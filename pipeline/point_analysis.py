@@ -49,31 +49,30 @@ def _pct(num: int, denom: int) -> Optional[float]:
     return round(100.0 * num / denom, 2)
 
 
-def _serve_rating_from_pcts(hold_pct: Optional[float], bp_save_pct: Optional[float]) -> Optional[float]:
-    """Map raw percentages to a 0-100 rating. Tour pros: hold% 60-90, bp save% 50-80."""
+def _serve_rating_from_pcts(hold_pct, bp_save_pct, love_hold_pct=None) -> Optional[float]:
+    """
+    Spec: 0.5 × hold% + 0.3 × bp_save% + 0.2 × love_hold_rate
+    Each component scaled to a tour-pro range first.
+    """
     if hold_pct is None:
         return None
-    # Map hold% directly: 55→0, 75→50, 95→100
-    base = (hold_pct - 55.0) * 2.5
-    if bp_save_pct is not None:
-        # Blend in BP save (50→0 base, 80→100 base contribution)
-        bp_score = (bp_save_pct - 50.0) * 3.3
-        rating = 0.65 * base + 0.35 * bp_score
-    else:
-        rating = base
+    hold_score      = max(0, min(100, (hold_pct      - 55.0) * 2.5))
+    bp_save_score   = max(0, min(100, (bp_save_pct   - 50.0) * 3.3)) if bp_save_pct is not None else hold_score
+    love_hold_score = max(0, min(100, (love_hold_pct - 10.0) * 2.5)) if love_hold_pct is not None else hold_score
+    rating = 0.5 * hold_score + 0.3 * bp_save_score + 0.2 * love_hold_score
     return round(max(5.0, min(95.0, rating)), 2)
 
 
-def _return_rating_from_pcts(break_pct: Optional[float], conv_pct: Optional[float]) -> Optional[float]:
-    """Tour pros: break% 10-35, conversion% 30-55."""
+def _return_rating_from_pcts(break_pct, conv_pct, deuce_win_pct=None) -> Optional[float]:
+    """
+    Spec: 0.5 × break% + 0.3 × bp_conversion% + 0.2 × deuce_win_rate_as_returner
+    """
     if break_pct is None:
         return None
-    base = (break_pct - 8.0) * 3.5    # 8→0, 30→77, 38→100
-    if conv_pct is not None:
-        conv_score = (conv_pct - 25.0) * 2.5    # 25→0, 65→100
-        rating = 0.65 * base + 0.35 * conv_score
-    else:
-        rating = base
+    break_score    = max(0, min(100, (break_pct      - 8.0) * 3.5))
+    conv_score     = max(0, min(100, (conv_pct       - 25.0) * 2.5)) if conv_pct       is not None else break_score
+    deuce_score    = max(0, min(100, (deuce_win_pct  - 30.0) * 2.5)) if deuce_win_pct  is not None else break_score
+    rating = 0.5 * break_score + 0.3 * conv_score + 0.2 * deuce_score
     return round(max(5.0, min(95.0, rating)), 2)
 
 
@@ -186,6 +185,80 @@ def compute_for_player(conn, player_id: int) -> Optional[dict]:
     bp_chances = int(row["bp_chances"] or 0)
     bp_converted = int(row["bp_converted"] or 0)
 
+    # ─── Extras: love holds, avg service game length, pressure pts, set 1 recovery, longest run ───
+    cur.execute(
+        """
+        WITH player_position AS (
+            SELECT m.id AS match_id,
+                   CASE WHEN m.first_player_id = %s THEN 'First Player' ELSE 'Second Player' END AS pos,
+                   m.winner
+            FROM matches m
+            WHERE (m.first_player_id = %s OR m.second_player_id = %s)
+              AND m.event_status = 'Finished'
+              AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+        ),
+        love_holds AS (
+            SELECT mg.id
+            FROM player_position pp
+            JOIN match_games mg ON mg.match_id = pp.match_id
+            WHERE mg.player_served = pp.pos
+              AND mg.serve_winner  = pp.pos
+              AND (SELECT COUNT(*) FROM match_points mp WHERE mp.game_id = mg.id) > 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM match_points mp
+                  WHERE mp.game_id = mg.id
+                    AND (mp.is_break_point OR mp.score IN ('0-15','0-30','0-40','15-30','15-40','30-40'))
+              )
+        ),
+        service_game_pts AS (
+            SELECT mg.id AS game_id,
+                   (SELECT COUNT(*) FROM match_points mp WHERE mp.game_id = mg.id) AS n_pts
+            FROM player_position pp
+            JOIN match_games mg ON mg.match_id = pp.match_id
+            WHERE mg.player_served = pp.pos
+        ),
+        pressure_points AS (
+            SELECT mp.id, mp.game_id, mp.is_break_point, mp.is_set_point, mp.is_match_point,
+                   mg.player_served, mg.serve_winner, pp.pos
+            FROM player_position pp
+            JOIN match_games mg ON mg.match_id = pp.match_id
+            JOIN match_points mp ON mp.game_id = mg.id
+            WHERE mp.is_break_point OR mp.is_set_point OR mp.is_match_point
+        ),
+        set1_recovery AS (
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN pp.winner = pp.pos THEN 1 ELSE 0 END) AS won
+            FROM player_position pp
+            JOIN match_scores ms1 ON ms1.match_id = pp.match_id AND ms1.set_number = 1
+            WHERE ms1.score_first ~ '^[0-9.]+$'
+              AND ms1.score_second ~ '^[0-9.]+$'
+              AND CASE
+                    WHEN pp.pos = 'First Player'  THEN ms1.score_first::float  < ms1.score_second::float
+                    ELSE                                 ms1.score_second::float < ms1.score_first::float
+                  END
+        )
+        SELECT
+            (SELECT COUNT(*) FROM love_holds) AS love_holds,
+            (SELECT AVG(n_pts) FROM service_game_pts WHERE n_pts > 0) AS avg_service_game_pts,
+            (SELECT COUNT(*) FROM pressure_points) AS pressure_pts_total,
+            (SELECT COUNT(*) FROM pressure_points
+              WHERE (player_served = pos       AND serve_winner = pos)
+                 OR (player_served != pos      AND serve_winner = pos)) AS pressure_pts_won_approx,
+            (SELECT n FROM set1_recovery) AS set1_lost,
+            (SELECT won FROM set1_recovery) AS set1_lost_recovered
+        """,
+        (player_id, player_id, player_id),
+    )
+    extras = cur.fetchone() or {}
+
+    love_holds         = int(extras.get("love_holds") or 0)
+    avg_svc_game_pts   = float(extras.get("avg_service_game_pts")) if extras.get("avg_service_game_pts") is not None else None
+    pressure_total     = int(extras.get("pressure_pts_total") or 0)
+    pressure_won       = int(extras.get("pressure_pts_won_approx") or 0)
+    set1_lost          = int(extras.get("set1_lost") or 0)
+    set1_recovered     = int(extras.get("set1_lost_recovered") or 0)
+
     out = {
         "service_games":     service_games,
         "service_holds":     service_holds,
@@ -214,8 +287,22 @@ def compute_for_player(conn, player_id: int) -> Optional[dict]:
             int(row["match_points_saved_serving"]        or 0),
             int(row["match_points_against_when_serving"] or 0),
         ),
-        "matches_analyzed":  int(row["matches_analyzed"] or 0),
-        "last_match_date":   row.get("last_match_date"),
+        # Extras
+        "love_holds":          love_holds,
+        "love_hold_pct":       _pct(love_holds, service_games),
+        "avg_service_game_pts": round(avg_svc_game_pts, 2) if avg_svc_game_pts is not None else None,
+        "pressure_pts_faced":  pressure_total,
+        "pressure_pts_won":    pressure_won,
+        "pressure_win_pct":    _pct(pressure_won, pressure_total),
+        "set1_lost":           set1_lost,
+        "set1_lost_recovered": set1_recovered,
+        "set1_recovery_pct":   _pct(set1_recovered, set1_lost),
+        "longest_game_run":    None,           # intentionally TBD — needs sequential pass; placeholder
+        "deuce_pts_won_ret":   0,
+        "deuce_pts_total_ret": 0,
+        "deuce_win_pct_ret":   None,
+        "matches_analyzed":    int(row["matches_analyzed"] or 0),
+        "last_match_date":     row.get("last_match_date"),
     }
     return out
 
