@@ -1069,10 +1069,15 @@ function SectionPointsAnalysis({ match }) {
                       letterSpacing: 0.7, color: 'var(--text-3)', marginBottom: 8 }}>
           Service
         </div>
-        <PointsBar label="Hold %"      v1={s1.service_hold_pct} v2={s2.service_hold_pct}
+        <PointsBar label="Hold %"           v1={s1.service_hold_pct}     v2={s2.service_hold_pct}
                    sample1={s1.service_games} sample2={s2.service_games} />
-        <PointsBar label="BP save %"   v1={s1.bp_save_pct}      v2={s2.bp_save_pct}
-                   sample1={s1.bp_faced} sample2={s2.bp_faced} />
+        <PointsBar label="BP save %"        v1={s1.bp_save_pct}          v2={s2.bp_save_pct}
+                   sample1={s1.bp_faced}      sample2={s2.bp_faced} />
+        <PointsBar label="Love hold %"      v1={s1.love_hold_pct}        v2={s2.love_hold_pct}
+                   sample1={s1.service_games} sample2={s2.service_games} />
+        <PointsBar label="Avg pts / game"   v1={s1.avg_service_game_pts} v2={s2.avg_service_game_pts}
+                   suffix=" pts" betterIsHigher={false}
+                   sample1={s1.service_games} sample2={s2.service_games} />
       </div>
 
       {/* Return group */}
@@ -1084,27 +1089,31 @@ function SectionPointsAnalysis({ match }) {
                       letterSpacing: 0.7, color: 'var(--text-3)', marginBottom: 8 }}>
           Return
         </div>
-        <PointsBar label="Break %"        v1={s1.break_pct}         v2={s2.break_pct}
+        <PointsBar label="Break %"          v1={s1.break_pct}            v2={s2.break_pct}
                    sample1={s1.return_games} sample2={s2.return_games} />
-        <PointsBar label="BP conversion"  v1={s1.bp_conversion_pct} v2={s2.bp_conversion_pct}
-                   sample1={s1.bp_chances} sample2={s2.bp_chances} />
+        <PointsBar label="BP conversion"    v1={s1.bp_conversion_pct}    v2={s2.bp_conversion_pct}
+                   sample1={s1.bp_chances}   sample2={s2.bp_chances} />
       </div>
 
-      {/* Clutch group */}
+      {/* Pressure / Clutch group */}
       <div style={{
         background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: 'var(--r-lg)', padding: '14px 18px', marginBottom: 8,
       }}>
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
                       letterSpacing: 0.7, color: 'var(--text-3)', marginBottom: 8 }}>
-          Clutch
+          Pressure & clutch
         </div>
-        <PointsBar label="Tiebreak win %"   v1={s1.tiebreak_win_pct}     v2={s2.tiebreak_win_pct}
+        <PointsBar label="Pressure point %"  v1={s1.pressure_win_pct}     v2={s2.pressure_win_pct}
+                   sample1={s1.pressure_pts_faced} sample2={s2.pressure_pts_faced} />
+        <PointsBar label="Tiebreak win %"    v1={s1.tiebreak_win_pct}     v2={s2.tiebreak_win_pct}
                    sample1={s1.tiebreaks_played} sample2={s2.tiebreaks_played} />
-        <PointsBar label="Set point save"   v1={s1.set_point_save_pct}   v2={s2.set_point_save_pct}
+        <PointsBar label="Set point save"    v1={s1.set_point_save_pct}   v2={s2.set_point_save_pct}
                    sample1={s1.set_points_faced} sample2={s2.set_points_faced} />
-        <PointsBar label="Match point save" v1={s1.match_point_save_pct} v2={s2.match_point_save_pct}
+        <PointsBar label="Match point save"  v1={s1.match_point_save_pct} v2={s2.match_point_save_pct}
                    sample1={s1.match_points_faced} sample2={s2.match_points_faced} />
+        <PointsBar label="Set 1 recovery"    v1={s1.set1_recovery_pct}    v2={s2.set1_recovery_pct}
+                   sample1={s1.set1_lost}     sample2={s2.set1_lost} />
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', marginTop: 12 }}>
