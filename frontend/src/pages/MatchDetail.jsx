@@ -682,6 +682,8 @@ function SectionRatings({ match }) {
     { label: 'RTT Score',                          k: 'rtt_score',          always: true },
     { label: `${surfaceLabel} rating`,             k: surfaceKey,           always: true },
     { label: 'Form',                               k: 'form_score',         always: true },
+    { label: 'Serve',                              k: 'serve_rating',       always: true },
+    { label: 'Return',                             k: 'return_rating',      always: true },
     { label: vsHandLabel,                           k: 'vs_hand',            always: true },
     { label: 'Endurance (long matches)',           k: 'endurance',          always: true },
     { label: 'Tournament level',                   k: 'tournament_level',   always: true },
