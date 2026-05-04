@@ -260,6 +260,24 @@ if __name__ == "__main__":
     # ── Self-healing schema migrations (idempotent, safe to re-run) ─────────
     apply_schema_migrations()
 
+    # ── Surface backfill — Wuxi etc. should never be "Unknown" ──────────────
+    log.info("Startup: backfilling tournament surfaces...")
+    try:
+        try:
+            from pipeline.surface_backfill import backfill_surfaces
+        except ImportError:
+            from surface_backfill import backfill_surfaces
+        import psycopg2
+        conn = psycopg2.connect(
+            os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+        )
+        try:
+            backfill_surfaces(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"surface backfill failed: {e}")
+
     # ── Startup jobs (run immediately on boot) ──────────────────────────────
     log.info("Running startup: daily fixtures...")
     run_daily_fixtures()   # populate DB immediately so the site has data
@@ -278,8 +296,27 @@ if __name__ == "__main__":
 
     # ── Scheduled jobs ──────────────────────────────────────────────────────
     schedule.every().day.at("06:00").do(run_daily_fixtures)   # 06:00 UTC
+    # Surface backfill before predictions so any new tournaments get a surface
+    def _surface_backfill_only():
+        try:
+            try:
+                from pipeline.surface_backfill import backfill_surfaces
+            except ImportError:
+                from surface_backfill import backfill_surfaces
+            import psycopg2
+            conn = psycopg2.connect(
+                os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+            )
+            try:
+                backfill_surfaces(conn)
+            finally:
+                conn.close()
+        except Exception as e:
+            log.error(f"surface backfill (rolling) failed: {e}")
+    schedule.every().day.at("06:15").do(_surface_backfill_only)
     schedule.every().day.at("06:30").do(run_predictions)      # predictions after morning fixtures
     schedule.every().day.at("18:00").do(run_daily_fixtures)   # 18:00 UTC
+    schedule.every().day.at("18:15").do(_surface_backfill_only)
     schedule.every().day.at("18:30").do(run_predictions)      # predictions after evening fixtures
     schedule.every(5).minutes.do(run_livescore)               # live scores
     # Settle predictions every 15 minutes — keeps the tracker page live as

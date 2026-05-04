@@ -200,7 +200,11 @@ class RttPredictor:
     # ── per-player feature loaders ───────────────────────────────────────────
 
     def _player_ratings(self, player_id: int) -> dict:
-        """Pull RTT + skill + surface ratings + momentum from player_ratings."""
+        """
+        Pull RTT + skill + surface ratings + momentum from player_ratings.
+        If the player has no row OR has rtt_score=NULL, fall back to a
+        rank-based estimate so the predictor still has a usable RTT score.
+        """
         conn = self._get_conn()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -215,7 +219,75 @@ class RttPredictor:
                 (player_id,),
             )
             row = cur.fetchone()
-        return dict(row) if row else {}
+        result = dict(row) if row else {}
+        # Cold-start fallback: if no RTT score, estimate from current ranking.
+        # Mirrors the API's matches.py rank-based heuristic.
+        if not result.get("rtt_score"):
+            est = self._estimate_rtt_from_rank(player_id)
+            if est is not None:
+                result["rtt_score"] = est
+                result["_rtt_estimated"] = True
+        return result
+
+    def _estimate_rtt_from_rank(self, player_id: int) -> Optional[float]:
+        """
+        Rank-based RTT estimate when player_ratings has nothing for this player.
+        Uses the player's most recent ATP/WTA ranking from sa_matches (training-only
+        — but the SCALAR rank we extract is a derived stat, fine to use internally).
+        Formula: 110 - 15*log10(rank). Rank 1 → ~95, Rank 50 → ~72, Rank 200 → ~57.
+        Returns None if no rank could be found.
+        """
+        import math
+        conn = self._get_conn()
+        # First try the production players table (rank from api-tennis)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, full_name FROM players WHERE id = %s",
+                (player_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        name, full_name = row[0], row[1]
+        if not (name or full_name):
+            return None
+        # Try to find a rank in sa_matches by joining on player name.
+        last_token = None
+        for n in (full_name, name):
+            if n:
+                tokens = n.replace(".", "").split()
+                if tokens:
+                    last_token = tokens[-1].strip()
+                    if last_token and len(last_token) >= 3:
+                        break
+        if not last_token:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(
+                        MIN(sm.winner_rank) FILTER (WHERE sm.winner_id = sp.player_id),
+                        MIN(sm.loser_rank)  FILTER (WHERE sm.loser_id  = sp.player_id)
+                    ) AS rank
+                    FROM sa_players sp
+                    JOIN sa_matches sm ON (sm.winner_id = sp.player_id OR sm.loser_id = sp.player_id)
+                    WHERE sp.full_name ILIKE %s
+                      AND sm.tourney_date >= CURRENT_DATE - INTERVAL '2 years'
+                    """,
+                    (f"%{last_token}%",),
+                )
+                r = cur.fetchone()
+        except Exception:
+            return None
+        rank = r[0] if r and r[0] else None
+        if not rank:
+            return None
+        try:
+            est = 110.0 - 15.0 * math.log10(max(1, int(rank)))
+            return round(max(15.0, min(95.0, est)), 2)
+        except (ValueError, TypeError):
+            return None
 
     def _player_hand_split(self, player_id: int, vs_hand: Optional[str]) -> Optional[dict]:
         """Pull this player's record vs the opponent's hand."""

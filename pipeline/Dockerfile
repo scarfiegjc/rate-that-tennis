@@ -23,6 +23,7 @@ COPY pipeline/odds.py                ./odds.py
 COPY pipeline/auto_data.py           ./auto_data.py
 COPY pipeline/player_splits.py       ./player_splits.py
 COPY pipeline/settle_predictions.py  ./settle_predictions.py
+COPY pipeline/surface_backfill.py    ./surface_backfill.py
 
 # SQL migrations (applied on boot by scheduler.apply_schema_migrations).
 # Idempotent — re-running them is a no-op.

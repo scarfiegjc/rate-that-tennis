@@ -7,7 +7,11 @@ GET /predictions/stats
 GET /systems
 GET /systems/{code}/picks?status=open|settled
 GET /systems/{code}/stats
+
+Resilience: every view-backed query is wrapped in safe_query so the page
+shows "no data yet" instead of a 500 if the migrations haven't applied.
 """
+import logging
 from datetime import date, timedelta
 from typing import Optional
 
@@ -15,8 +19,32 @@ from fastapi import APIRouter, HTTPException, Query
 
 from api.db import query, query_one
 
+log = logging.getLogger("api.predictions")
 
 router = APIRouter(tags=["predictions"])
+
+
+def safe_query(sql: str, params=None) -> list[dict]:
+    """Run a query; if a view/table is missing, return [] instead of raising."""
+    try:
+        return query(sql, params)
+    except Exception as e:
+        msg = str(e).lower()
+        if "does not exist" in msg or "undefined table" in msg or "undefined column" in msg:
+            log.warning(f"safe_query: missing schema, returning []: {e}")
+            return []
+        raise
+
+
+def safe_query_one(sql: str, params=None) -> Optional[dict]:
+    try:
+        return query_one(sql, params)
+    except Exception as e:
+        msg = str(e).lower()
+        if "does not exist" in msg or "undefined table" in msg or "undefined column" in msg:
+            log.warning(f"safe_query_one: missing schema, returning None: {e}")
+            return None
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,7 +102,7 @@ def predictions_today(
     today = date.today()
     cutoff = today + timedelta(days=days_ahead)
 
-    rows = query(
+    rows = safe_query(
         """
         SELECT *
         FROM v_predictions_with_results
@@ -118,7 +146,7 @@ def predictions_history(
 ):
     """Per-day rollup with all predictions for a given date or window."""
     if target_date:
-        rows = query(
+        rows = safe_query(
             """
             SELECT *
             FROM v_predictions_with_results
@@ -136,7 +164,7 @@ def predictions_history(
     today = date.today()
     earliest = today - timedelta(days=days)
 
-    daily = query(
+    daily = safe_query(
         """
         SELECT event_date, predictions, settled, correct, incorrect, accuracy_pct,
                high_conf, high_conf_correct, high_conf_accuracy_pct
@@ -174,7 +202,7 @@ def predictions_history(
 @router.get("/predictions/stats")
 def predictions_stats():
     """Overall and segmented accuracy."""
-    overall = query_one(
+    overall = safe_query_one(
         """
         SELECT
             COUNT(*) FILTER (WHERE settled_at IS NOT NULL) AS settled,
@@ -187,7 +215,7 @@ def predictions_stats():
         """,
     ) or {}
 
-    by_confidence = query(
+    by_confidence = safe_query(
         """
         SELECT
             confidence,
@@ -204,7 +232,7 @@ def predictions_stats():
         """
     )
 
-    by_surface = query(
+    by_surface = safe_query(
         """
         SELECT
             s.name AS surface,
@@ -257,7 +285,7 @@ def predictions_stats():
 
 @router.get("/systems")
 def list_systems():
-    rows = query(
+    rows = safe_query(
         """
         SELECT system_id AS id, code, name, description, icon, accent_colour,
                picks_total, picks_settled, picks_correct, accuracy_pct,
@@ -297,7 +325,7 @@ def system_picks(
     status: str = Query(default="all", regex="^(all|open|settled)$"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    sys_row = query_one("SELECT id, name, description, icon, accent_colour FROM systems WHERE code = %s", (code,))
+    sys_row = safe_query_one("SELECT id, name, description, icon, accent_colour FROM systems WHERE code = %s", (code,))
     if not sys_row:
         raise HTTPException(status_code=404, detail="System not found")
 
@@ -307,7 +335,7 @@ def system_picks(
     elif status == "settled":
         where = "AND sp.settled_at IS NOT NULL"
 
-    rows = query(
+    rows = safe_query(
         f"""
         SELECT
             sp.id AS pick_id,
@@ -378,7 +406,7 @@ def system_picks(
 
 @router.get("/systems/{code}/stats")
 def system_stats(code: str):
-    row = query_one(
+    row = safe_query_one(
         """
         SELECT system_id AS id, code, name, description, icon, accent_colour,
                picks_total, picks_settled, picks_correct, accuracy_pct,
@@ -391,7 +419,7 @@ def system_stats(code: str):
     if not row:
         raise HTTPException(status_code=404, detail="System not found")
     # Trend: last 30 days
-    trend = query(
+    trend = safe_query(
         """
         SELECT date_trunc('day', m.event_date)::date AS day,
                COUNT(*) FILTER (WHERE sp.settled_at IS NOT NULL) AS settled,
