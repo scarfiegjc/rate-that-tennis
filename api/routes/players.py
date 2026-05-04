@@ -14,6 +14,157 @@ router = APIRouter(prefix="/players", tags=["players"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /players  — Player Database (list, sortable, filterable)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SORT_KEY_MAP = {
+    "rtt":       "pr.rtt_score",
+    "form":      "pr.form_score",
+    "momentum":  "CASE pr.momentum WHEN 'rising' THEN 2 WHEN 'stable' THEN 1 WHEN 'falling' THEN 0 ELSE -1 END",
+    "clay":      "pr.clay_rating",
+    "hard":      "pr.hard_rating",
+    "grass":     "pr.grass_rating",
+    "indoor":    "pr.indoor_rating",
+}
+
+@router.get("")
+def players_database(
+    sort:    str           = Query(default="rtt", description="rtt|form|momentum|clay|hard|grass|indoor"),
+    country: Optional[str] = Query(default=None, description="ISO country code filter, e.g. GBR"),
+    search:  Optional[str] = Query(default=None, description="Substring of player name"),
+    active_only: bool      = Query(default=True, description="Only players with a match in the last 6 months"),
+    limit:   int           = Query(default=300, ge=10, le=2000),
+):
+    """
+    Returns a flat list of players for the Player Database page. Each row carries
+    the data the frontend needs to render a 2-column men/women layout with
+    sort/filter/search.
+    """
+    sort_key = sort.lower()
+    sort_sql = _SORT_KEY_MAP.get(sort_key, "pr.rtt_score")
+
+    where = ["1=1"]
+    params: list = []
+
+    if country:
+        where.append("p.country_code = %s")
+        params.append(country.upper())
+
+    if search:
+        where.append("(p.name ILIKE %s OR p.full_name ILIKE %s)")
+        params.extend([f"%{search}%", f"%{search}%"])
+
+    if active_only:
+        where.append(
+            "EXISTS (SELECT 1 FROM matches m2 "
+            "WHERE (m2.first_player_id = p.id OR m2.second_player_id = p.id) "
+            "  AND m2.event_date >= CURRENT_DATE - INTERVAL '6 months')"
+        )
+
+    sql = f"""
+        WITH gender AS (
+            SELECT
+                m.first_player_id  AS player_id,
+                MAX(et.gender)     AS gender
+            FROM matches m
+            JOIN event_types et ON et.id = m.event_type_id
+            WHERE et.gender IN ('Men', 'Women')
+              AND m.first_player_id IS NOT NULL
+            GROUP BY m.first_player_id
+            UNION ALL
+            SELECT
+                m.second_player_id AS player_id,
+                MAX(et.gender)     AS gender
+            FROM matches m
+            JOIN event_types et ON et.id = m.event_type_id
+            WHERE et.gender IN ('Men', 'Women')
+              AND m.second_player_id IS NOT NULL
+            GROUP BY m.second_player_id
+        ),
+        gender_pick AS (
+            SELECT player_id,
+                   MODE() WITHIN GROUP (ORDER BY gender) AS gender
+            FROM gender
+            GROUP BY player_id
+        ),
+        playing_today AS (
+            SELECT DISTINCT player_id FROM (
+                SELECT first_player_id  AS player_id FROM matches
+                WHERE event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '2 days'
+                UNION
+                SELECT second_player_id AS player_id FROM matches
+                WHERE event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '2 days'
+            ) x
+        ),
+        rtt_30d AS (
+            SELECT player_id,
+                   (rtt_score - LAG(rtt_score) OVER (PARTITION BY player_id ORDER BY rated_at)) AS delta_30d,
+                   ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY rated_at DESC) AS rn
+            FROM player_ratings_history
+            WHERE rated_at >= CURRENT_DATE - INTERVAL '35 days'
+        )
+        SELECT
+            p.id, p.name, p.full_name, p.country, p.country_code, p.hand,
+            pr.rtt_score, pr.clay_rating, pr.hard_rating, pr.grass_rating, pr.indoor_rating,
+            pr.form_score, pr.momentum,
+            gp.gender,
+            (pt.player_id IS NOT NULL) AS playing_today,
+            COALESCE(r30.delta_30d, 0) AS rtt_delta_30d
+        FROM players p
+        LEFT JOIN player_ratings pr ON pr.player_id = p.id
+        LEFT JOIN gender_pick gp    ON gp.player_id = p.id
+        LEFT JOIN playing_today pt  ON pt.player_id = p.id
+        LEFT JOIN rtt_30d r30       ON r30.player_id = p.id AND r30.rn = 1
+        WHERE {' AND '.join(where)}
+          AND pr.rtt_score IS NOT NULL
+        ORDER BY {sort_sql} DESC NULLS LAST, pr.rtt_score DESC NULLS LAST
+        LIMIT %s
+    """
+    params.append(limit)
+
+    rows = query(sql, tuple(params))
+
+    # Coerce numeric types
+    out = []
+    for r in rows:
+        out.append({
+            "id":            r["id"],
+            "name":          r["name"],
+            "full_name":     r["full_name"],
+            "country":       r["country"],
+            "country_code":  r["country_code"],
+            "hand":          r["hand"],
+            "gender":        "M" if r.get("gender") == "Men" else ("W" if r.get("gender") == "Women" else None),
+            "rtt_score":     float(r["rtt_score"])    if r.get("rtt_score")    is not None else None,
+            "clay_rating":   float(r["clay_rating"])  if r.get("clay_rating")  is not None else None,
+            "hard_rating":   float(r["hard_rating"])  if r.get("hard_rating")  is not None else None,
+            "grass_rating":  float(r["grass_rating"]) if r.get("grass_rating") is not None else None,
+            "indoor_rating": float(r["indoor_rating"])if r.get("indoor_rating")is not None else None,
+            "form_score":    float(r["form_score"])   if r.get("form_score")   is not None else None,
+            "momentum":      r.get("momentum"),
+            "playing_today": bool(r.get("playing_today")),
+            "rtt_delta_30d": float(r["rtt_delta_30d"]) if r.get("rtt_delta_30d") is not None else 0.0,
+        })
+
+    # Counts for the page header
+    men   = [p for p in out if p["gender"] == "M"]
+    women = [p for p in out if p["gender"] == "W"]
+    return {
+        "sort":    sort_key,
+        "country": country,
+        "search":  search,
+        "active_only": active_only,
+        "summary": {
+            "total":         len(out),
+            "men":           len(men),
+            "women":         len(women),
+            "playing_today": sum(1 for p in out if p["playing_today"]),
+        },
+        "players": out,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helper: find Sackmann player IDs for an API player
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -207,20 +358,46 @@ def get_player_form(
                 CASE WHEN sm.winner_id = ANY(%s) THEN sm.loser_name ELSE sm.winner_name END AS opponent_name,
                 CASE WHEN sm.winner_id = ANY(%s) THEN sm.loser_rank  ELSE sm.winner_rank  END AS opponent_rank,
                 (sm.winner_id = ANY(%s)) AS won,
-                -- Performance index: base 50 for win, 30 for loss + quality bonus
+                -- Performance index 0-100: opponent quality + score gap drive most of the spread
+                -- Wins: 50 base + opponent bonus (up to +35 for top-10, down to -5 for >300)
+                --       + score-gap bonus (up to +10 for dominant, -5 for scrappy)
+                -- Losses: 50 base + opponent absorption (close losses to top players soften)
+                --         + score-gap penalty (heavy losses hit harder)
                 CASE
                     WHEN sm.winner_id = ANY(%s) THEN
                         50
-                        + COALESCE(LEAST((sm.w_ace::float / NULLIF(sm.w_svpt,0)) * 500, 20), 0)
-                        + CASE WHEN sm.loser_rank IS NOT NULL AND sm.loser_rank <= 10 THEN 20
-                               WHEN sm.loser_rank IS NOT NULL AND sm.loser_rank <= 50 THEN 10
-                               ELSE 5 END
+                        + CASE WHEN sm.loser_rank IS NULL THEN 0
+                               WHEN sm.loser_rank <= 5    THEN 40
+                               WHEN sm.loser_rank <= 10   THEN 33
+                               WHEN sm.loser_rank <= 20   THEN 27
+                               WHEN sm.loser_rank <= 50   THEN 20
+                               WHEN sm.loser_rank <= 100  THEN 12
+                               WHEN sm.loser_rank <= 200  THEN 5
+                               WHEN sm.loser_rank <= 500  THEN 0
+                               ELSE -5 END
+                        + CASE
+                              WHEN sm.score ~ '6-0 6-0|6-0 6-1|6-1 6-0' THEN 10
+                              WHEN sm.score ~ '6-1 6-1|6-2 6-1|6-1 6-2|6-0 6-2|6-2 6-0' THEN 7
+                              WHEN sm.score ~ '7-6.*7-6|7-5.*7-6|7-6.*7-5|7-5.*7-5' THEN -5
+                              WHEN sm.score ~ '7-6|7-5' THEN -2
+                              ELSE 0
+                          END
                     ELSE
-                        30
-                        + COALESCE(LEAST((sm.l_ace::float / NULLIF(sm.l_svpt,0)) * 500, 15), 0)
-                        + CASE WHEN sm.winner_rank IS NOT NULL AND sm.winner_rank <= 10 THEN 10
-                               WHEN sm.winner_rank IS NOT NULL AND sm.winner_rank <= 50 THEN 5
-                               ELSE 0 END
+                        50
+                        + CASE WHEN sm.winner_rank IS NULL THEN -10
+                               WHEN sm.winner_rank <= 5    THEN -5
+                               WHEN sm.winner_rank <= 10   THEN -8
+                               WHEN sm.winner_rank <= 20   THEN -12
+                               WHEN sm.winner_rank <= 50   THEN -18
+                               WHEN sm.winner_rank <= 100  THEN -25
+                               WHEN sm.winner_rank <= 200  THEN -30
+                               ELSE -35 END
+                        + CASE
+                              WHEN sm.score ~ '6-0 6-0|6-0 6-1|6-1 6-0' THEN -10
+                              WHEN sm.score ~ '7-6.*7-6|7-5.*7-6|7-6.*7-5|7-5.*7-5' THEN 8
+                              WHEN sm.score ~ '7-6|7-5' THEN 4
+                              ELSE 0
+                          END
                 END AS performance_index
             FROM sa_matches sm
             WHERE (sm.winner_id = ANY(%s) OR sm.loser_id = ANY(%s))

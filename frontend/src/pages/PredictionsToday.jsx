@@ -16,6 +16,7 @@ function StatCard({ label, value, sub }) {
 function PredictionRow({ p }) {
   const p1Pct = p.p1?.prob != null ? Math.round(p.p1.prob * 100) : null
   const p2Pct = p.p2?.prob != null ? Math.round(p.p2.prob * 100) : null
+  const isPending = p1Pct == null
   const isSettled = p.is_correct !== null && p.is_correct !== undefined
   const winnerSide = p.actual_winner === 'first_player' ? 'p1'
                    : p.actual_winner === 'second_player' ? 'p2' : null
@@ -60,20 +61,24 @@ function PredictionRow({ p }) {
       </div>
 
       <div className="match-centre">
-        <div className="match-probs">
-          <span className={
-            p1Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'
-          }>{p1Pct ?? '—'}%</span>
-          <span style={{ color: 'var(--text-3)' }}>·</span>
-          <span className={
-            p2Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'
-          }>{p2Pct ?? '—'}%</span>
-        </div>
-        {p.confidence && (
-          <span className="confidence">
-            <span className={`confidence-dot ${p.confidence}`} />
-            {p.confidence}
+        {isPending ? (
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
+            pending
           </span>
+        ) : (
+          <>
+            <div className="match-probs">
+              <span className={p1Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p1Pct}%</span>
+              <span style={{ color: 'var(--text-3)' }}>·</span>
+              <span className={p2Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p2Pct}%</span>
+            </div>
+            {p.confidence && (
+              <span className="confidence">
+                <span className={`confidence-dot ${p.confidence}`} />
+                {p.confidence}
+              </span>
+            )}
+          </>
         )}
       </div>
 
@@ -191,15 +196,31 @@ export default function PredictionsToday() {
         </div>
       )}
 
-      {/* Daily groups */}
-      {dates.map(d => (
-        <div key={d} style={{ marginTop: 24 }}>
-          <div className="date-sep">{d}</div>
-          <div className="card" style={{ overflow: 'hidden' }}>
-            {byDate[d].map(p => <PredictionRow key={p.match_id} p={p} />)}
+      {/* Daily groups — settled (results) first, then live, then upcoming */}
+      {dates.map(d => {
+        const sorted = [...byDate[d]].sort((a, b) => {
+          // settled (has actual_winner) → 0, otherwise 1
+          const aSettled = a.actual_winner ? 0 : 1
+          const bSettled = b.actual_winner ? 0 : 1
+          if (aSettled !== bSettled) return aSettled - bSettled
+          // within unsettled: live first
+          const aLive = /in play|live|set \d|game/i.test(a.event_status || '') ? 0 : 1
+          const bLive = /in play|live|set \d|game/i.test(b.event_status || '') ? 0 : 1
+          if (aLive !== bLive) return aLive - bLive
+          const ta = a.event_time || '99:99'
+          const tb = b.event_time || '99:99'
+          if (ta !== tb) return ta < tb ? -1 : 1
+          return (a.match_id || 0) - (b.match_id || 0)
+        })
+        return (
+          <div key={d} style={{ marginTop: 24 }}>
+            <div className="date-sep">{d}</div>
+            <div className="card" style={{ overflow: 'hidden' }}>
+              {sorted.map(p => <PredictionRow key={p.match_id} p={p} />)}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       {data.predictions.length === 0 && (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}>

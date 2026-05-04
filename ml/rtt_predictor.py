@@ -43,7 +43,47 @@ log = logging.getLogger("rtt-predictor")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-PREDICTOR_VERSION = "rtt-v1"
+PREDICTOR_VERSION = "rtt-v2"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Aging curve — multiplier applied to a player's effective rating.
+# Tennis players peak at 23-27; decline visibly after 31. These multipliers
+# come from the academic literature + ATP/WTA empirical analyses.
+# ─────────────────────────────────────────────────────────────────────────────
+
+AGING_CURVE = {
+    16: 0.85, 17: 0.88, 18: 0.91, 19: 0.94, 20: 0.96, 21: 0.98,
+    22: 0.99, 23: 1.00, 24: 1.00, 25: 1.00, 26: 1.00, 27: 0.99,
+    28: 0.98, 29: 0.97, 30: 0.96,
+    31: 0.94, 32: 0.92, 33: 0.90, 34: 0.88, 35: 0.86, 36: 0.83,
+    37: 0.80, 38: 0.77, 39: 0.74, 40: 0.70,
+}
+
+
+def _age_factor(age: Optional[float]) -> float:
+    if age is None:
+        return 1.0
+    a = int(round(age))
+    if a in AGING_CURVE:
+        return AGING_CURVE[a]
+    if a < 16:
+        return 0.80
+    if a > 40:
+        return 0.60
+    return 1.0
+
+
+def _age_at(birthday, match_date) -> Optional[float]:
+    if birthday is None or match_date is None:
+        return None
+    try:
+        from datetime import date as _date
+        md = match_date.date() if hasattr(match_date, 'date') else _date.fromisoformat(str(match_date)[:10])
+        bd = birthday.date()  if hasattr(birthday, 'date')   else _date.fromisoformat(str(birthday)[:10])
+        return round((md - bd).days / 365.25, 1)
+    except Exception:
+        return None
 
 DB_URL = (
     os.environ.get("DATABASE_PUBLIC_URL")
@@ -146,9 +186,16 @@ def _favours(logit: float) -> str:
 
 
 def _surface_to_rating_col(surface: Optional[str]) -> Optional[str]:
+    """
+    Map a surface name to the corresponding rating column. Defaults to
+    'hard_rating' when the surface is missing or 'Unknown' — outdoor hard is
+    the modal surface and a vastly better default than producing 50/50.
+    """
     if not surface:
-        return None
+        return "hard_rating"
     s = surface.lower()
+    if s == "unknown":
+        return "hard_rating"
     if "clay" in s:
         return "clay_rating"
     if "grass" in s:
@@ -159,7 +206,7 @@ def _surface_to_rating_col(surface: Optional[str]) -> Optional[str]:
         return "indoor_rating"
     if "hard" in s:
         return "hard_rating"
-    return None
+    return "hard_rating"
 
 
 def _normalise_hand(raw: Optional[str]) -> Optional[str]:
@@ -399,6 +446,63 @@ class RttPredictor:
             return None
         return (match_date - last).days
 
+    def _last_match_surface(self, player_id: int, match_date: Optional[date]) -> Optional[str]:
+        """Surface of the player's most recent finished match before match_date."""
+        if not match_date:
+            return None
+        conn = self._get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.name
+                FROM matches m
+                LEFT JOIN tournaments t ON t.id = m.tournament_id
+                LEFT JOIN surfaces s ON s.id = t.surface_id
+                WHERE (m.first_player_id = %s OR m.second_player_id = %s)
+                  AND m.event_status = 'Finished'
+                  AND m.event_date < %s
+                ORDER BY m.event_date DESC, m.id DESC
+                LIMIT 1
+                """,
+                (player_id, player_id, match_date),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def _set1_dominance(self, player_id: int) -> Optional[float]:
+        """
+        Returns the player's set-1 win rate over the last 24 months, as 0..1.
+        Used for set-1 dominance factor.
+        """
+        conn = self._get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS n,
+                    SUM(CASE
+                          WHEN (m.first_player_id = %s
+                                AND ms.score_first ~ '^[0-9]+$'
+                                AND ms.score_second ~ '^[0-9]+$'
+                                AND ms.score_first::int > ms.score_second::int)
+                            OR (m.second_player_id = %s
+                                AND ms.score_first ~ '^[0-9]+$'
+                                AND ms.score_second ~ '^[0-9]+$'
+                                AND ms.score_second::int > ms.score_first::int)
+                          THEN 1 ELSE 0 END) AS set1_wins
+                FROM matches m
+                JOIN match_scores ms ON ms.match_id = m.id AND ms.set_number = 1
+                WHERE (m.first_player_id = %s OR m.second_player_id = %s)
+                  AND m.event_status = 'Finished'
+                  AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+                """,
+                (player_id, player_id, player_id, player_id),
+            )
+            row = cur.fetchone()
+        if not row or not row[0] or row[0] < 5:
+            return None
+        return float(row[1] or 0) / float(row[0])
+
     # ── feature computation ──────────────────────────────────────────────────
 
     @staticmethod
@@ -426,6 +530,8 @@ class RttPredictor:
         p1_hand: Optional[str],
         p2_hand: Optional[str],
         match_date: Optional[date],
+        p1_age: Optional[float] = None,
+        p2_age: Optional[float] = None,
     ) -> tuple[list[FactorContribution], dict]:
         """Compute every factor contribution. Returns (factors, snapshot)."""
         factors: list[FactorContribution] = []
@@ -439,17 +545,39 @@ class RttPredictor:
             except (TypeError, ValueError):
                 return None
 
-        # ── 1) RTT score gap (the headline) ──────────────────────────────────
+        # Age factors — applied as multipliers on RTT below
+        age_f1 = _age_factor(p1_age)
+        age_f2 = _age_factor(p2_age)
+        snapshot["p1_age"] = p1_age
+        snapshot["p2_age"] = p2_age
+        snapshot["p1_age_factor"] = age_f1
+        snapshot["p2_age_factor"] = age_f2
+
+        # ── 1) RTT score gap (with aging adjustment) ─────────────────────────
         p1_rtt = f(p1_ratings.get("rtt_score"))
         p2_rtt = f(p2_ratings.get("rtt_score"))
         snapshot["p1_rtt"] = p1_rtt
         snapshot["p2_rtt"] = p2_rtt
         if p1_rtt is not None and p2_rtt is not None:
-            gap = p1_rtt - p2_rtt
+            # Effective rating after aging adjustment — peak players unaffected,
+            # ageing players get marked down. Difference becomes the working gap.
+            p1_eff = p1_rtt * age_f1
+            p2_eff = p2_rtt * age_f2
+            snapshot["p1_eff_rtt"] = round(p1_eff, 2)
+            snapshot["p2_eff_rtt"] = round(p2_eff, 2)
+            gap = p1_eff - p2_eff
             logit = _clip(gap * W_RTT_GAP_PER_POINT, -CAP_RTT_GAP_LOGIT, CAP_RTT_GAP_LOGIT)
             snapshot["rtt_gap"] = round(gap, 2)
             factors.append(self._factor(
                 "rtt_gap", "RTT score advantage", p1_rtt, p2_rtt, logit,
+            ))
+
+        # ── 1b) Aging differential — shown as a separate insight when meaningful ──
+        if p1_age is not None and p2_age is not None and abs(age_f1 - age_f2) >= 0.03:
+            # Render as an explanatory factor (logit already in rtt_gap)
+            factors.append(self._factor(
+                "aging", "Aging curve adjustment",
+                p1_age, p2_age, 0.0,    # already counted in rtt_gap; this row is informational
             ))
 
         # ── 2) Surface-specific rating gap ───────────────────────────────────
@@ -581,6 +709,74 @@ class RttPredictor:
                     "fatigue", "Rest / fatigue (days since last match)", d1, d2, logit,
                 ))
 
+        # ── 11) Surface-shift penalty ─────────────────────────────────────────
+        # Players who switch surface (e.g. clay → grass) historically perform
+        # 3-5% worse for the first match. Only meaningful when surface changes.
+        if surface and match_date:
+            try:
+                last1 = self._last_match_surface(p1_id, match_date)
+                last2 = self._last_match_surface(p2_id, match_date)
+                def _shift_delta(last_surf, this_surf):
+                    if not last_surf or not this_surf:
+                        return 0
+                    a = last_surf.lower(); b = this_surf.lower()
+                    if a == b:
+                        return 0
+                    # Bigger shift between disparate surfaces (clay <-> grass)
+                    pair = tuple(sorted([
+                        'clay' if 'clay' in a else 'grass' if 'grass' in a else 'hard',
+                        'clay' if 'clay' in b else 'grass' if 'grass' in b else 'hard',
+                    ]))
+                    if pair == ('clay', 'grass'):
+                        return -1   # big shift
+                    return 0  # default — same effective surface
+                shift_p1 = _shift_delta(last1, surface)
+                shift_p2 = _shift_delta(last2, surface)
+                # Net penalty (positive favours p1)
+                net = shift_p2 - shift_p1     # if p2 has shift_p2=-1 and p1=0, p1 benefits
+                if net != 0:
+                    logit = _clip(net * 0.10, -0.15, 0.15)
+                    factors.append(self._factor(
+                        "surface_shift", f"Surface shift ({last1 or '?'} → {surface})",
+                        shift_p1, shift_p2, logit,
+                    ))
+            except Exception:
+                pass
+
+        # ── 12) Set-1 dominance ───────────────────────────────────────────────
+        # Players with high set-1 win rates tend to set the tone. The DIFFERENCE
+        # between players' set-1 win rates is the signal.
+        try:
+            s1 = self._set1_dominance(p1_id)
+            s2 = self._set1_dominance(p2_id)
+            if s1 is not None and s2 is not None and abs(s1 - s2) >= 0.05:
+                gap = (s1 - s2) * 100  # convert to percentage points
+                logit = _clip(gap * 0.008, -0.20, 0.20)
+                factors.append(self._factor(
+                    "set1_dominance", "Set-1 win rate",
+                    round(s1*100,1), round(s2*100,1), logit,
+                ))
+        except Exception:
+            pass
+
+        # ── 13) Punching above weight ─────────────────────────────────────────
+        # form_score relative to rtt_score: a high form_score with a lower
+        # rtt_score suggests a player on the rise — leading indicator.
+        p1_form_v = f(p1_ratings.get("form_score"))
+        p2_form_v = f(p2_ratings.get("form_score"))
+        p1_rtt_v  = f(p1_ratings.get("rtt_score"))
+        p2_rtt_v  = f(p2_ratings.get("rtt_score"))
+        if all(v is not None for v in (p1_form_v, p2_form_v, p1_rtt_v, p2_rtt_v)):
+            p1_punch = p1_form_v - p1_rtt_v   # positive = on the rise
+            p2_punch = p2_form_v - p2_rtt_v
+            net = p1_punch - p2_punch
+            if abs(net) >= 5:
+                logit = _clip(net * 0.012, -0.20, 0.20)
+                factors.append(self._factor(
+                    "punching_above_weight", "Form vs rating divergence",
+                    round(p1_punch, 1), round(p2_punch, 1), logit,
+                ))
+
         return factors, snapshot
 
     # ── public API ───────────────────────────────────────────────────────────
@@ -597,6 +793,8 @@ class RttPredictor:
         p1_hand: Optional[str] = None,
         p2_hand: Optional[str] = None,
         match_date: Optional[date] = None,
+        p1_birthday=None,
+        p2_birthday=None,
     ) -> PredictionResult:
         # Pull RTT ratings
         p1_r = self._player_ratings(p1_id)
@@ -615,6 +813,8 @@ class RttPredictor:
             p1_hand=p1_hand,
             p2_hand=p2_hand,
             match_date=match_date,
+            p1_age=_age_at(p1_birthday, match_date),
+            p2_age=_age_at(p2_birthday, match_date),
         )
 
         total_logit = sum(f.logit for f in factors)
@@ -745,7 +945,9 @@ class RttPredictor:
                     et.tour_category,
                     et.type_name,
                     p1.hand AS p1_hand,
-                    p2.hand AS p2_hand
+                    p2.hand AS p2_hand,
+                    p1.birthday AS p1_birthday,
+                    p2.birthday AS p2_birthday
                 FROM matches m
                 LEFT JOIN tournaments t ON m.tournament_id = t.id
                 LEFT JOIN surfaces s    ON t.surface_id = s.id
@@ -783,6 +985,8 @@ class RttPredictor:
                     p1_hand=m.get("p1_hand"),
                     p2_hand=m.get("p2_hand"),
                     match_date=m.get("event_date"),
+                    p1_birthday=m.get("p1_birthday"),
+                    p2_birthday=m.get("p2_birthday"),
                 )
                 self.write_prediction(pred)
                 predicted += 1

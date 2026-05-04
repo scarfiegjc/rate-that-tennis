@@ -9,6 +9,7 @@ import { api } from '../api.js'
 import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
+import RttLozenge from '../components/RttLozenge.jsx'
 
 // ── Surface dot ───────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ function MatchRow({ match }) {
   const p2   = match.second_player || {}
   const pred = match.prediction    || {}
 
-  const isLive    = /in play|live/i.test(match.event_status || '')
+  const isLive    = /in play|live|set \d|game/i.test(match.event_status || '')
   const isFinished = /finished/i.test(match.event_status || '')
   const edgeVal   = Math.max(pred.edge_first || 0, pred.edge_second || 0)
   const edgeName  = (pred.edge_first || 0) >= (pred.edge_second || 0)
@@ -39,9 +40,29 @@ function MatchRow({ match }) {
   const winner1 = isFinished && match.winner === 'First Player'
   const winner2 = isFinished && match.winner === 'Second Player'
 
+  // Was the model's pick correct? Pick the side with the higher predicted prob.
+  let predictionCorrect = null
+  if (isFinished && p1prob != null) {
+    const predictedSide = p1prob >= 50 ? 1 : 2
+    const actualWinner  = winner1 ? 1 : winner2 ? 2 : null
+    if (actualWinner != null) predictionCorrect = predictedSide === actualWinner
+  }
+
+  // Row classes: live, correct, wrong, or default
+  const rowCls = isLive
+    ? 'match-row match-row--live'
+    : predictionCorrect === true
+      ? 'match-row match-row--correct'
+      : predictionCorrect === false
+        ? 'match-row match-row--wrong'
+        : 'match-row'
+
+  // Live score string e.g. "2-1, 4-3"
+  const liveScore = match.final_result || match.game_result || ''
+
   return (
     <button
-      className={`match-row ${isLive ? 'match-row--live' : ''}`}
+      className={rowCls}
       onClick={() => navigate(`/match/${match.match_id}`)}
     >
       {/* Time / status */}
@@ -64,16 +85,20 @@ function MatchRow({ match }) {
         </div>
         <div className="match-player-sub">
           <span className="match-player-country">{p1.country_code || ''}</span>
-          {p1.rtt_score != null && (
-            <span className="match-player-rtt">RTT <span>{Math.round(p1.rtt_score)}</span></span>
-          )}
-          <FormDots dots={p1.form_dots || []} />
+          <RttLozenge score={p1.rtt_score} hideIfMissing />
+          <FormDots dots={p1.form_dots || []} max={10} />
         </div>
       </div>
 
-      {/* Centre — probability */}
+      {/* Centre — final score for finished matches, live score for live, otherwise prediction probability */}
       <div className="match-centre">
-        {p1prob != null ? (
+        {isFinished && (match.set_scores || match.final_result) ? (
+          <span className="match-final-score">
+            {match.set_scores || match.final_result}
+          </span>
+        ) : isLive && liveScore ? (
+          <span className="match-live-score">{liveScore}</span>
+        ) : p1prob != null ? (
           <>
             <div className="match-probs">
               <span className="match-prob-p1">{p1prob}%</span>
@@ -99,22 +124,24 @@ function MatchRow({ match }) {
           {p2.name || '—'}
         </div>
         <div className="match-player-sub">
-          <FormDots dots={p2.form_dots || []} />
-          {p2.rtt_score != null && (
-            <span className="match-player-rtt">RTT <span>{Math.round(p2.rtt_score)}</span></span>
-          )}
+          <FormDots dots={p2.form_dots || []} max={10} />
+          <RttLozenge score={p2.rtt_score} hideIfMissing />
           <span className="match-player-country">{p2.country_code || ''}</span>
         </div>
       </div>
 
       {/* Edge / meta */}
       <div className="match-row-meta">
-        {hasEdge
-          ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
-          : isLive
-            ? <span className="live-badge"><span className="live-dot" />Live</span>
+        {isLive
+          ? <span className="live-badge amber"><span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE</span>
+          : hasEdge
+            ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
             : isFinished
-              ? null
+              ? predictionCorrect === true
+                ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
+                : predictionCorrect === false
+                  ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
+                  : null
               : p1prob != null
                 ? <span className="edge-badge neutral">—</span>
                 : null
@@ -165,7 +192,19 @@ function TournamentBlock({ name, surface, matches }) {
 
       {open && (
         <div>
-          {matches.map(m => (
+          {[...matches].sort((a, b) => {
+            const aLive = /in play|live|set \d|game/i.test(a.event_status || '') ? 1 : 0
+            const bLive = /in play|live|set \d|game/i.test(b.event_status || '') ? 1 : 0
+            if (aLive !== bLive) return bLive - aLive   // live first
+            const aFin = /finished/i.test(a.event_status || '') ? 1 : 0
+            const bFin = /finished/i.test(b.event_status || '') ? 1 : 0
+            if (aFin !== bFin) return aFin - bFin       // finished last
+            // Otherwise by event_time then match_id
+            const ta = a.event_time || '99:99'
+            const tb = b.event_time || '99:99'
+            if (ta !== tb) return ta < tb ? -1 : 1
+            return (a.match_id || 0) - (b.match_id || 0)
+          }).map(m => (
             <MatchRow key={m.match_id} match={m} />
           ))}
         </div>

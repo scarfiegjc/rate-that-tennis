@@ -1,0 +1,22 @@
+/**
+ * RTT score lozenge — pastel pill scaled by score.
+ *  80+   → elite (green)
+ *  65–79 → strong (lime)
+ *  50–64 → average (amber)
+ *  35–49 → below (orange)
+ *  <35   → poor (red)
+ *  null  → unknown (grey, hidden by default)
+ */
+export default function RttLozenge({ score, hideIfMissing = false }) {
+  if (score == null) {
+    if (hideIfMissing) return null
+    return <span className="rtt-lozenge unknown">—</span>
+  }
+  const n = Math.round(Number(score))
+  let cls = 'poor'
+  if (n >= 80)      cls = 'elite'
+  else if (n >= 65) cls = 'strong'
+  else if (n >= 50) cls = 'average'
+  else if (n >= 35) cls = 'below'
+  return <span className={`rtt-lozenge ${cls}`} title={`RTT ${n}`}>{n}</span>
+}

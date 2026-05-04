@@ -7,6 +7,7 @@ import PredictionsToday from './pages/PredictionsToday.jsx'
 import PredictionsHistory from './pages/PredictionsHistory.jsx'
 import SystemsList from './pages/SystemsList.jsx'
 import SystemDetail from './pages/SystemDetail.jsx'
+import PlayerDatabase from './pages/PlayerDatabase.jsx'
 
 function Header() {
   const loc = useLocation()
@@ -32,6 +33,9 @@ function Header() {
         <Link to="/systems" className={`nav-link ${is('/systems') ? 'active' : ''}`}>
           Systems
         </Link>
+        <Link to="/players" className={`nav-link ${is('/players') && !loc.pathname.startsWith('/player/') ? 'active' : ''}`}>
+          Players
+        </Link>
       </nav>
     </header>
   )
@@ -45,6 +49,7 @@ export default function App() {
         <Route path="/"                       element={<MatchList />} />
         <Route path="/live"                   element={<LivePage />} />
         <Route path="/match/:id"              element={<MatchDetail />} />
+        <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
         <Route path="/predictions"            element={<PredictionsToday />} />
         <Route path="/predictions/history"    element={<PredictionsHistory />} />

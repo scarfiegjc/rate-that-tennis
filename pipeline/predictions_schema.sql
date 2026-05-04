@@ -10,6 +10,14 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE model_predictions
+    -- Deep reasoning intelligence text (Claude-generated, 3 columns on the UI)
+    ADD COLUMN IF NOT EXISTS p1_intel            TEXT,
+    ADD COLUMN IF NOT EXISTS p2_intel            TEXT,
+    ADD COLUMN IF NOT EXISTS match_preview       TEXT,
+    ADD COLUMN IF NOT EXISTS did_you_know        TEXT,
+    ADD COLUMN IF NOT EXISTS confidence_line     TEXT,
+    ADD COLUMN IF NOT EXISTS intel_generated_at  TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS intel_model         TEXT,
     -- Inputs the prediction was based on (snapshot at predict time)
     ADD COLUMN IF NOT EXISTS p1_rtt              NUMERIC(6,2),
     ADD COLUMN IF NOT EXISTS p2_rtt              NUMERIC(6,2),
@@ -38,6 +46,45 @@ CREATE INDEX IF NOT EXISTS idx_predictions_settled
     ON model_predictions(settled_at DESC) WHERE settled_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_predictions_correct
     ON model_predictions(is_correct) WHERE is_correct IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 1b. Player point stats — derived from match_games + match_points
+--     (production point-by-point data — fully ours, no Sackmann).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS player_point_stats (
+    player_id            INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+    -- Service
+    service_games        INTEGER DEFAULT 0,
+    service_holds        INTEGER DEFAULT 0,
+    service_hold_pct     NUMERIC(5,2),
+    bp_faced             INTEGER DEFAULT 0,
+    bp_saved             INTEGER DEFAULT 0,
+    bp_save_pct          NUMERIC(5,2),
+    -- Return
+    return_games         INTEGER DEFAULT 0,
+    return_breaks        INTEGER DEFAULT 0,
+    break_pct            NUMERIC(5,2),
+    bp_chances           INTEGER DEFAULT 0,
+    bp_converted         INTEGER DEFAULT 0,
+    bp_conversion_pct    NUMERIC(5,2),
+    -- Clutch
+    tiebreaks_played     INTEGER DEFAULT 0,
+    tiebreaks_won        INTEGER DEFAULT 0,
+    tiebreak_win_pct     NUMERIC(5,2),
+    set_points_faced     INTEGER DEFAULT 0,
+    set_points_saved     INTEGER DEFAULT 0,
+    set_point_save_pct   NUMERIC(5,2),
+    match_points_faced   INTEGER DEFAULT 0,
+    match_points_saved   INTEGER DEFAULT 0,
+    match_point_save_pct NUMERIC(5,2),
+    -- Sample size
+    matches_analyzed     INTEGER DEFAULT 0,
+    last_match_date      DATE,
+    updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pps_matches ON player_point_stats(matches_analyzed DESC);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Hand-matchup splits — per-player record vs each opponent hand

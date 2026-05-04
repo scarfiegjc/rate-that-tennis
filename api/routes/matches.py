@@ -121,11 +121,14 @@ def _edge(model_prob: float | None, implied_prob: float | None) -> float | None:
     return round(model_prob - implied_prob, 4)
 
 
-def _bulk_form_dots(player_ids: list, n: int = 5) -> dict:
-    """Return {player_id: ['W','L',...]} for a list of player IDs in one query."""
+def _bulk_form_dots(player_ids: list, n: int = 10) -> dict:
+    """
+    Return {player_id: ['W','L',...]} for a list of player IDs in one query.
+    Production matches only — fast. Players with fewer than n matches in our
+    production data show fewer dots; that's fine for the list view.
+    """
     if not player_ids:
         return {}
-    # Fetch last n results per player via LATERAL
     placeholders = ",".join(["%s"] * len(player_ids))
     rows = query(
         f"""
@@ -154,7 +157,7 @@ def _bulk_form_dots(player_ids: list, n: int = 5) -> dict:
     return result
 
 
-def _form_dots(player_id: int, n: int = 5) -> list[str]:
+def _form_dots(player_id: int, n: int = 10) -> list[str]:
     """Last N match results as W/L list."""
     rows = query(
         """
@@ -242,6 +245,58 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
     p1_stats = _surface_stats(p1_id)
     p2_stats = _surface_stats(p2_id)
 
+    # Per-player computed metrics: 3 new ratings + 8 statistics each.
+    # Wrapped so any failure here can't break the match page.
+    p1_metrics = {"ratings": {}, "stats": {}}
+    p2_metrics = {"ratings": {}, "stats": {}}
+    level_code = "A"
+    try:
+        from api.routes._player_metrics import player_match_metrics
+        level_row = query_one(
+            """
+            SELECT et.tour_category, et.type_name
+            FROM matches m
+            LEFT JOIN event_types et ON et.id = m.event_type_id
+            WHERE m.id = %s
+            """,
+            (match_id,),
+        ) or {}
+
+        def _level_code(tc, tn):
+            tc = (tc or "").lower()
+            tn = (tn or "").lower()
+            if "grand slam" in tn:
+                return "G"
+            if "masters" in tn or "premier mandatory" in tn or "premier 5" in tn:
+                return "M"
+            if "challenger" in tc or "challenger" in tn:
+                return "C"
+            if "itf" in tc:
+                return "S"
+            return "A"
+
+        level_code = _level_code(level_row.get("tour_category"), level_row.get("type_name"))
+
+        if p1_id:
+            p1_metrics = player_match_metrics(
+                p1_id,
+                opponent_hand=p2.get("hand"),
+                surface=surface_name,
+                level_code=level_code,
+                player_rtt=float(p1_ratings.get("rtt_score")) if p1_ratings.get("rtt_score") is not None else None,
+            )
+        if p2_id:
+            p2_metrics = player_match_metrics(
+                p2_id,
+                opponent_hand=p1.get("hand"),
+                surface=surface_name,
+                level_code=level_code,
+                player_rtt=float(p2_ratings.get("rtt_score")) if p2_ratings.get("rtt_score") is not None else None,
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger("api.matches").warning(f"player_match_metrics failed: {e}")
+
     # Prediction
     pred = query_one(
         """
@@ -287,16 +342,23 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
         "players": {
             "first": {
                 **p1,
-                "ratings": p1_ratings,
+                "ratings": {**p1_ratings, **p1_metrics["ratings"]},
                 "form_dots": p1_form,
                 "stats": p1_stats,
+                "metrics": p1_metrics["stats"],
             },
             "second": {
                 **p2,
-                "ratings": p2_ratings,
+                "ratings": {**p2_ratings, **p2_metrics["ratings"]},
                 "form_dots": p2_form,
                 "stats": p2_stats,
+                "metrics": p2_metrics["stats"],
             },
+        },
+        "context": {
+            "level_code": level_code,
+            "p2_hand": p2.get("hand"),
+            "p1_hand": p1.get("hand"),
         },
         "prediction": pred,
         "market": odds,
@@ -324,6 +386,9 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             m.tournament_round,
             m.event_status,
             m.winner,
+            m.final_result,
+            m.game_result,
+            m.is_live,
             t.name AS tournament_name,
             s.name AS surface_name,
             p1.name AS p1_name,
@@ -335,18 +400,24 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             mp.prob_first_player,
             mp.prob_second_player,
             mp.confidence,
+            ms.set_scores,
             bo1.decimal_odds AS odds_p1,
             bo1.implied_prob AS impl_p1,
             bo2.decimal_odds AS odds_p2,
             bo2.implied_prob AS impl_p2
         FROM matches m
-        JOIN tournaments t ON t.id = m.tournament_id
-        JOIN players p1 ON p1.id = m.first_player_id
-        JOIN players p2 ON p2.id = m.second_player_id
-        LEFT JOIN surfaces s ON s.id = t.surface_id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN players p1    ON p1.id = m.first_player_id
+        LEFT JOIN players p2    ON p2.id = m.second_player_id
+        LEFT JOIN surfaces s    ON s.id = t.surface_id
         LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
         LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
         LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        LEFT JOIN LATERAL (
+            SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number) AS set_scores
+            FROM match_scores ms_inner
+            WHERE ms_inner.match_id = m.id
+        ) ms ON TRUE
         LEFT JOIN LATERAL (
             SELECT decimal_odds, implied_prob
             FROM bookmaker_odds
@@ -368,7 +439,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
 
     # Bulk-load form dots for all players in one query
     all_player_ids = list({m["first_player_id"] for m in matches} | {m["second_player_id"] for m in matches})
-    form_dots_map = _bulk_form_dots(all_player_ids, n=5)
+    form_dots_map = _bulk_form_dots(all_player_ids, n=10)
 
     result = []
     for m in matches:
@@ -393,6 +464,11 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             "event_date": str(m["event_date"]) if m["event_date"] else None,
             "event_time": str(m["event_time"]) if m["event_time"] else None,
             "event_status": m["event_status"],
+            "winner": m.get("winner"),
+            "final_result": m.get("final_result"),
+            "game_result": m.get("game_result"),
+            "set_scores":   m.get("set_scores"),
+            "is_live": m.get("is_live"),
             "first_player": {
                 "id": m["first_player_id"],
                 "name": m["p1_name"],

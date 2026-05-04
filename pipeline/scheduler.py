@@ -85,15 +85,35 @@ def _import_settle():
         return settle_predictions
 
 
+def _import_fill_ratings():
+    try:
+        from pipeline.fill_ratings import fill_missing_ratings
+        return fill_missing_ratings
+    except ImportError:
+        from fill_ratings import fill_missing_ratings
+        return fill_missing_ratings
+
+
+def _import_surface_backfill():
+    try:
+        from pipeline.surface_backfill import backfill_surfaces
+        return backfill_surfaces
+    except ImportError:
+        from surface_backfill import backfill_surfaces
+        return backfill_surfaces
+
+
 def run_predictions():
     """
     Full predictions pipeline (RTT v1):
-      1. Refresh hand-vs-hand splits
-      2. Compute RTT-based win probabilities for next 7 days
-      3. Settle finished matches (last 14 days)
-      4. Evaluate systems (Surface Monster, Form Surge, …)
+      0. Refresh tournament surfaces (Wuxi → Hard, etc.)
+      1. Fill missing player ratings (every active player gets an RTT)
+      2. Refresh hand-vs-hand splits
+      3. Compute RTT-based win probabilities for next 7 days
+      4. Settle finished matches (last 14 days)
+      5. Evaluate systems (Surface Monster, Form Surge, …)
 
-    All four stages use only psycopg2 + stdlib so they're Railway-safe.
+    All stages use only psycopg2 + stdlib so they're Railway-safe.
     Each stage is wrapped so a single failure doesn't poison the rest.
     """
     log.info("Scheduled: predictions (RTT v1)")
@@ -101,7 +121,30 @@ def run_predictions():
 
     db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
 
-    # 1) Hand splits
+    # 0) Surface backfill
+    try:
+        backfill_surfaces = _import_surface_backfill()
+        conn = psycopg2.connect(db_url)
+        try:
+            backfill_surfaces(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"surface backfill failed: {e}")
+
+    # 1) Fill missing player ratings — done before predictions so cold-start
+    # players in upcoming matches always have an RTT score to drive predictions
+    try:
+        fill_missing_ratings = _import_fill_ratings()
+        conn = psycopg2.connect(db_url)
+        try:
+            fill_missing_ratings(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"fill missing ratings failed: {e}")
+
+    # 2) Hand splits
     try:
         compute_hand_splits = _import_compute_hand_splits()
         conn = psycopg2.connect(db_url)
@@ -260,7 +303,15 @@ if __name__ == "__main__":
     # ── Self-healing schema migrations (idempotent, safe to re-run) ─────────
     apply_schema_migrations()
 
-    # ── Surface backfill — Wuxi etc. should never be "Unknown" ──────────────
+    # ── Startup jobs in DEPENDENCY ORDER ─────────────────────────────────────
+    # 1. Schema (above)
+    # 2. Fixtures + tournaments — populate the data layer first
+    log.info("Running startup: daily fixtures...")
+    run_daily_fixtures()
+    log.info("Running startup: event type + tournament sync...")
+    run_startup_sync()
+
+    # 3. Surface backfill — now that we have all tournaments
     log.info("Startup: backfilling tournament surfaces...")
     try:
         try:
@@ -278,21 +329,35 @@ if __name__ == "__main__":
     except Exception as e:
         log.error(f"surface backfill failed: {e}")
 
-    # ── Startup jobs (run immediately on boot) ──────────────────────────────
-    log.info("Running startup: daily fixtures...")
-    run_daily_fixtures()   # populate DB immediately so the site has data
-
-    log.info("Running startup: event type + tournament sync...")
-    run_startup_sync()     # ensure lookup tables are populated
-
+    # 4. Compute proper RTT ratings (auto_data — uses sa_matches history)
     log.info("Running startup: RTT ratings computation...")
-    run_ratings()          # populate player_ratings for all active players
+    run_ratings()
 
+    # 5. Fill any gaps — every player in an upcoming match should have an RTT
+    log.info("Startup: filling missing player ratings...")
+    try:
+        try:
+            from pipeline.fill_ratings import fill_missing_ratings
+        except ImportError:
+            from fill_ratings import fill_missing_ratings
+        import psycopg2
+        conn = psycopg2.connect(
+            os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+        )
+        try:
+            fill_missing_ratings(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"fill_missing_ratings failed: {e}")
+
+    # 6. Predictions (uses RTT data + hand splits + systems)
     log.info("Running startup: predictions...")
-    run_predictions()      # generate win probabilities for all upcoming matches
+    run_predictions()
 
+    # 7. Odds (independent — runs anytime)
     log.info("Running startup: odds...")
-    run_odds()             # fetch bookmaker odds if key is available
+    run_odds()
 
     # ── Scheduled jobs ──────────────────────────────────────────────────────
     schedule.every().day.at("06:00").do(run_daily_fixtures)   # 06:00 UTC
@@ -314,9 +379,27 @@ if __name__ == "__main__":
         except Exception as e:
             log.error(f"surface backfill (rolling) failed: {e}")
     schedule.every().day.at("06:15").do(_surface_backfill_only)
+    def _fill_ratings_only():
+        try:
+            try:
+                from pipeline.fill_ratings import fill_missing_ratings
+            except ImportError:
+                from fill_ratings import fill_missing_ratings
+            import psycopg2
+            conn = psycopg2.connect(
+                os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+            )
+            try:
+                fill_missing_ratings(conn)
+            finally:
+                conn.close()
+        except Exception as e:
+            log.error(f"fill ratings (rolling) failed: {e}")
+    schedule.every().day.at("06:20").do(_fill_ratings_only)
     schedule.every().day.at("06:30").do(run_predictions)      # predictions after morning fixtures
     schedule.every().day.at("18:00").do(run_daily_fixtures)   # 18:00 UTC
     schedule.every().day.at("18:15").do(_surface_backfill_only)
+    schedule.every().day.at("18:20").do(_fill_ratings_only)
     schedule.every().day.at("18:30").do(run_predictions)      # predictions after evening fixtures
     schedule.every(5).minutes.do(run_livescore)               # live scores
     # Settle predictions every 15 minutes — keeps the tracker page live as
@@ -338,6 +421,24 @@ if __name__ == "__main__":
     schedule.every().day.at("07:00").do(run_odds)             # odds after fixtures
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
     schedule.every().sunday.at("02:00").do(run_ratings)       # weekly ratings refresh
+    # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
+    def _player_sync_weekly():
+        try:
+            try:
+                from pipeline.player_sync import run_full_sync
+            except ImportError:
+                from player_sync import run_full_sync
+            import psycopg2
+            conn = psycopg2.connect(
+                os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+            )
+            try:
+                run_full_sync(conn, do_tournaments=True)
+            finally:
+                conn.close()
+        except Exception as e:
+            log.error(f"weekly player sync failed: {e}")
+    schedule.every().sunday.at("03:00").do(_player_sync_weekly)
 
     log.info(
         "Scheduler running. "

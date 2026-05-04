@@ -16,6 +16,12 @@ async function get(path) {
 export const api = {
   matchesToday:  ()           => get('/api/v1/matches/today'),
   match:         (id)         => get(`/api/v1/matches/${id}`),
+  playersDatabase: ({ sort = 'rtt', country, search, activeOnly = true, limit = 300 } = {}) => {
+    const q = new URLSearchParams({ sort, active_only: activeOnly, limit })
+    if (country) q.set('country', country)
+    if (search)  q.set('search', search)
+    return get(`/api/v1/players?${q.toString()}`)
+  },
   player:        (id)         => get(`/api/v1/players/${id}`),
   playerForm:    (id, surface, limit = 15) =>
     get(`/api/v1/players/${id}/form?surface=${surface || 'all'}&limit=${limit}`),
@@ -24,6 +30,9 @@ export const api = {
   playerStats:   (id)         => get(`/api/v1/players/${id}/stats`),
   h2h:           (p1, p2)     => get(`/api/v1/players/${p1}/h2h/${p2}`),
   health:        ()           => get('/health'),
+
+  matchIntelligence:    (id) => get(`/api/v1/matches/${id}/intelligence`),
+  matchPointAnalysis:   (id) => get(`/api/v1/matches/${id}/point-analysis`),
 
   // Predictions tracker
   predictionsToday:  (daysAhead = 2) =>

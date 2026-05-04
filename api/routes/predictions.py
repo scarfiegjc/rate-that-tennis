@@ -94,20 +94,382 @@ def _serialise_prediction_row(r: dict) -> dict:
 # GET /predictions/today
 # ─────────────────────────────────────────────────────────────────────────────
 
+@router.get("/matches/{match_id}/intelligence")
+def match_intelligence(match_id: int):
+    """
+    Returns the deep-reasoning intelligence text for a match (3 paragraphs).
+    If not yet generated, returns has_intel=false and the rich match facts
+    needed to generate it.
+    """
+    row = safe_query_one(
+        """
+        SELECT
+            mp.match_id,
+            mp.p1_intel, mp.p2_intel, mp.match_preview,
+            mp.did_you_know, mp.confidence_line,
+            mp.intel_generated_at, mp.intel_model,
+            mp.prob_first_player, mp.prob_second_player,
+            mp.confidence, mp.rtt_gap, mp.surface_gap, mp.form_gap,
+            mp.predicted_winner,
+            m.event_date, m.event_time, m.tournament_round,
+            t.name AS tournament_name,
+            s.name AS surface_name,
+            p1.id AS p1_id, p1.name AS p1_name, p1.full_name AS p1_full,
+            p1.country AS p1_country, p1.country_code AS p1_country_code,
+            p1.hand AS p1_hand, p1.birthday AS p1_birthday,
+            p2.id AS p2_id, p2.name AS p2_name, p2.full_name AS p2_full,
+            p2.country AS p2_country, p2.country_code AS p2_country_code,
+            p2.hand AS p2_hand, p2.birthday AS p2_birthday,
+            pr1.rtt_score AS p1_rtt, pr1.clay_rating AS p1_clay,
+            pr1.hard_rating AS p1_hard, pr1.grass_rating AS p1_grass,
+            pr1.indoor_rating AS p1_indoor, pr1.form_score AS p1_form,
+            pr1.momentum AS p1_momentum,
+            pr2.rtt_score AS p2_rtt, pr2.clay_rating AS p2_clay,
+            pr2.hard_rating AS p2_hard, pr2.grass_rating AS p2_grass,
+            pr2.indoor_rating AS p2_indoor, pr2.form_score AS p2_form,
+            pr2.momentum AS p2_momentum
+        FROM matches m
+        LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        LEFT JOIN players p1 ON p1.id = m.first_player_id
+        LEFT JOIN players p2 ON p2.id = m.second_player_id
+        LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
+        LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
+        WHERE m.id = %s
+        """,
+        (match_id,),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    has_intel = bool(row.get("p1_intel") and row.get("p2_intel") and row.get("match_preview"))
+
+    # Recent form for both players (last 10 W/L with opponent + score)
+    def _form(pid):
+        return safe_query(
+            """
+            SELECT m.event_date, m.tournament_round AS round, t.name AS tournament,
+                   s.name AS surface, m.final_result,
+                   CASE WHEN m.first_player_id = %s THEN p2.name ELSE p1.name END AS opp,
+                   CASE WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
+                          OR (m.winner = 'Second Player' AND m.second_player_id = %s)
+                        THEN 'W' ELSE 'L' END AS result
+            FROM matches m
+            JOIN players p1 ON p1.id = m.first_player_id
+            JOIN players p2 ON p2.id = m.second_player_id
+            LEFT JOIN tournaments t ON t.id = m.tournament_id
+            LEFT JOIN surfaces s ON s.id = t.surface_id
+            WHERE (m.first_player_id = %s OR m.second_player_id = %s)
+              AND m.event_status = 'Finished'
+              AND m.winner IS NOT NULL
+            ORDER BY m.event_date DESC
+            LIMIT 10
+            """,
+            (pid, pid, pid, pid, pid),
+        )
+
+    p1_form = _form(row["p1_id"]) if row.get("p1_id") else []
+    p2_form = _form(row["p2_id"]) if row.get("p2_id") else []
+
+    # H2H — quick lookup
+    h2h = safe_query_one(
+        """
+        SELECT
+            SUM(CASE WHEN m.winner = 'First Player'  THEN
+                    CASE WHEN m.first_player_id = %s  THEN 1 ELSE 0 END
+                ELSE CASE WHEN m.second_player_id = %s THEN 1 ELSE 0 END
+                END) AS p1_wins,
+            SUM(CASE WHEN m.winner = 'First Player'  THEN
+                    CASE WHEN m.first_player_id = %s  THEN 1 ELSE 0 END
+                ELSE CASE WHEN m.second_player_id = %s THEN 1 ELSE 0 END
+                END) AS p2_wins,
+            COUNT(*) AS total
+        FROM matches m
+        WHERE ((m.first_player_id = %s AND m.second_player_id = %s)
+            OR (m.first_player_id = %s AND m.second_player_id = %s))
+          AND m.event_status = 'Finished'
+        """,
+        (row["p1_id"], row["p1_id"], row["p2_id"], row["p2_id"],
+         row["p1_id"], row["p2_id"], row["p2_id"], row["p1_id"]),
+    )
+
+    return {
+        "match_id":  match_id,
+        "has_intel": has_intel,
+        "intel": {
+            "p1_intel":        row.get("p1_intel"),
+            "p2_intel":        row.get("p2_intel"),
+            "match_preview":   row.get("match_preview"),
+            "did_you_know":    row.get("did_you_know"),
+            "confidence_line": row.get("confidence_line"),
+            "generated_at":    str(row["intel_generated_at"]) if row.get("intel_generated_at") else None,
+            "model":           row.get("intel_model"),
+        },
+        "facts": {
+            "match": {
+                "tournament": row.get("tournament_name"),
+                "round":      row.get("tournament_round"),
+                "surface":    row.get("surface_name"),
+                "event_date": str(row["event_date"]) if row.get("event_date") else None,
+            },
+            "prediction": {
+                "prob_first_player":  float(row["prob_first_player"])  if row.get("prob_first_player")  is not None else None,
+                "prob_second_player": float(row["prob_second_player"]) if row.get("prob_second_player") is not None else None,
+                "confidence":         row.get("confidence"),
+                "predicted_winner":   row.get("predicted_winner"),
+                "rtt_gap":     float(row["rtt_gap"])     if row.get("rtt_gap")     is not None else None,
+                "surface_gap": float(row["surface_gap"]) if row.get("surface_gap") is not None else None,
+                "form_gap":    float(row["form_gap"])    if row.get("form_gap")    is not None else None,
+            },
+            "p1": {
+                "id":           row["p1_id"],
+                "name":         row.get("p1_name"),
+                "full_name":    row.get("p1_full"),
+                "country":      row.get("p1_country"),
+                "country_code": row.get("p1_country_code"),
+                "hand":         row.get("p1_hand"),
+                "birthday":     str(row["p1_birthday"]) if row.get("p1_birthday") else None,
+                "rtt":          float(row["p1_rtt"])    if row.get("p1_rtt") is not None else None,
+                "form":         float(row["p1_form"])   if row.get("p1_form") is not None else None,
+                "momentum":     row.get("p1_momentum"),
+                "surface_ratings": {
+                    "clay":   float(row["p1_clay"])   if row.get("p1_clay")   is not None else None,
+                    "hard":   float(row["p1_hard"])   if row.get("p1_hard")   is not None else None,
+                    "grass":  float(row["p1_grass"])  if row.get("p1_grass")  is not None else None,
+                    "indoor": float(row["p1_indoor"]) if row.get("p1_indoor") is not None else None,
+                },
+                "recent_form": [
+                    {"date": str(f["event_date"]) if f.get("event_date") else None,
+                     "result": f["result"], "opp": f.get("opp"),
+                     "score": f.get("final_result"), "tournament": f.get("tournament"),
+                     "surface": f.get("surface"), "round": f.get("round")}
+                    for f in p1_form
+                ],
+            },
+            "p2": {
+                "id":           row["p2_id"],
+                "name":         row.get("p2_name"),
+                "full_name":    row.get("p2_full"),
+                "country":      row.get("p2_country"),
+                "country_code": row.get("p2_country_code"),
+                "hand":         row.get("p2_hand"),
+                "birthday":     str(row["p2_birthday"]) if row.get("p2_birthday") else None,
+                "rtt":          float(row["p2_rtt"])    if row.get("p2_rtt") is not None else None,
+                "form":         float(row["p2_form"])   if row.get("p2_form") is not None else None,
+                "momentum":     row.get("p2_momentum"),
+                "surface_ratings": {
+                    "clay":   float(row["p2_clay"])   if row.get("p2_clay")   is not None else None,
+                    "hard":   float(row["p2_hard"])   if row.get("p2_hard")   is not None else None,
+                    "grass":  float(row["p2_grass"])  if row.get("p2_grass")  is not None else None,
+                    "indoor": float(row["p2_indoor"]) if row.get("p2_indoor") is not None else None,
+                },
+                "recent_form": [
+                    {"date": str(f["event_date"]) if f.get("event_date") else None,
+                     "result": f["result"], "opp": f.get("opp"),
+                     "score": f.get("final_result"), "tournament": f.get("tournament"),
+                     "surface": f.get("surface"), "round": f.get("round")}
+                    for f in p2_form
+                ],
+            },
+            "h2h": {
+                "p1_wins": int(h2h.get("p1_wins") or 0) if h2h else 0,
+                "p2_wins": int(h2h.get("p2_wins") or 0) if h2h else 0,
+                "total":   int(h2h.get("total")   or 0) if h2h else 0,
+            },
+            "market": _latest_odds_for_match(match_id),
+        },
+    }
+
+
+def _latest_odds_for_match(match_id: int) -> dict:
+    """Latest bookmaker odds for a match — feeds into the AI's market sentence."""
+    rows = safe_query(
+        """
+        SELECT DISTINCT ON (player_ref)
+            player_ref, bookmaker, decimal_odds, implied_prob, fetched_at
+        FROM bookmaker_odds
+        WHERE match_id = %s
+        ORDER BY player_ref, fetched_at DESC
+        """,
+        (match_id,),
+    )
+    out = {"p1": None, "p2": None}
+    for r in rows:
+        side = "p1" if r["player_ref"] == "first_player" else "p2"
+        out[side] = {
+            "bookmaker":    r.get("bookmaker"),
+            "decimal_odds": float(r["decimal_odds"]) if r.get("decimal_odds") else None,
+            "implied_prob": float(r["implied_prob"]) if r.get("implied_prob") else None,
+        }
+    return out
+
+
+@router.get("/matches/{match_id}/point-analysis")
+def match_point_analysis(match_id: int):
+    """Returns both players' point stats for a match (service hold, break %, etc)."""
+    m = safe_query_one(
+        "SELECT first_player_id, second_player_id FROM matches WHERE id = %s",
+        (match_id,),
+    )
+    if not m:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    def _stats_for(pid):
+        if not pid:
+            return None
+        return safe_query_one(
+            """
+            SELECT * FROM player_point_stats WHERE player_id = %s
+            """,
+            (pid,),
+        )
+
+    p1_stats = _stats_for(m["first_player_id"])
+    p2_stats = _stats_for(m["second_player_id"])
+
+    def _norm(s):
+        if not s:
+            return None
+        # Convert NUMERIC to float, dates to str
+        return {
+            k: (float(v) if hasattr(v, '__float__') and not isinstance(v, (bool, int)) else
+                str(v) if hasattr(v, 'isoformat') else v)
+            for k, v in s.items()
+        }
+
+    return {
+        "match_id": match_id,
+        "p1": _norm(p1_stats),
+        "p2": _norm(p2_stats),
+        "has_data": bool(p1_stats or p2_stats),
+    }
+
+
+@router.get("/admin/intel/queue")
+def admin_intel_queue(days_ahead: int = Query(default=2, ge=1, le=7)):
+    """List of matches in the next N days that don't yet have intelligence."""
+    rows = safe_query(
+        """
+        SELECT m.id AS match_id, m.event_date, m.event_time,
+               t.name AS tournament,
+               s.name AS surface,
+               p1.name AS p1_name, p2.name AS p2_name,
+               mp.predictor_version
+        FROM matches m
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s    ON s.id = t.surface_id
+        LEFT JOIN players p1    ON p1.id = m.first_player_id
+        LEFT JOIN players p2    ON p2.id = m.second_player_id
+        LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        WHERE m.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + (%s || ' days')::interval
+          AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Finished')
+          AND m.first_player_id IS NOT NULL
+          AND m.second_player_id IS NOT NULL
+          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+          AND mp.match_id IS NOT NULL
+          AND (mp.match_preview IS NULL OR mp.match_preview = '')
+        ORDER BY m.event_date, m.event_time NULLS LAST
+        LIMIT 100
+        """,
+        (days_ahead,),
+    )
+    return {"queue": rows, "count": len(rows)}
+
+
+from fastapi import Body
+
+@router.post("/admin/intel/store/{match_id}")
+def admin_intel_store(match_id: int, payload: dict = Body(...)):
+    """Store generated intelligence text for a match."""
+    p1_intel        = (payload.get("p1_intel") or "").strip()
+    p2_intel        = (payload.get("p2_intel") or "").strip()
+    match_preview   = (payload.get("match_preview") or "").strip()
+    did_you_know    = (payload.get("did_you_know") or "").strip() or None
+    confidence_line = (payload.get("confidence_line") or "").strip() or None
+    model           = (payload.get("model") or "claude").strip()
+
+    if not (p1_intel and p2_intel and match_preview):
+        raise HTTPException(status_code=400, detail="p1_intel, p2_intel, match_preview are required")
+
+    rows = safe_query(
+        """
+        UPDATE model_predictions
+        SET p1_intel           = %s,
+            p2_intel           = %s,
+            match_preview      = %s,
+            did_you_know       = %s,
+            confidence_line    = %s,
+            intel_generated_at = NOW(),
+            intel_model        = %s
+        WHERE match_id = %s
+        RETURNING match_id
+        """,
+        (p1_intel, p2_intel, match_preview, did_you_know, confidence_line, model, match_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No prediction found for match {match_id}")
+    return {"ok": True, "match_id": match_id}
+
+
 @router.get("/predictions/today")
 def predictions_today(
     days_ahead: int = Query(default=2, ge=0, le=7),
     include_settled: bool = Query(default=True),
 ):
+    """
+    Today + tomorrow's matches with their predictions joined in.
+    LEFT JOIN style: matches without a prediction still appear (status = 'pending').
+    """
     today = date.today()
     cutoff = today + timedelta(days=days_ahead)
 
+    # Use a LEFT JOIN against matches so we show every upcoming match —
+    # even those without a model prediction yet (so the user can see what's
+    # happening today even if the predictor hasn't run for new fixtures).
     rows = safe_query(
         """
-        SELECT *
-        FROM v_predictions_with_results
-        WHERE event_date BETWEEN %s AND %s
-        ORDER BY event_date, event_time NULLS LAST, match_id
+        SELECT
+            m.id              AS match_id,
+            m.event_date,
+            m.event_time,
+            m.event_status,
+            m.winner          AS match_winner_text,
+            t.name            AS tournament_name,
+            s.name            AS surface_name,
+            m.tournament_round,
+            p1.id             AS p1_id,
+            p1.name           AS p1_name,
+            p1.country_code   AS p1_country,
+            p2.id             AS p2_id,
+            p2.name           AS p2_name,
+            p2.country_code   AS p2_country,
+            mp.prob_first_player,
+            mp.prob_second_player,
+            mp.confidence,
+            mp.predicted_winner,
+            mp.actual_winner,
+            mp.is_correct,
+            mp.settled_at,
+            mp.predictor_version,
+            mp.rtt_gap,
+            mp.surface_gap,
+            mp.form_gap,
+            mp.total_logit,
+            mp.predicted_at,
+            mp.key_factors
+        FROM matches m
+        LEFT JOIN tournaments t       ON t.id = m.tournament_id
+        LEFT JOIN surfaces s          ON s.id = t.surface_id
+        LEFT JOIN players p1          ON p1.id = m.first_player_id
+        LEFT JOIN players p2          ON p2.id = m.second_player_id
+        LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        WHERE m.event_date BETWEEN %s AND %s
+          AND m.event_status NOT IN ('Cancelled','Walkover','Postponed')
+          AND m.first_player_id IS NOT NULL
+          AND m.second_player_id IS NOT NULL
+          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+        ORDER BY m.event_date, m.event_time NULLS LAST, m.id
         """,
         (today, cutoff),
     )
@@ -116,9 +478,18 @@ def predictions_today(
     if not include_settled:
         items = [i for i in items if i["actual_winner"] is None]
 
-    settled_count   = sum(1 for i in items if i["is_correct"] is not None)
-    correct_count   = sum(1 for i in items if i["is_correct"])
-    accuracy_pct    = round(100.0 * correct_count / settled_count, 1) if settled_count else None
+    # A 50/50 isn't a real pick — exclude from accuracy counts.
+    def _is_pick(i):
+        p1 = (i.get("p1") or {}).get("prob")
+        if p1 is None:
+            return False
+        return abs(p1 - 0.5) > 0.01     # outside the 49–51% band
+
+    settled_count = sum(1 for i in items if i["is_correct"] is not None and _is_pick(i))
+    correct_count = sum(1 for i in items if i["is_correct"] and _is_pick(i))
+    accuracy_pct  = round(100.0 * correct_count / settled_count, 1) if settled_count else None
+    pending_count = sum(1 for i in items if (i.get("p1") or {}).get("prob") is None)
+    no_pick_count = sum(1 for i in items if not _is_pick(i) and (i.get("p1") or {}).get("prob") is not None)
 
     return {
         "date": str(today),
@@ -128,6 +499,8 @@ def predictions_today(
             "total":     len(items),
             "settled":   settled_count,
             "correct":   correct_count,
+            "pending":   pending_count,
+            "no_pick":   no_pick_count,
             "accuracy_pct": accuracy_pct,
         },
     }
@@ -198,6 +571,77 @@ def predictions_history(
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /predictions/stats
 # ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/predictions/accuracy")
+def predictions_accuracy():
+    """
+    Detailed live-data accuracy breakdown — by confidence tier, by surface,
+    by tournament level, by RTT-gap band. Uses settled predictions only.
+    Excludes 50/50 picks (≥0.49 and ≤0.51) since those aren't real predictions.
+    """
+    base = """
+        AND mp.settled_at IS NOT NULL
+        AND (mp.prob_first_player < 0.49 OR mp.prob_first_player > 0.51)
+    """
+
+    overall = safe_query_one(f"""
+        SELECT COUNT(*) AS n,
+               SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) AS correct,
+               ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS pct
+        FROM model_predictions mp
+        WHERE 1=1 {base}
+    """) or {}
+
+    by_conf = safe_query(f"""
+        SELECT mp.confidence,
+               COUNT(*) AS n,
+               SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) AS correct,
+               ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS pct
+        FROM model_predictions mp
+        WHERE mp.confidence IS NOT NULL {base}
+        GROUP BY mp.confidence
+        ORDER BY CASE mp.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+    """)
+
+    by_surface = safe_query(f"""
+        SELECT s.name AS surface,
+               COUNT(*) AS n,
+               SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) AS correct,
+               ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS pct
+        FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        WHERE s.name IS NOT NULL {base}
+        GROUP BY s.name
+        ORDER BY n DESC
+    """)
+
+    by_rtt_gap = safe_query(f"""
+        SELECT
+            CASE
+                WHEN ABS(mp.rtt_gap) >= 20 THEN '20+ pt gap'
+                WHEN ABS(mp.rtt_gap) >= 12 THEN '12-19 pt gap'
+                WHEN ABS(mp.rtt_gap) >= 6  THEN '6-11 pt gap'
+                ELSE '0-5 pt gap'
+            END AS gap_band,
+            COUNT(*) AS n,
+            SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) AS correct,
+            ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS pct
+        FROM model_predictions mp
+        WHERE mp.rtt_gap IS NOT NULL {base}
+        GROUP BY gap_band
+        ORDER BY MIN(ABS(mp.rtt_gap)) DESC
+    """)
+
+    return {
+        "overall": overall,
+        "by_confidence": by_conf,
+        "by_surface": by_surface,
+        "by_rtt_gap": by_rtt_gap,
+        "note": "50/50 predictions excluded. Live data only (post-deploy).",
+    }
+
 
 @router.get("/predictions/stats")
 def predictions_stats():

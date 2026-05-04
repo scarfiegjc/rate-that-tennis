@@ -232,7 +232,89 @@ button {
 }
 
 .form-dot.W { background: var(--green); }
-.form-dot.L { background: var(--border); }
+.form-dot.L { background: var(--red); }
+
+/* ── RTT score lozenge ─────────────────────────────────── */
+
+.rtt-lozenge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  flex-shrink: 0;
+}
+
+.rtt-lozenge.elite     { background: #bbf0d0; color: #166534; }   /* 80+ */
+.rtt-lozenge.strong    { background: #d9f0bb; color: #3a5c14; }   /* 65–79 */
+.rtt-lozenge.average   { background: #fef3c7; color: #92400e; }   /* 50–64 */
+.rtt-lozenge.below     { background: #fed7aa; color: #9a3412; }   /* 35–49 */
+.rtt-lozenge.poor      { background: #fecaca; color: #991b1b; }   /* <35 */
+.rtt-lozenge.unknown   { background: #f0ede8; color: #a8a29e; }
+
+/* ── Match result backgrounds (pastel) ────────────────── */
+
+.match-row--correct  { background: #f0fdf4; }
+.match-row--correct:hover { background: #dcfce7; }
+.match-row--wrong    { background: #fef2f2; }
+.match-row--wrong:hover   { background: #fee2e2; }
+
+/* ── Prediction bar (top of each match row) ─────────────────────── */
+.match-prediction-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  display: flex;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.match-prediction-bar-p1 { background: var(--green); transition: width 0.4s ease; }
+.match-prediction-bar-p2 { background: var(--blue);  transition: width 0.4s ease; }
+.match-prediction-bar-correct { background: var(--green); width: 100%; }
+.match-prediction-bar-wrong   { background: var(--red);   width: 100%; }
+.match-prediction-bar-neutral { background: var(--border); width: 100%; }
+.match-prediction-bar-live    { background: var(--amber); width: 100%; opacity: 0.8; }
+
+/* Match row needs position relative so the bar can absolutely position */
+.match-row { position: relative; }
+
+/* In-progress live row — amber, not red (red is reserved for "wrong prediction") */
+.match-row--live {
+  background: #fffbeb;                   /* amber-50 */
+}
+.match-row--live:hover { background: #fef3c7; }
+
+.match-live-score {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.match-final-score {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+/* Live badge in row meta column */
+.live-badge.amber {
+  background: #fffbeb;
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+}
 
 /* ── Probability bar ─────────────────────────────────── */
 
