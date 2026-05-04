@@ -319,6 +319,10 @@ def upsert_stats(conn, player_id: int, stats: dict) -> None:
             tiebreaks_played, tiebreaks_won, tiebreak_win_pct,
             set_points_faced, set_points_saved, set_point_save_pct,
             match_points_faced, match_points_saved, match_point_save_pct,
+            love_holds, love_hold_pct, avg_service_game_pts,
+            pressure_pts_faced, pressure_pts_won, pressure_win_pct,
+            set1_lost, set1_lost_recovered, set1_recovery_pct,
+            longest_game_run, deuce_pts_won_ret, deuce_pts_total_ret, deuce_win_pct_ret,
             matches_analyzed, last_match_date, updated_at
         ) VALUES (
             %(player_id)s, %(service_games)s, %(service_holds)s, %(service_hold_pct)s,
@@ -328,6 +332,10 @@ def upsert_stats(conn, player_id: int, stats: dict) -> None:
             %(tiebreaks_played)s, %(tiebreaks_won)s, %(tiebreak_win_pct)s,
             %(set_points_faced)s, %(set_points_saved)s, %(set_point_save_pct)s,
             %(match_points_faced)s, %(match_points_saved)s, %(match_point_save_pct)s,
+            %(love_holds)s, %(love_hold_pct)s, %(avg_service_game_pts)s,
+            %(pressure_pts_faced)s, %(pressure_pts_won)s, %(pressure_win_pct)s,
+            %(set1_lost)s, %(set1_lost_recovered)s, %(set1_recovery_pct)s,
+            %(longest_game_run)s, %(deuce_pts_won_ret)s, %(deuce_pts_total_ret)s, %(deuce_win_pct_ret)s,
             %(matches_analyzed)s, %(last_match_date)s, NOW()
         )
         ON CONFLICT (player_id) DO UPDATE SET
@@ -352,6 +360,19 @@ def upsert_stats(conn, player_id: int, stats: dict) -> None:
             match_points_faced   = EXCLUDED.match_points_faced,
             match_points_saved   = EXCLUDED.match_points_saved,
             match_point_save_pct = EXCLUDED.match_point_save_pct,
+            love_holds           = EXCLUDED.love_holds,
+            love_hold_pct        = EXCLUDED.love_hold_pct,
+            avg_service_game_pts = EXCLUDED.avg_service_game_pts,
+            pressure_pts_faced   = EXCLUDED.pressure_pts_faced,
+            pressure_pts_won     = EXCLUDED.pressure_pts_won,
+            pressure_win_pct     = EXCLUDED.pressure_win_pct,
+            set1_lost            = EXCLUDED.set1_lost,
+            set1_lost_recovered  = EXCLUDED.set1_lost_recovered,
+            set1_recovery_pct    = EXCLUDED.set1_recovery_pct,
+            longest_game_run     = EXCLUDED.longest_game_run,
+            deuce_pts_won_ret    = EXCLUDED.deuce_pts_won_ret,
+            deuce_pts_total_ret  = EXCLUDED.deuce_pts_total_ret,
+            deuce_win_pct_ret    = EXCLUDED.deuce_win_pct_ret,
             matches_analyzed     = EXCLUDED.matches_analyzed,
             last_match_date      = EXCLUDED.last_match_date,
             updated_at           = NOW()
@@ -359,9 +380,17 @@ def upsert_stats(conn, player_id: int, stats: dict) -> None:
         {**stats, "player_id": player_id},
     )
 
-    # Update player_ratings.serve_rating / return_rating with derived values
-    serve_r  = _serve_rating_from_pcts(stats.get("service_hold_pct"), stats.get("bp_save_pct"))
-    return_r = _return_rating_from_pcts(stats.get("break_pct"),       stats.get("bp_conversion_pct"))
+    # Update player_ratings.serve_rating / return_rating with the spec'd formula
+    serve_r  = _serve_rating_from_pcts(
+        stats.get("service_hold_pct"),
+        stats.get("bp_save_pct"),
+        stats.get("love_hold_pct"),
+    )
+    return_r = _return_rating_from_pcts(
+        stats.get("break_pct"),
+        stats.get("bp_conversion_pct"),
+        stats.get("deuce_win_pct_ret"),
+    )
     if serve_r is not None or return_r is not None:
         cur.execute(
             """
