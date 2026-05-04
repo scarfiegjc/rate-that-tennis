@@ -1,0 +1,13 @@
+# ratethat.tennis — Railway config for the API service
+# This file lives at the repo root and configures the API service.
+# The frontend service has its own railway.toml inside frontend/
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "./Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.env.local
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ML results (large files — regenerated locally)
+ml/results/
+ml/__pycache__/
+
+# ML models — commit only the small logistic models; exclude large ensemble/xgboost/lightgbm
+ml/models/*_ensemble.pkl
+ml/models/*_xgboost.pkl
+ml/models/*_lightgbm.pkl
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+pip-log.txt
+
+# Railway / Docker build artifacts
+*.dockerignore
+push_to_github.command

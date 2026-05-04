@@ -1,0 +1,11 @@
+# ratethat.tennis — Railway config for the pipeline service
+# Root directory: / (repo root)
+# Dockerfile path: pipeline/Dockerfile
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "pipeline/Dockerfile"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

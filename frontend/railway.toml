@@ -1,0 +1,12 @@
+# ratethat.tennis — Railway config for the frontend service
+# Railway service settings: root directory = frontend/
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "./Dockerfile"
+
+[deploy]
+healthcheckPath = "/ping"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

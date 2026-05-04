@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ratethat.tennis — ML Lab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --yellow:   #d29922;
+    --red:      #f85149;
+    --purple:   #bc8cff;
+    --orange:   #ffa657;
+    --clay:     #d97706;
+    --hard:     #2563eb;
+    --grass:    #16a34a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── Header */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header h1 span { color: var(--accent); }
+  .badge {
+    background: rgba(88,166,255,0.15);
+    color: var(--accent);
+    border: 1px solid rgba(88,166,255,0.3);
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .load-btn {
+    margin-left: auto;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .load-btn:hover { opacity: 0.85; }
+
+  /* ── Layout */
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+  /* ── Summary cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .stat-card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; }
+  .stat-card .sub   { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .green { color: var(--green); }
+  .yellow { color: var(--yellow); }
+  .red { color: var(--red); }
+
+  /* ── Section */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 20px;
+  }
+  .section-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-header h2 { font-size: 15px; font-weight: 600; }
+  .section-body { padding: 20px; }
+
+  /* ── Tabs */
+  .tab-bar {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 3px;
+    margin-bottom: 20px;
+    width: fit-content;
+  }
+  .tab {
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    transition: all 0.15s;
+  }
+  .tab.active {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  /* ── Table */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .data-table td { padding: 10px 12px; border-bottom: 1px solid rgba(48,54,61,0.5); }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+  /* ── Model comparison chips */
+  .model-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid;
+    transition: all 0.15s;
+  }
+  .chip.active { opacity: 1; }
+  .chip.inactive { opacity: 0.35; }
+
+  /* Model colours */
+  .chip-ensemble    { color: #58a6ff; border-color: #58a6ff; background: rgba(88,166,255,0.1); }
+  .chip-xgboost     { color: #3fb950; border-color: #3fb950; background: rgba(63,185,80,0.1); }
+  .chip-lightgbm    { color: #bc8cff; border-color: #bc8cff; background: rgba(188,140,255,0.1); }
+  .chip-logistic    { color: #ffa657; border-color: #ffa657; background: rgba(255,166,87,0.1); }
+  .chip-elo         { color: #8b949e; border-color: #8b949e; background: rgba(139,148,158,0.1); }
+  .chip-surf_elo    { color: #d29922; border-color: #d29922; background: rgba(210,153,34,0.1); }
+
+  /* ── Surface pills */
+  .surf-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .surf-hard  { background: rgba(37,99,235,0.2); color: #60a5fa; }
+  .surf-clay  { background: rgba(217,119,6,0.2); color: #fbbf24; }
+  .surf-grass { background: rgba(22,163,74,0.2); color: #4ade80; }
+
+  /* ── Delta */
+  .delta-pos { color: var(--green); }
+  .delta-neg { color: var(--red); }
+
+  /* ── Chart container */
+  .chart-wrap { position: relative; }
+
+  /* ── Loading overlay */
+  .loading {
+    text-align: center;
+    padding: 48px;
+    color: var(--muted);
+  }
+  .loading-icon { font-size: 32px; margin-bottom: 12px; animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── No data */
+  .no-data {
+    text-align: center;
+    padding: 48px;
+    color: var(--muted);
+  }
+  .no-data code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: monospace;
+  }
+
+  /* ── Progress bar */
+  .progress-bar {
+    height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <h1>ratethat<span>.tennis</span></h1>
+  <span class="badge">ML Lab</span>
+  <span id="data-status" style="color:var(--muted); font-size:13px;">No data loaded</span>
+  <button class="load-btn" onclick="loadFromFile()">Load backtest_results.json</button>
+  <input type="file" id="file-input" accept=".json" style="display:none" onchange="handleFile(event)">
+</div>
+
+<div class="container">
+
+  <!-- SUMMARY CARDS -->
+  <div class="summary-grid" id="summary-cards">
+    <div class="stat-card"><div class="label">Best Model Accuracy</div><div class="value" id="s-acc">—</div><div class="sub" id="s-acc-sub">vs Elo baseline</div></div>
+    <div class="stat-card"><div class="label">Mean Log-Loss</div><div class="value" id="s-ll">—</div><div class="sub">Lower is better</div></div>
+    <div class="stat-card"><div class="label">Mean ROC-AUC</div><div class="value" id="s-auc">—</div><div class="sub">0.5 = random</div></div>
+    <div class="stat-card"><div class="label">Edge vs Elo</div><div class="value green" id="s-edge">—</div><div class="sub">Accuracy lift</div></div>
+    <div class="stat-card"><div class="label">Total Matches Backtested</div><div class="value" id="s-matches">—</div><div class="sub" id="s-years">—</div></div>
+    <div class="stat-card"><div class="label">Elo Baseline Accuracy</div><div class="value" id="s-elo-acc">—</div><div class="sub">Benchmark to beat</div></div>
+  </div>
+
+  <!-- TAB NAV -->
+  <div class="tab-bar">
+    <button class="tab active" onclick="showTab('accuracy')">Accuracy over time</button>
+    <button class="tab" onclick="showTab('models')">Model comparison</button>
+    <button class="tab" onclick="showTab('surfaces')">Per surface</button>
+    <button class="tab" onclick="showTab('calibration')">Calibration</button>
+    <button class="tab" onclick="showTab('table')">Year-by-year table</button>
+  </div>
+
+  <!-- TAB: ACCURACY OVER TIME -->
+  <div id="tab-accuracy" class="section">
+    <div class="section-header">
+      <h2>Prediction accuracy by year</h2>
+      <div class="model-chips" id="acc-chips" style="margin:0; margin-left: auto;"></div>
+    </div>
+    <div class="section-body">
+      <div class="chart-wrap" style="height:320px">
+        <canvas id="chart-accuracy"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: MODEL COMPARISON -->
+  <div id="tab-models" class="section" style="display:none">
+    <div class="section-header"><h2>Model comparison — averaged across all test years</h2></div>
+    <div class="section-body">
+      <table class="data-table" id="model-compare-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Accuracy</th>
+            <th>Log-Loss</th>
+            <th>Brier Score</th>
+            <th>ROC-AUC</th>
+            <th>vs Elo accuracy</th>
+          </tr>
+        </thead>
+        <tbody id="model-compare-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TAB: PER SURFACE -->
+  <div id="tab-surfaces" class="section" style="display:none">
+    <div class="section-header"><h2>Accuracy by surface</h2></div>
+    <div class="section-body">
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; margin-bottom:20px" id="surface-cards"></div>
+      <div class="chart-wrap" style="height:280px">
+        <canvas id="chart-surfaces"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: CALIBRATION -->
+  <div id="tab-calibration" class="section" style="display:none">
+    <div class="section-header">
+      <h2>Calibration (reliability diagram)</h2>
+      <span style="color:var(--muted); font-size:13px; margin-left:8px">Perfect calibration = diagonal line</span>
+    </div>
+    <div class="section-body">
+      <div class="chart-wrap" style="height:340px">
+        <canvas id="chart-calibration"></canvas>
+      </div>
+      <p style="color:var(--muted); font-size:12px; margin-top:12px">
+        A well-calibrated model's "70% confident" predictions win ~70% of the time.
+        This is critical for betting edge — miscalibrated models give false confidence.
+      </p>
+    </div>
+  </div>
+
+  <!-- TAB: TABLE -->
+  <div id="tab-table" class="section" style="display:none">
+    <div class="section-header"><h2>Year-by-year results (best model per year)</h2></div>
+    <div class="section-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th>Matches</th>
+            <th>Best model</th>
+            <th>Accuracy</th>
+            <th>Log-Loss</th>
+            <th>ROC-AUC</th>
+            <th>Elo baseline</th>
+            <th>Edge vs Elo</th>
+          </tr>
+        </thead>
+        <tbody id="year-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Global state
+let DATA = null;
+let activeModels = new Set(['ensemble', 'xgboost', 'lightgbm', 'logistic', 'elo', 'surf_elo']);
+let charts = {};
+
+const MODEL_COLORS = {
+  ensemble:  '#58a6ff',
+  xgboost:   '#3fb950',
+  lightgbm:  '#bc8cff',
+  logistic:  '#ffa657',
+  elo:       '#8b949e',
+  surf_elo:  '#d29922',
+  rank:      '#f85149',
+};
+
+const MODEL_LABELS = {
+  ensemble:  'Ensemble',
+  xgboost:   'XGBoost',
+  lightgbm:  'LightGBM',
+  logistic:  'Logistic Regression',
+  elo:       'Elo (baseline)',
+  surf_elo:  'Surface Elo',
+  rank:      'Rank-based',
+};
+
+const SURF_COLORS = { Hard: '#2563eb', Clay: '#d97706', Grass: '#16a34a' };
+
+// ── File loading
+function loadFromFile() { document.getElementById('file-input').click(); }
+
+function handleFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      DATA = JSON.parse(e.target.result);
+      document.getElementById('data-status').textContent = `Loaded: ${file.name}`;
+      document.getElementById('data-status').style.color = 'var(--green)';
+      renderAll();
+    } catch(err) {
+      alert('Invalid JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── Tab switching
+function showTab(name) {
+  document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+  document.getElementById('tab-' + name).style.display = 'block';
+  document.querySelectorAll('.tab').forEach((el, i) => {
+    const names = ['accuracy','models','surfaces','calibration','table'];
+    el.classList.toggle('active', names[i] === name);
+  });
+}
+
+// ── Render everything
+function renderAll() {
+  if (!DATA) return;
+  const wf = DATA.walk_forward || {};
+  const summary = DATA.summary || {};
+  const years = Object.keys(wf).sort();
+
+  renderSummaryCards(summary);
+  renderAccuracyChart(wf, years);
+  renderModelComparison(wf, years);
+  renderSurfaces(wf, years);
+  renderCalibration(wf, years);
+  renderYearTable(summary);
+  renderChips();
+}
+
+function renderSummaryCards(s) {
+  const acc = s.mean_accuracy;
+  const elo = s.elo_mean_acc;
+  const edge = s.mean_edge_vs_elo;
+
+  el('s-acc').textContent       = acc ? (acc * 100).toFixed(1) + '%' : '—';
+  el('s-ll').textContent        = s.mean_log_loss ? s.mean_log_loss.toFixed(4) : '—';
+  el('s-auc').textContent       = s.mean_auc ? s.mean_auc.toFixed(4) : '—';
+  el('s-edge').textContent      = edge ? '+' + (edge * 100).toFixed(2) + '%' : '—';
+  el('s-elo-acc').textContent   = elo ? (elo * 100).toFixed(1) + '%' : '—';
+  el('s-matches').textContent   = s.total_matches ? s.total_matches.toLocaleString() : '—';
+  el('s-years').textContent     = s.years_tested ? s.years_tested.join(', ') : '—';
+}
+
+// ── Accuracy chart
+function renderAccuracyChart(wf, years) {
+  const allModels = new Set();
+  years.forEach(y => Object.keys(wf[y]).forEach(m => {
+    if (m !== 'per_surface') allModels.add(m);
+  }));
+
+  const datasets = [];
+  [...allModels].filter(m => activeModels.has(m)).forEach(model => {
+    const data = years.map(y => {
+      const entry = wf[y]?.[model];
+      return entry ? entry.accuracy : null;
+    });
+    datasets.push({
+      label:       MODEL_LABELS[model] || model,
+      data,
+      borderColor: MODEL_COLORS[model] || '#666',
+      backgroundColor: MODEL_COLORS[model] + '22',
+      tension:     0.3,
+      pointRadius: 4,
+      borderWidth: 2,
+    });
+  });
+
+  destroyChart('chart-accuracy');
+  charts['accuracy'] = new Chart(el('chart-accuracy'), {
+    type: 'line',
+    data: { labels: years, datasets },
+    options: chartOpts('Accuracy', v => (v * 100).toFixed(1) + '%', [0.58, 0.75]),
+  });
+}
+
+// ── Model comparison table
+function renderModelComparison(wf, years) {
+  const allModels = new Set();
+  years.forEach(y => Object.keys(wf[y]).forEach(m => {
+    if (m !== 'per_surface') allModels.add(m);
+  }));
+
+  const stats = {};
+  [...allModels].forEach(m => {
+    const accs = [], lls = [], briers = [], aucs = [];
+    years.forEach(y => {
+      const e = wf[y]?.[m];
+      if (e) { accs.push(e.accuracy); lls.push(e.log_loss); briers.push(e.brier || 0); aucs.push(e.roc_auc); }
+    });
+    if (accs.length > 0) {
+      stats[m] = {
+        acc:   mean(accs),
+        ll:    mean(lls),
+        brier: mean(briers),
+        auc:   mean(aucs),
+      };
+    }
+  });
+
+  const eloAcc = stats['elo']?.acc || 0;
+  const sorted = Object.entries(stats).sort((a,b) => b[1].acc - a[1].acc);
+
+  const tbody = el('model-compare-body');
+  tbody.innerHTML = sorted.map(([model, s]) => {
+    const edge = s.acc - eloAcc;
+    const edgeStr = edge > 0 ? `<span class="delta-pos">+${(edge*100).toFixed(2)}%</span>`
+                               : `<span class="delta-neg">${(edge*100).toFixed(2)}%</span>`;
+    const color = MODEL_COLORS[model] || '#666';
+    return `<tr>
+      <td style="font-weight:600">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:8px"></span>
+        ${MODEL_LABELS[model] || model}
+      </td>
+      <td><strong>${(s.acc*100).toFixed(2)}%</strong>
+        <div class="progress-bar"><div class="progress-fill" style="width:${(s.acc-0.5)*200}%;background:${color}"></div></div>
+      </td>
+      <td>${s.ll.toFixed(4)}</td>
+      <td>${s.brier.toFixed(4)}</td>
+      <td>${s.auc.toFixed(4)}</td>
+      <td>${model === 'elo' ? '—' : edgeStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Surfaces
+function renderSurfaces(wf, years) {
+  const surfaces = ['Hard', 'Clay', 'Grass'];
+  const surfCards = el('surface-cards');
+  surfCards.innerHTML = '';
+
+  surfaces.forEach(surf => {
+    const key = surf.toLowerCase();
+    const accs = [];
+    years.forEach(y => {
+      const e = wf[y]?.per_surface?.[key];
+      if (e) accs.push(e.accuracy);
+    });
+    const avg = accs.length > 0 ? mean(accs) : null;
+    const color = SURF_COLORS[surf];
+
+    surfCards.innerHTML += `
+      <div class="stat-card" style="border-top: 3px solid ${color}">
+        <div class="label"><span class="surf-pill surf-${key}">${surf}</span></div>
+        <div class="value" style="color:${color}">${avg ? (avg*100).toFixed(1)+'%' : '—'}</div>
+        <div class="sub">Mean accuracy ${years[0]}–${years[years.length-1]}</div>
+      </div>`;
+  });
+
+  // Surface accuracy chart
+  const datasets = surfaces.map(surf => {
+    const key = surf.toLowerCase();
+    return {
+      label: surf,
+      data: years.map(y => wf[y]?.per_surface?.[key]?.accuracy ?? null),
+      borderColor: SURF_COLORS[surf],
+      backgroundColor: SURF_COLORS[surf] + '22',
+      tension: 0.3,
+      borderWidth: 2,
+      pointRadius: 4,
+    };
+  });
+
+  destroyChart('chart-surfaces');
+  charts['surfaces'] = new Chart(el('chart-surfaces'), {
+    type: 'line',
+    data: { labels: years, datasets },
+    options: chartOpts('Accuracy by Surface', v => (v * 100).toFixed(1) + '%', [0.58, 0.75]),
+  });
+}
+
+// ── Calibration
+function renderCalibration(wf, years) {
+  // Use the most recent year with ensemble data
+  let calYear = null;
+  for (let i = years.length - 1; i >= 0; i--) {
+    if (wf[years[i]]?.ensemble?.calibration) { calYear = years[i]; break; }
+    if (wf[years[i]]?.xgboost?.calibration)  { calYear = years[i]; break; }
+  }
+
+  if (!calYear) return;
+
+  const models = ['ensemble', 'xgboost', 'lightgbm', 'elo'];
+  const datasets = [];
+
+  // Perfect calibration reference
+  datasets.push({
+    label: 'Perfect calibration',
+    data: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0].map(x => ({ x, y: x })),
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderDash: [6,4],
+    borderWidth: 1.5,
+    pointRadius: 0,
+    tension: 0,
+  });
+
+  models.forEach(model => {
+    const cal = wf[calYear]?.[model]?.calibration;
+    if (!cal) return;
+    datasets.push({
+      label: MODEL_LABELS[model] || model,
+      data: cal.map(b => ({ x: b.mean_pred, y: b.fraction_pos })),
+      borderColor: MODEL_COLORS[model],
+      backgroundColor: MODEL_COLORS[model] + '22',
+      tension: 0.2,
+      pointRadius: 5,
+      borderWidth: 2,
+    });
+  });
+
+  destroyChart('chart-calibration');
+  charts['calibration'] = new Chart(el('chart-calibration'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      ...darkTheme(),
+      plugins: { legend: { labels: { color: '#8b949e', boxWidth: 12 } } },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 0, max: 1,
+          title: { display: true, text: 'Mean predicted probability', color: '#8b949e' },
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e', callback: v => (v*100)+'%' },
+        },
+        y: {
+          type: 'linear',
+          min: 0, max: 1,
+          title: { display: true, text: 'Fraction of positives (actual win rate)', color: '#8b949e' },
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e', callback: v => (v*100)+'%' },
+        },
+      },
+    },
+  });
+}
+
+// ── Year table
+function renderYearTable(summary) {
+  const rows = summary.year_by_year || [];
+  const tbody = el('year-table-body');
+  tbody.innerHTML = rows.map(r => {
+    const edge = r.edge_acc || 0;
+    const edgeClass = edge > 0 ? 'delta-pos' : 'delta-neg';
+    const edgeStr = (edge > 0 ? '+' : '') + (edge * 100).toFixed(2) + '%';
+    return `<tr>
+      <td><strong>${r.year}</strong></td>
+      <td>${r.n?.toLocaleString()}</td>
+      <td><span style="color:${MODEL_COLORS[r.model] || '#fff'}">${MODEL_LABELS[r.model] || r.model}</span></td>
+      <td><strong>${(r.best_acc * 100).toFixed(2)}%</strong></td>
+      <td>${r.best_ll?.toFixed(4) ?? '—'}</td>
+      <td>${r.best_auc?.toFixed(4) ?? '—'}</td>
+      <td style="color:var(--muted)">${(r.elo_acc * 100).toFixed(2)}%</td>
+      <td class="${edgeClass}"><strong>${edgeStr}</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Model chips
+function renderChips() {
+  const container = el('acc-chips');
+  container.innerHTML = '';
+  const allModels = ['ensemble','xgboost','lightgbm','logistic','elo','surf_elo'];
+  allModels.forEach(m => {
+    const chip = document.createElement('span');
+    chip.className = `chip chip-${m} ${activeModels.has(m) ? 'active' : 'inactive'}`;
+    chip.textContent = MODEL_LABELS[m] || m;
+    chip.onclick = () => {
+      if (activeModels.has(m)) activeModels.delete(m);
+      else activeModels.add(m);
+      chip.classList.toggle('active', activeModels.has(m));
+      chip.classList.toggle('inactive', !activeModels.has(m));
+      if (DATA) renderAccuracyChart(DATA.walk_forward || {}, Object.keys(DATA.walk_forward || {}).sort());
+    };
+    container.appendChild(chip);
+  });
+}
+
+// ── Chart helpers
+function darkTheme() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    plugins: {
+      legend: { labels: { color: '#8b949e', boxWidth: 12, font: { size: 12 } } },
+      tooltip: {
+        backgroundColor: '#161b22',
+        borderColor: '#30363d',
+        borderWidth: 1,
+        titleColor: '#e6edf3',
+        bodyColor: '#8b949e',
+      },
+    },
+  };
+}
+
+function chartOpts(title, tickFmt, yRange) {
+  return {
+    ...darkTheme(),
+    scales: {
+      x: {
+        grid: { color: 'rgba(48,54,61,0.5)' },
+        ticks: { color: '#8b949e', font: { size: 11 } },
+      },
+      y: {
+        min: yRange[0], max: yRange[1],
+        grid: { color: 'rgba(48,54,61,0.5)' },
+        ticks: { color: '#8b949e', font: { size: 11 }, callback: tickFmt },
+      },
+    },
+  };
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function el(id) { return document.getElementById(id); }
+function mean(arr) { return arr.reduce((a,b) => a+b, 0) / arr.length; }
+
+// ── Demo data for when no file is loaded
+window.addEventListener('DOMContentLoaded', () => {
+  // Check if backtest_results.json is in the same folder (won't work from file:// but works from server)
+  fetch('./backtest_results.json')
+    .then(r => r.json())
+    .then(data => {
+      DATA = data;
+      document.getElementById('data-status').textContent = 'Auto-loaded: backtest_results.json';
+      document.getElementById('data-status').style.color = 'var(--green)';
+      renderAll();
+    })
+    .catch(() => {
+      // No auto-load — show instructions
+      document.getElementById('data-status').textContent = 'Click "Load" to load backtest results';
+    });
+});
+</script>
+</body>
+</html>
