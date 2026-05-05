@@ -404,9 +404,12 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             bo1.decimal_odds AS odds_p1,
             bo1.implied_prob AS impl_p1,
             bo2.decimal_odds AS odds_p2,
-            bo2.implied_prob AS impl_p2
+            bo2.implied_prob AS impl_p2,
+            et.gender AS event_gender,
+            m.is_doubles
         FROM matches m
-        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN tournaments t  ON t.id = m.tournament_id
+        LEFT JOIN event_types et ON et.id = m.event_type_id
         LEFT JOIN players p1    ON p1.id = m.first_player_id
         LEFT JOIN players p2    ON p2.id = m.second_player_id
         LEFT JOIN surfaces s    ON s.id = t.surface_id
@@ -469,6 +472,8 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             "game_result": m.get("game_result"),
             "set_scores":   m.get("set_scores"),
             "is_live": m.get("is_live"),
+            "is_doubles": bool(m.get("is_doubles")),
+            "gender": m.get("event_gender"),  # 'Men' | 'Women' | None
             "first_player": {
                 "id": m["first_player_id"],
                 "name": m["p1_name"],

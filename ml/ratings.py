@@ -650,23 +650,25 @@ class RatingsPipeline:
 
         sa_players has name_first + name_last; production players table has
         name (short, e.g. "N. Djokovic") and full_name ("Novak Djokovic").
-        We attempt two join strategies in one query:
-          1. Exact full-name match (first last / last first)
-          2. ILIKE last-name substring match as fallback
+
+        Three strategies, applied in priority order (earlier matches win):
+          1. Exact full-name match   "Novak Djokovic" == "Novak Djokovic"
+          2. Initial + last name     "N. Djokovic" matches name_first="Novak", name_last="Djokovic"
+          3. Last-name substring     fallback — p.full_name ILIKE '%Djokovic%'
         """
         log.info("Building sa_player → production player mapping...")
 
         mapping: dict[int, int] = {}
 
-        # Strategy 1: exact match on full_name "First Last" or "Last First"
+        # ── Strategy 1: exact full-name match ────────────────────────────
         sql_exact = """
             SELECT sp.player_id AS sa_id, p.id AS prod_id
             FROM sa_players sp
             JOIN players p ON (
                 lower(trim(p.full_name)) = lower(trim(sp.name_first || ' ' || sp.name_last))
                 OR lower(trim(p.full_name)) = lower(trim(sp.name_last || ' ' || sp.name_first))
-                OR lower(trim(p.name)) = lower(trim(sp.name_first || ' ' || sp.name_last))
-                OR lower(trim(p.name)) = lower(trim(sp.name_last || ' ' || sp.name_first))
+                OR lower(trim(p.name))      = lower(trim(sp.name_first || ' ' || sp.name_last))
+                OR lower(trim(p.name))      = lower(trim(sp.name_last || ' ' || sp.name_first))
             )
         """
         try:
@@ -678,7 +680,42 @@ class RatingsPipeline:
             log.warning(f"  Exact match failed: {e}")
             conn.rollback()
 
-        # Strategy 2: ILIKE last-name substring match (separate query, no array params)
+        # ── Strategy 2: initial + last name ──────────────────────────────
+        # Handles "C. Alcaraz" → name_first="Carlos", name_last="Alcaraz"
+        # The production `name` field uses "X. Lastname" format from the API.
+        # We compare:
+        #   LEFT(sp.name_first, 1)  ==  the letter before the first "." in p.name
+        # combined with an exact last-name match.
+        sql_initial = """
+            SELECT sp.player_id AS sa_id, p.id AS prod_id
+            FROM sa_players sp
+            JOIN players p ON (
+                lower(sp.name_last) = lower(
+                    -- extract the part after ". " in short names like "C. Alcaraz"
+                    trim(split_part(p.name, '.', 2))
+                )
+                AND upper(left(sp.name_first, 1)) = upper(
+                    -- extract the letter before the "." in "C. Alcaraz"
+                    trim(split_part(p.name, '.', 1))
+                )
+                AND p.name LIKE '%.%'   -- only attempt on abbreviated names
+            )
+        """
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql_initial)
+                before = len(mapping)
+                for row in cur.fetchall():
+                    sa_id, prod_id = row[0], row[1]
+                    if sa_id not in mapping:
+                        mapping[sa_id] = prod_id
+            log.info(f"  After initial+lastname match: {len(mapping):,} players mapped "
+                     f"(+{len(mapping) - before} new)")
+        except Exception as e:
+            log.warning(f"  Initial match failed: {e}")
+            conn.rollback()
+
+        # ── Strategy 3: last-name substring fallback ─────────────────────
         sql_fuzzy = """
             SELECT sp.player_id AS sa_id, p.id AS prod_id
             FROM sa_players sp
@@ -690,11 +727,13 @@ class RatingsPipeline:
         try:
             with conn.cursor() as cur:
                 cur.execute(sql_fuzzy)
+                before = len(mapping)
                 for row in cur.fetchall():
                     sa_id, prod_id = row[0], row[1]
                     if sa_id not in mapping:
                         mapping[sa_id] = prod_id
-            log.info(f"  After fuzzy match: {len(mapping):,} players mapped total")
+            log.info(f"  After fuzzy match: {len(mapping):,} players mapped total "
+                     f"(+{len(mapping) - before} new via fuzzy)")
         except Exception as e:
             log.warning(f"  Fuzzy match failed: {e}")
             conn.rollback()

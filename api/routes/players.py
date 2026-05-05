@@ -58,7 +58,8 @@ def players_database(
         where.append(
             "EXISTS (SELECT 1 FROM matches m2 "
             "WHERE (m2.first_player_id = p.id OR m2.second_player_id = p.id) "
-            "  AND m2.event_date >= CURRENT_DATE - INTERVAL '6 months')"
+            "  AND m2.event_date >= CURRENT_DATE - INTERVAL '6 months' "
+            "  AND m2.is_doubles = FALSE)"
         )
 
     sql = f"""
@@ -69,6 +70,8 @@ def players_database(
             FROM matches m
             JOIN event_types et ON et.id = m.event_type_id
             WHERE et.gender IN ('Men', 'Women')
+              AND (et.is_doubles = FALSE OR et.is_doubles IS NULL)
+              AND m.is_doubles = FALSE
               AND m.first_player_id IS NOT NULL
             GROUP BY m.first_player_id
             UNION ALL
@@ -78,6 +81,8 @@ def players_database(
             FROM matches m
             JOIN event_types et ON et.id = m.event_type_id
             WHERE et.gender IN ('Men', 'Women')
+              AND (et.is_doubles = FALSE OR et.is_doubles IS NULL)
+              AND m.is_doubles = FALSE
               AND m.second_player_id IS NOT NULL
             GROUP BY m.second_player_id
         ),
@@ -91,9 +96,11 @@ def players_database(
             SELECT DISTINCT player_id FROM (
                 SELECT first_player_id  AS player_id FROM matches
                 WHERE event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '2 days'
+                  AND is_doubles = FALSE
                 UNION
                 SELECT second_player_id AS player_id FROM matches
                 WHERE event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '2 days'
+                  AND is_doubles = FALSE
             ) x
         ),
         rtt_30d AS (
@@ -713,7 +720,10 @@ def get_h2h(p1_id: int, p2_id: int):
             (p1_sa_ids, p1_sa_ids, p2_sa_ids, p2_sa_ids, p1_sa_ids),
         )
 
-    # Supplement with live/recent data from main matches table
+    # Supplement with live/recent data from main matches table.
+    # Crucially we attribute the winner based on the ACTUAL player ID, not the
+    # 'First/Second Player' slot in the api-tennis ordering — that flips
+    # depending on which player was loaded first.
     live_matches = query(
         """
         SELECT
@@ -722,19 +732,32 @@ def get_h2h(p1_id: int, p2_id: int):
             t.name AS tournament,
             m.tournament_round AS round,
             s.name AS surface,
-            ms.score,
-            CASE WHEN m.winner = 'First Player' THEN 'first_player' ELSE 'second_player' END AS winner
+            m.final_result AS final_result,
+            COALESCE(ms.score, m.final_result) AS score,
+            CASE
+                WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
+                  OR (m.winner = 'Second Player' AND m.second_player_id = %s)
+                THEN 'first_player'
+                WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
+                  OR (m.winner = 'Second Player' AND m.second_player_id = %s)
+                THEN 'second_player'
+                ELSE NULL
+            END AS winner
         FROM matches m
         LEFT JOIN tournaments t ON t.id = m.tournament_id
         LEFT JOIN surfaces s ON s.id = t.surface_id
-        LEFT JOIN match_scores ms ON ms.match_id = m.id
+        LEFT JOIN LATERAL (
+            SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number) AS score
+            FROM match_scores
+            WHERE match_id = m.id
+        ) ms ON TRUE
         WHERE ((m.first_player_id = %s AND m.second_player_id = %s)
             OR (m.first_player_id = %s AND m.second_player_id = %s))
           AND m.event_status = 'Finished'
         ORDER BY m.event_date DESC
         LIMIT 10
         """,
-        (p1_id, p2_id, p2_id, p1_id),
+        (p1_id, p1_id, p2_id, p2_id, p1_id, p2_id, p2_id, p1_id),
     )
 
     # Merge and sort, deduplicate by match_id

@@ -1,9 +1,12 @@
 /**
  * MatchList — Command centre. Matches grouped by date → tournament.
  * Each match is a compact horizontal row: time · players · probability · edge.
+ *
+ * Filters: surface · gender (Men/Women) · tournament
+ * Sort:    by time (default, grouped view) · by win chance (flat ranked list)
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import FormDots from '../components/FormDots.jsx'
@@ -20,7 +23,7 @@ function SurfaceDot({ surface }) {
 
 // ── Match row ─────────────────────────────────────────────────────────────────
 
-function MatchRow({ match }) {
+function MatchRow({ match, showTournament }) {
   const navigate = useNavigate()
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
@@ -40,7 +43,6 @@ function MatchRow({ match }) {
   const winner1 = isFinished && match.winner === 'First Player'
   const winner2 = isFinished && match.winner === 'Second Player'
 
-  // Was the model's pick correct? Pick the side with the higher predicted prob.
   let predictionCorrect = null
   if (isFinished && p1prob != null) {
     const predictedSide = p1prob >= 50 ? 1 : 2
@@ -48,7 +50,6 @@ function MatchRow({ match }) {
     if (actualWinner != null) predictionCorrect = predictedSide === actualWinner
   }
 
-  // Row classes: live, correct, wrong, or default
   const rowCls = isLive
     ? 'match-row match-row--live'
     : predictionCorrect === true
@@ -57,7 +58,6 @@ function MatchRow({ match }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  // Live score string e.g. "2-1, 4-3"
   const liveScore = match.final_result || match.game_result || ''
 
   return (
@@ -90,7 +90,7 @@ function MatchRow({ match }) {
         </div>
       </div>
 
-      {/* Centre — final score for finished matches, live score for live, otherwise prediction probability */}
+      {/* Centre */}
       <div className="match-centre">
         {isFinished && (match.set_scores || match.final_result) ? (
           <span className="match-final-score">
@@ -132,6 +132,15 @@ function MatchRow({ match }) {
 
       {/* Edge / meta */}
       <div className="match-row-meta">
+        {showTournament && match.tournament && (
+          <span style={{
+            fontSize: 10, color: 'var(--text-3)', maxWidth: 120,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            marginRight: 6,
+          }}>
+            {match.tournament}
+          </span>
+        )}
         {isLive
           ? <span className="live-badge amber"><span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE</span>
           : hasEdge
@@ -165,8 +174,6 @@ function TournamentBlock({ name, surface, matches }) {
     /in play|live/i.test(m.event_status || '')
   ).length
 
-  const surfaceCls = (surface || '').toLowerCase().replace(' ', '-')
-
   return (
     <div className="tournament-block">
       <button className="tournament-header" onClick={() => setOpen(o => !o)}>
@@ -195,17 +202,16 @@ function TournamentBlock({ name, surface, matches }) {
           {[...matches].sort((a, b) => {
             const aLive = /in play|live|set \d|game/i.test(a.event_status || '') ? 1 : 0
             const bLive = /in play|live|set \d|game/i.test(b.event_status || '') ? 1 : 0
-            if (aLive !== bLive) return bLive - aLive   // live first
+            if (aLive !== bLive) return bLive - aLive
             const aFin = /finished/i.test(a.event_status || '') ? 1 : 0
             const bFin = /finished/i.test(b.event_status || '') ? 1 : 0
-            if (aFin !== bFin) return aFin - bFin       // finished last
-            // Otherwise by event_time then match_id
+            if (aFin !== bFin) return aFin - bFin
             const ta = a.event_time || '99:99'
             const tb = b.event_time || '99:99'
             if (ta !== tb) return ta < tb ? -1 : 1
             return (a.match_id || 0) - (b.match_id || 0)
           }).map(m => (
-            <MatchRow key={m.match_id} match={m} />
+            <MatchRow key={m.match_id} match={m} showTournament={false} />
           ))}
         </div>
       )}
@@ -213,10 +219,9 @@ function TournamentBlock({ name, surface, matches }) {
   )
 }
 
-// ── Date group ────────────────────────────────────────────────────────────────
+// ── Date group (grouped / by-time view) ──────────────────────────────────────
 
 function DateGroup({ date, matches }) {
-  // Group by tournament
   const byTournament = {}
   for (const m of matches) {
     const key = m.tournament || 'Unknown Tournament'
@@ -224,7 +229,6 @@ function DateGroup({ date, matches }) {
     byTournament[key].matches.push(m)
   }
 
-  // Tournaments with edges first
   const sorted = Object.entries(byTournament).sort(([, a], [, b]) => {
     const eA = a.matches.filter(m =>
       Math.max(m.prediction?.edge_first || 0, m.prediction?.edge_second || 0) > 0.02
@@ -248,6 +252,42 @@ function DateGroup({ date, matches }) {
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── Win-chance flat list ──────────────────────────────────────────────────────
+
+function WinChanceList({ matches }) {
+  const sorted = [...matches].sort((a, b) => {
+    // Live matches always at top
+    const aLive = /in play|live/i.test(a.event_status || '') ? 1 : 0
+    const bLive = /in play|live/i.test(b.event_status || '') ? 1 : 0
+    if (aLive !== bLive) return bLive - aLive
+    // Sort by most decisive prediction (furthest from 50/50)
+    const aProb = Math.max(
+      a.prediction?.prob_first_player  ?? 0.5,
+      a.prediction?.prob_second_player ?? 0.5,
+    )
+    const bProb = Math.max(
+      b.prediction?.prob_first_player  ?? 0.5,
+      b.prediction?.prob_second_player ?? 0.5,
+    )
+    return bProb - aProb
+  })
+
+  return (
+    <div className="tournament-block" style={{ marginBottom: 24 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: 0.6, color: 'var(--text-3)',
+        padding: '8px 14px 6px',
+      }}>
+        Ranked by model confidence · {sorted.length} match{sorted.length !== 1 ? 'es' : ''}
+      </div>
+      {sorted.map(m => (
+        <MatchRow key={m.match_id} match={m} showTournament />
+      ))}
     </div>
   )
 }
@@ -288,13 +328,21 @@ function todayLabel() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
+const GENDERS  = ['All', 'Men', 'Women']
+const SORTS    = [
+  { id: 'time',      label: 'By time' },
+  { id: 'winchance', label: 'By win chance' },
+]
 
 export default function MatchList() {
-  const [matches,  setMatches]  = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState(null)
-  const [surface,  setSurface]  = useState('All')
-  const [lastFetch, setLastFetch] = useState(null)
+  const [matches,    setMatches]    = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
+  const [surface,    setSurface]    = useState('All')
+  const [gender,     setGender]     = useState('All')
+  const [tournament, setTournament] = useState('')
+  const [sortBy,     setSortBy]     = useState('time')
+  const [lastFetch,  setLastFetch]  = useState(null)
 
   function load() {
     setLoading(true)
@@ -309,18 +357,39 @@ export default function MatchList() {
 
   useEffect(() => { load() }, [])
 
-  const filtered = surface === 'All'
-    ? matches
-    : matches.filter(m => (m.surface || '').toLowerCase() === surface.toLowerCase())
+  // Build tournament list from all matches (before filtering)
+  const tournamentOptions = useMemo(() => {
+    const names = new Set()
+    for (const m of matches) {
+      if (m.tournament) names.add(m.tournament)
+    }
+    return Array.from(names).sort()
+  }, [matches])
 
-  const groups = groupByDate(filtered)
+  // Apply all active filters
+  const filtered = useMemo(() => {
+    return matches.filter(m => {
+      if (surface !== 'All' && (m.surface || '').toLowerCase() !== surface.toLowerCase()) return false
+      if (gender === 'Men'   && m.gender !== 'Men')   return false
+      if (gender === 'Women' && m.gender !== 'Women') return false
+      if (tournament && m.tournament !== tournament)   return false
+      return true
+    })
+  }, [matches, surface, gender, tournament])
 
-  const liveCount = filtered.filter(m =>
-    /in play|live/i.test(m.event_status || '')
-  ).length
+  // Clear tournament selection if it disappears from the filtered set
+  useEffect(() => {
+    if (tournament && filtered.length > 0 && !filtered.some(m => m.tournament === tournament)) {
+      setTournament('')
+    }
+  }, [surface, gender]) // eslint-disable-line
+
+  const liveCount = filtered.filter(m => /in play|live/i.test(m.event_status || '')).length
   const edgeCount = filtered.filter(m =>
     Math.max(m.prediction?.edge_first || 0, m.prediction?.edge_second || 0) > 0.02
   ).length
+
+  const groups = groupByDate(filtered)
 
   return (
     <div className="page">
@@ -343,27 +412,14 @@ export default function MatchList() {
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="surface-filters">
-              {SURFACES.map(s => (
-                <button
-                  key={s}
-                  className={`surface-pill ${surface === s ? 'active' : ''}`}
-                  onClick={() => setSurface(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={load}
-              style={{ fontSize: 13, color: 'var(--text-3)', padding: '4px 6px',
-                       borderRadius: 'var(--r-sm)', transition: 'color 0.12s' }}
-              title="Refresh"
-            >
-              ↻
-            </button>
-          </div>
+          <button
+            onClick={load}
+            style={{ fontSize: 13, color: 'var(--text-3)', padding: '4px 6px',
+                     borderRadius: 'var(--r-sm)', transition: 'color 0.12s' }}
+            title="Refresh"
+          >
+            ↻
+          </button>
           {lastFetch && (
             <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
               Updated {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -372,13 +428,91 @@ export default function MatchList() {
         </div>
       </div>
 
+      {/* Filter + sort bar */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 12,
+        alignItems: 'center', marginBottom: 16,
+        paddingBottom: 12,
+        borderBottom: '1px solid var(--border-faint)',
+      }}>
+
+        {/* Surface */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Surface</span>
+          {SURFACES.map(s => (
+            <button
+              key={s}
+              className={`surface-pill ${surface === s ? 'active' : ''}`}
+              onClick={() => setSurface(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Gender / Tour */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Tour</span>
+          {GENDERS.map(g => (
+            <button
+              key={g}
+              className={`surface-pill ${gender === g ? 'active' : ''}`}
+              onClick={() => setGender(g)}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+
+        {/* Tournament dropdown */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Tournament</span>
+          <select
+            value={tournament}
+            onChange={e => setTournament(e.target.value)}
+            style={{
+              padding: '4px 8px', borderRadius: 6,
+              border: `1px solid ${tournament ? 'var(--accent, #3b82f6)' : 'var(--border)'}`,
+              fontSize: 12,
+              background: 'var(--bg-card)',
+              color: tournament ? 'var(--accent, #3b82f6)' : 'var(--text-2)',
+              fontFamily: 'inherit', cursor: 'pointer',
+              fontWeight: tournament ? 600 : 400,
+              maxWidth: 220,
+            }}
+          >
+            <option value="">All tournaments</option>
+            {tournamentOptions.map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Sort — pushed to the right */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Sort</span>
+          {SORTS.map(s => (
+            <button
+              key={s.id}
+              className={`surface-pill ${sortBy === s.id ? 'active' : ''}`}
+              onClick={() => setSortBy(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+      </div>
+
       {/* Content */}
       {loading ? (
         <div className="loading">Loading matches…</div>
       ) : error ? (
         <div className="error">{error}</div>
-      ) : Object.keys(groups).length === 0 ? (
-        <div className="loading">No matches found.</div>
+      ) : filtered.length === 0 ? (
+        <div className="loading">No matches found for these filters.</div>
+      ) : sortBy === 'winchance' ? (
+        <WinChanceList matches={filtered} />
       ) : (
         Object.entries(groups).map(([date, dayMatches]) => (
           <DateGroup key={date} date={date} matches={dayMatches} />
