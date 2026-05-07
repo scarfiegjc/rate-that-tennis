@@ -6,8 +6,6 @@ import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import FormChart from '../components/FormChart.jsx'
 import OddsComparison from '../components/OddsComparison.jsx'
-import { playerUrl, matchMetaDescription, matchJsonLd, breadcrumbJsonLd } from '../utils/seo.js'
-import { useSEO } from '../hooks/useSEO.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers
