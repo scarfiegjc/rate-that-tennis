@@ -5,6 +5,12 @@ import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import FormChart from '../components/FormChart.jsx'
+import OddsComparison from '../components/OddsComparison.jsx'
+import courtClayImg  from '../assets/court-clay.jpg'
+import courtGrassImg from '../assets/court-grass.jpg'
+import courtHardImg  from '../assets/court-hard.jpg'
+import { playerUrl, matchMetaDescription, matchJsonLd, breadcrumbJsonLd } from '../utils/seo.js'
+import { useSEO } from '../hooks/useSEO.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers
@@ -524,6 +530,9 @@ function SectionIntelligence({ match }) {
           Generated {new Date(generatedAt).toLocaleString()} · {i.model || 'AI'}
         </div>
       )}
+
+      {/* Market vs RTT odds comparison — best-value lozenges + bookmaker compare */}
+      <OddsComparison matchId={matchId} />
 
       {/* Bet recommendations — kept below the journalistic block */}
       {bets.length > 0 && (

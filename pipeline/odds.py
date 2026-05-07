@@ -57,11 +57,22 @@ SPORT_KEYS = [
     "tennis_wta_aus_open_singles",
 ]
 
-# Which bookmaker to prefer for implied odds (first available wins)
+# Regions to fetch — each region multiplies API credit cost.
+# Free tier (500 credits/month): start with "uk,eu" only (2 credits per call).
+# Drop us to save ~33% of credits until US affiliate phase begins.
+ODDS_REGIONS = os.environ.get("ODDS_API_REGIONS", "uk,eu")
+
+# Which bookmaker to prefer when picking a single "headline" odds row for the
+# match list / today endpoint. The match-detail comparison view uses ALL
+# bookmakers regardless. Sharpest first.
 PREFERRED_BOOKMAKERS = [
-    "pinnacle",      # sharpest lines
+    "pinnacle",      # sharpest lines, useful as fair-price reference
+    "leovegas",      # primary affiliate target
+    "unibet",        # primary affiliate target
+    "888sport",      # primary affiliate target
+    "betvictor",
+    "betway",
     "bet365",
-    "unibet",
     "williamhill",
     "betmgm",
     "fanduel",
@@ -205,7 +216,7 @@ def fetch_odds_for_sport(sport_key: str) -> list[dict]:
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
-        "regions": "uk,eu,us",          # covers most major bookmakers
+        "regions": ODDS_REGIONS,        # configurable; default uk,eu for free tier
         "markets": "h2h",
         "oddsFormat": "decimal",
         "dateFormat": "iso",
@@ -324,71 +335,73 @@ def run(dry_run: bool = False) -> dict:
 
                 stats["matched"] += 1
 
-                # Choose best bookmaker (by preference order)
+                # Write odds from EVERY bookmaker that quoted this event so the
+                # match-detail comparison view has the full price spread to
+                # show. The unique constraint (match_id, bookmaker, player_ref)
+                # ensures one row per bookmaker per side per match.
                 bookmakers = event.get("bookmakers", [])
-                bm_map = {bm["key"]: bm for bm in bookmakers}
-
-                chosen_bm = None
-                for pref in PREFERRED_BOOKMAKERS:
-                    if pref in bm_map:
-                        chosen_bm = bm_map[pref]
-                        break
-                if not chosen_bm and bookmakers:
-                    chosen_bm = bookmakers[0]   # fall back to first available
-                if not chosen_bm:
+                if not bookmakers:
                     stats["skipped"] += 1
                     continue
 
-                # Extract H2H market
-                h2h_markets = [m for m in chosen_bm.get("markets", []) if m["key"] == "h2h"]
-                if not h2h_markets:
+                wrote_any = False
+                for bm in bookmakers:
+                    bm_key = bm.get("key")
+                    if not bm_key:
+                        continue
+
+                    h2h_markets = [m for m in bm.get("markets", []) if m["key"] == "h2h"]
+                    if not h2h_markets:
+                        continue
+
+                    outcomes = h2h_markets[0].get("outcomes", [])
+                    odds_by_name: dict[str, float] = {o["name"]: o["price"] for o in outcomes}
+
+                    # Map odds API player names → first/second player role
+                    # (home_team = first_player in The Odds API convention)
+                    p1_odds = odds_by_name.get(home_name)
+                    p2_odds = odds_by_name.get(away_name)
+
+                    # Fallback: check similarity if exact name not found
+                    if p1_odds is None:
+                        for oname, oprice in odds_by_name.items():
+                            if _similarity(home_name, oname) > 0.85:
+                                p1_odds = oprice
+                                break
+                    if p2_odds is None:
+                        for oname, oprice in odds_by_name.items():
+                            if _similarity(away_name, oname) > 0.85:
+                                p2_odds = oprice
+                                break
+
+                    if not dry_run:
+                        if p1_odds:
+                            write_odds(match_id, bm_key, "first_player", p1_odds, conn)
+                            stats["written"] += 1
+                            wrote_any = True
+                        if p2_odds:
+                            write_odds(match_id, bm_key, "second_player", p2_odds, conn)
+                            stats["written"] += 1
+                            wrote_any = True
+                    else:
+                        if p1_odds:
+                            log.info(
+                                f"    DRY-RUN: match_id={match_id} "
+                                f"{home_name} odds={p1_odds} [{bm_key}]"
+                            )
+                        if p2_odds:
+                            log.info(
+                                f"    DRY-RUN: match_id={match_id} "
+                                f"{away_name} odds={p2_odds} [{bm_key}]"
+                            )
+
+                if not wrote_any and not dry_run:
                     stats["skipped"] += 1
                     continue
-
-                outcomes = h2h_markets[0].get("outcomes", [])
-                odds_by_name: dict[str, float] = {o["name"]: o["price"] for o in outcomes}
-
-                # Map odds API player names → first/second player role
-                # (home_team = first_player in The Odds API convention)
-                p1_odds = odds_by_name.get(home_name)
-                p2_odds = odds_by_name.get(away_name)
-
-                # Fallback: check similarity if exact name not found
-                if p1_odds is None:
-                    for oname, oprice in odds_by_name.items():
-                        if _similarity(home_name, oname) > 0.85:
-                            p1_odds = oprice
-                            break
-                if p2_odds is None:
-                    for oname, oprice in odds_by_name.items():
-                        if _similarity(away_name, oname) > 0.85:
-                            p2_odds = oprice
-                            break
-
-                bm_key = chosen_bm["key"]
-
-                if not dry_run:
-                    if p1_odds:
-                        write_odds(match_id, bm_key, "first_player", p1_odds, conn)
-                        stats["written"] += 1
-                    if p2_odds:
-                        write_odds(match_id, bm_key, "second_player", p2_odds, conn)
-                        stats["written"] += 1
-                else:
-                    if p1_odds:
-                        log.info(
-                            f"    DRY-RUN: match_id={match_id} "
-                            f"{home_name} odds={p1_odds} [{bm_key}]"
-                        )
-                    if p2_odds:
-                        log.info(
-                            f"    DRY-RUN: match_id={match_id} "
-                            f"{away_name} odds={p2_odds} [{bm_key}]"
-                        )
 
                 log.debug(
-                    f"    Matched: {home_name} ({p1_odds}) vs {away_name} ({p2_odds})"
-                    f" → match_id={match_id} via {bm_key}"
+                    f"    Matched: {home_name} vs {away_name} → match_id={match_id} "
+                    f"({len(bookmakers)} bookmaker(s))"
                 )
 
         if not dry_run:

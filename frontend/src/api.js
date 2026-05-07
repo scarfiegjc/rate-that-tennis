@@ -33,6 +33,7 @@ export const api = {
 
   matchIntelligence:    (id) => get(`/api/v1/matches/${id}/intelligence`),
   matchPointAnalysis:   (id) => get(`/api/v1/matches/${id}/point-analysis`),
+  matchOdds:            (id) => get(`/api/v1/matches/${id}/odds`),
 
   // Predictions tracker
   predictionsToday:  (daysAhead = 2) =>
