@@ -335,7 +335,18 @@ function todayLabel() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
-const GENDERS  = ['All', 'Men', 'Women']
+// Display label → underlying gender filter value
+const TOURS    = [
+  { id: 'All', label: 'All' },
+  { id: 'Men', label: 'ATP' },
+  { id: 'Women', label: 'WTA' },
+]
+const STATUSES = [
+  { id: 'all',      label: 'All' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'live',     label: 'Live' },
+  { id: 'finished', label: 'Finished' },
+]
 const SORTS    = [
   { id: 'time',      label: 'By time' },
   { id: 'winchance', label: 'By win chance' },
@@ -347,7 +358,9 @@ export default function MatchList() {
   const [error,      setError]      = useState(null)
   const [surface,    setSurface]    = useState('All')
   const [gender,     setGender]     = useState('All')
+  const [status,     setStatus]     = useState('all')
   const [tournament, setTournament] = useState('')
+  const [edgesOnly,  setEdgesOnly]  = useState(false)
   const [sortBy,     setSortBy]     = useState('time')
   const [lastFetch,  setLastFetch]  = useState(null)
 
@@ -380,9 +393,21 @@ export default function MatchList() {
       if (gender === 'Men'   && m.gender !== 'Men')   return false
       if (gender === 'Women' && m.gender !== 'Women') return false
       if (tournament && m.tournament !== tournament)   return false
+      if (status !== 'all') {
+        const st = (m.event_status || '').toLowerCase()
+        const isLive     = /in play|live|set \d|game/i.test(st)
+        const isFinished = /finished/i.test(st)
+        if (status === 'live'     && !isLive) return false
+        if (status === 'finished' && !isFinished) return false
+        if (status === 'upcoming' && (isLive || isFinished)) return false
+      }
+      if (edgesOnly) {
+        const e = Math.max(m.prediction?.edge_first || 0, m.prediction?.edge_second || 0)
+        if (e <= 0.02) return false
+      }
       return true
     })
-  }, [matches, surface, gender, tournament])
+  }, [matches, surface, gender, tournament, status, edgesOnly])
 
   // Clear tournament selection if it disappears from the filtered set
   useEffect(() => {
@@ -414,9 +439,14 @@ export default function MatchList() {
               </span>
             )}
             {edgeCount > 0 && (
-              <span className="count-badge edge">
-                {edgeCount} edge{edgeCount !== 1 ? 's' : ''} identified
-              </span>
+              <button
+                onClick={() => setEdgesOnly(v => !v)}
+                title={edgesOnly ? 'Show all matches' : 'Show only matches with edges'}
+                className={`count-badge edge ${edgesOnly ? 'count-badge--active' : ''}`}
+                style={{ cursor: 'pointer', border: edgesOnly ? '1px solid var(--green)' : '1px solid transparent' }}
+              >
+                {edgesOnly ? '✓ ' : ''}{edgeCount} edge{edgeCount !== 1 ? 's' : ''} identified
+              </button>
             )}
           </div>
           <button
@@ -457,16 +487,30 @@ export default function MatchList() {
           ))}
         </div>
 
-        {/* Gender / Tour */}
+        {/* Tour: ATP / WTA */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Tour</span>
-          {GENDERS.map(g => (
+          {TOURS.map(t => (
             <button
-              key={g}
-              className={`surface-pill ${gender === g ? 'active' : ''}`}
-              onClick={() => setGender(g)}
+              key={t.id}
+              className={`surface-pill ${gender === t.id ? 'active' : ''}`}
+              onClick={() => setGender(t.id)}
             >
-              {g}
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Status: All / Upcoming / Live / Finished */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Status</span>
+          {STATUSES.map(s => (
+            <button
+              key={s.id}
+              className={`surface-pill ${status === s.id ? 'active' : ''}`}
+              onClick={() => setStatus(s.id)}
+            >
+              {s.label}
             </button>
           ))}
         </div>
