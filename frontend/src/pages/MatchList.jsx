@@ -332,15 +332,52 @@ function todayLabel() {
   })
 }
 
+// Categorise a match by tournament-name pattern + gender. Used by the Level
+// filter checkboxes (Slam / Masters / ATP / WTA / Challenger / ITF / UTR).
+function detectLevel(match) {
+  const t = (match.tournament || '').trim()
+  const lc = t.toLowerCase()
+  if (/^utr\s+ptt/i.test(t))                                     return 'UTR'
+  if (/\b(m15|m25|w15|w25|w35|w50|w60|w75|w80|w100)\b/i.test(t)) return 'ITF'
+  if (/\bchallenger\b/i.test(lc))                                return 'Challenger'
+  if (/\b(masters|1000)\b/i.test(lc))                            return 'Masters'
+  if (/\b(australian open|roland.?garros|wimbledon|us open)\b/i.test(lc)) return 'Slam'
+  if (/^atp\b/i.test(t)) return 'ATP'
+  if (/^wta\b/i.test(t)) return 'WTA'
+  if (match.gender === 'Men')   return 'ATP'
+  if (match.gender === 'Women') return 'WTA'
+  return 'Other'
+}
+
+// Tiny tickbox component
+function Tickbox({ label, checked, onChange, accent }) {
+  const colour = accent || 'var(--green)'
+  return (
+    <label style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      cursor: 'pointer', fontSize: 12, color: 'var(--text-2)',
+      padding: '3px 8px', borderRadius: 6,
+      border: `1px solid ${checked ? colour : 'var(--border)'}`,
+      background: checked ? `color-mix(in srgb, ${colour} 12%, transparent)` : 'transparent',
+      transition: 'all 0.12s',
+      whiteSpace: 'nowrap', userSelect: 'none',
+    }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        style={{ accentColor: colour, cursor: 'pointer', width: 13, height: 13, margin: 0 }}
+      />
+      {label}
+    </label>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
-// Display label → underlying gender filter value
-const TOURS    = [
-  { id: 'All', label: 'All' },
-  { id: 'Men', label: 'ATP' },
-  { id: 'Women', label: 'WTA' },
-]
+// Tour-level checkbox set
+const LEVELS  = ['Slam', 'Masters', 'ATP', 'WTA', 'Challenger', 'ITF', 'UTR']
 const STATUSES = [
   { id: 'all',      label: 'All' },
   { id: 'upcoming', label: 'Upcoming' },
@@ -357,12 +394,23 @@ export default function MatchList() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(null)
   const [surface,    setSurface]    = useState('All')
-  const [gender,     setGender]     = useState('All')
+  const [levels,     setLevels]     = useState(() => new Set(LEVELS))  // all on by default
   const [status,     setStatus]     = useState('all')
   const [tournament, setTournament] = useState('')
   const [edgesOnly,  setEdgesOnly]  = useState(false)
+  const [predictedOnly, setPredictedOnly] = useState(false)
+  const [ratedOnly,  setRatedOnly]  = useState(false)
   const [sortBy,     setSortBy]     = useState('time')
   const [lastFetch,  setLastFetch]  = useState(null)
+
+  function toggleLevel(level) {
+    setLevels(prev => {
+      const next = new Set(prev)
+      if (next.has(level)) next.delete(level)
+      else next.add(level)
+      return next
+    })
+  }
 
   function load() {
     setLoading(true)
@@ -390,8 +438,9 @@ export default function MatchList() {
   const filtered = useMemo(() => {
     return matches.filter(m => {
       if (surface !== 'All' && (m.surface || '').toLowerCase() !== surface.toLowerCase()) return false
-      if (gender === 'Men'   && m.gender !== 'Men')   return false
-      if (gender === 'Women' && m.gender !== 'Women') return false
+      // Tour level checkboxes (multi-select)
+      const lvl = detectLevel(m)
+      if (!levels.has(lvl) && lvl !== 'Other') return false
       if (tournament && m.tournament !== tournament)   return false
       if (status !== 'all') {
         const st = (m.event_status || '').toLowerCase()
@@ -405,16 +454,22 @@ export default function MatchList() {
         const e = Math.max(m.prediction?.edge_first || 0, m.prediction?.edge_second || 0)
         if (e <= 0.02) return false
       }
+      if (predictedOnly && (m.prediction?.prob_first_player == null)) return false
+      if (ratedOnly) {
+        const r1 = m.first_player?.rtt_score
+        const r2 = m.second_player?.rtt_score
+        if (r1 == null || r2 == null) return false
+      }
       return true
     })
-  }, [matches, surface, gender, tournament, status, edgesOnly])
+  }, [matches, surface, levels, tournament, status, edgesOnly, predictedOnly, ratedOnly])
 
   // Clear tournament selection if it disappears from the filtered set
   useEffect(() => {
     if (tournament && filtered.length > 0 && !filtered.some(m => m.tournament === tournament)) {
       setTournament('')
     }
-  }, [surface, gender]) // eslint-disable-line
+  }, [surface, levels]) // eslint-disable-line
 
   const liveCount = filtered.filter(m => /in play|live/i.test(m.event_status || '')).length
   const edgeCount = filtered.filter(m =>
@@ -487,17 +542,16 @@ export default function MatchList() {
           ))}
         </div>
 
-        {/* Tour: ATP / WTA */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Tour</span>
-          {TOURS.map(t => (
-            <button
-              key={t.id}
-              className={`surface-pill ${gender === t.id ? 'active' : ''}`}
-              onClick={() => setGender(t.id)}
-            >
-              {t.label}
-            </button>
+        {/* Tour level — multi-select tickboxes */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Level</span>
+          {LEVELS.map(lvl => (
+            <Tickbox
+              key={lvl}
+              label={lvl}
+              checked={levels.has(lvl)}
+              onChange={() => toggleLevel(lvl)}
+            />
           ))}
         </div>
 
@@ -513,6 +567,22 @@ export default function MatchList() {
               {s.label}
             </button>
           ))}
+        </div>
+
+        {/* Show / hide toggles */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Tickbox
+            label="Predictions only"
+            checked={predictedOnly}
+            onChange={() => setPredictedOnly(v => !v)}
+            accent="var(--amber)"
+          />
+          <Tickbox
+            label="Rated players only"
+            checked={ratedOnly}
+            onChange={() => setRatedOnly(v => !v)}
+            accent="var(--accent, #3b82f6)"
+          />
         </div>
 
         {/* Tournament dropdown */}
