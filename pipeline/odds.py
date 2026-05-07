@@ -43,8 +43,10 @@ logging.basicConfig(
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
-# Tennis sport keys to query — expand as needed
-SPORT_KEYS = [
+# Tennis sport keys to query — fetched dynamically from /sports endpoint at runtime
+# so we always pick up whatever tournament is currently in season.
+# Fallback list (used only if the /sports query fails for some reason):
+SPORT_KEYS_FALLBACK = [
     "tennis_atp",
     "tennis_wta",
     "tennis_atp_french_open",
@@ -55,7 +57,35 @@ SPORT_KEYS = [
     "tennis_wta_us_open",
     "tennis_atp_aus_open_singles",
     "tennis_wta_aus_open_singles",
+    "tennis_atp_italian_open",
+    "tennis_wta_italian_open",
+    "tennis_atp_madrid_open",
+    "tennis_wta_madrid_open",
 ]
+
+
+def discover_active_tennis_sports() -> list[str]:
+    """Query The Odds API /sports endpoint for currently-active tennis sports."""
+    try:
+        url = f"{ODDS_API_BASE}/sports/"
+        resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
+        if resp.status_code != 200:
+            log.warning(f"Could not discover sports (HTTP {resp.status_code}); using fallback list")
+            return SPORT_KEYS_FALLBACK
+        sports = resp.json()
+        active_tennis = [s["key"] for s in sports if s.get("group") == "Tennis" and s.get("active")]
+        if not active_tennis:
+            log.info("No active tennis sports right now")
+            return []
+        log.info(f"Discovered {len(active_tennis)} active tennis sport(s): {', '.join(active_tennis)}")
+        return active_tennis
+    except Exception as e:
+        log.warning(f"Sports discovery failed ({e}); using fallback list")
+        return SPORT_KEYS_FALLBACK
+
+
+# Lazy-resolved at run() time so we don't hit the API on import
+SPORT_KEYS: list[str] = []
 
 # Regions to fetch — each region multiplies API credit cost.
 # Free tier (500 credits/month): start with "uk,eu" only (2 credits per call).
@@ -279,10 +309,11 @@ def write_odds(
 
 # ─── Main pipeline ────────────────────────────────────────────────────────────
 
-def run(dry_run: bool = False) -> dict:
+def run(dry_run: bool = False, sport_keys: list[str] | None = None) -> dict:
     """
     Full odds sync: fetch → match → write.
     Returns summary dict {fetched, matched, written, skipped}.
+    If sport_keys is provided, uses them instead of auto-discovering active sports.
     """
     if not ODDS_API_KEY:
         log.error(
@@ -300,9 +331,14 @@ def run(dry_run: bool = False) -> dict:
         player_index = build_player_index(conn)
         log.info(f"Player index loaded: {len(player_index):,} players")
 
+        # Resolve which tennis sport keys to query — use override if given,
+        # else auto-detect active ones so we always pick up the current
+        # Slam/Masters tournament.
+        active_sports = sport_keys if sport_keys else discover_active_tennis_sports()
+
         stats = {"fetched": 0, "matched": 0, "written": 0, "skipped": 0}
 
-        for sport_key in SPORT_KEYS:
+        for sport_key in active_sports:
             events = fetch_odds_for_sport(sport_key)
             if not events:
                 continue
@@ -437,7 +473,6 @@ if __name__ == "__main__":
                         help="Only fetch one sport key (e.g. tennis_atp)")
     args = parser.parse_args()
 
-    if args.sport:
-        SPORT_KEYS[:] = [args.sport]
+    sport_keys = [args.sport] if args.sport else None
 
-    run(dry_run=args.dry_run)
+    run(dry_run=args.dry_run, sport_keys=sport_keys)
