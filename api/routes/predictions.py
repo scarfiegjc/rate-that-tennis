@@ -60,6 +60,9 @@ def _serialise_prediction_row(r: dict) -> dict:
         "event_date": str(r["event_date"]) if r.get("event_date") else None,
         "event_time": str(r["event_time"]) if r.get("event_time") else None,
         "event_status": r.get("event_status"),
+        "set_scores": r.get("set_scores"),
+        "final_result": r.get("final_result"),
+        "game_result": r.get("game_result"),
         "tournament": r.get("tournament_name"),
         "surface": r.get("surface_name"),
         "round": r.get("tournament_round"),
@@ -435,6 +438,8 @@ def predictions_today(
             m.event_time,
             m.event_status,
             m.winner          AS match_winner_text,
+            m.final_result,
+            m.game_result,
             t.name            AS tournament_name,
             s.name            AS surface_name,
             m.tournament_round,
@@ -457,13 +462,19 @@ def predictions_today(
             mp.form_gap,
             mp.total_logit,
             mp.predicted_at,
-            mp.key_factors
+            mp.key_factors,
+            ms.set_scores
         FROM matches m
         LEFT JOIN tournaments t       ON t.id = m.tournament_id
         LEFT JOIN surfaces s          ON s.id = t.surface_id
         LEFT JOIN players p1          ON p1.id = m.first_player_id
         LEFT JOIN players p2          ON p2.id = m.second_player_id
         LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        LEFT JOIN LATERAL (
+            SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number) AS set_scores
+            FROM match_scores ms_inner
+            WHERE ms_inner.match_id = m.id
+        ) ms ON TRUE
         WHERE m.event_date BETWEEN %s AND %s
           AND m.event_status NOT IN ('Cancelled','Walkover','Postponed')
           AND m.first_player_id IS NOT NULL

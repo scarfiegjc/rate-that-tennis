@@ -300,6 +300,51 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Big, prominent live score on the match bar (Matches + In-Play pages) */
+.match-live-score-big {
+  font-size: 16px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.6px;
+  line-height: 1.1;
+}
+
+.match-live-game {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+  line-height: 1.1;
+  margin-top: 1px;
+}
+
+.match-live-status {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.match-centre--inplay {
+  background: rgba(248, 81, 73, 0.06);
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin: 0 4px;
+}
+
+.match-prob-pair {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  margin-right: 6px;
+}
+
 .match-final-score {
   font-size: 13px;
   font-weight: 700;
@@ -1100,6 +1145,111 @@ button {
 .confidence-dot.high   { background: var(--green); }
 .confidence-dot.medium { background: var(--amber); }
 .confidence-dot.low    { background: var(--border); }
+
+/* ── Predictions tracker (table layout) ───────────────────── */
+
+.prediction-tracker-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.prediction-tracker-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-faint);
+  transition: background 0.1s;
+}
+.prediction-tracker-row:last-child { border-bottom: none; }
+.prediction-tracker-row:hover      { background: var(--bg-raised); }
+
+.prediction-tracker-row--correct .prediction-pick { background: var(--green-bg); }
+.prediction-tracker-row--correct                   { border-left: 3px solid var(--green); }
+.prediction-tracker-row--wrong   .prediction-pick { background: var(--red-bg); }
+.prediction-tracker-row--wrong                     { border-left: 3px solid var(--red); }
+
+.prediction-tracker-header {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  border-left: none !important;
+}
+.prediction-tracker-header:hover { background: var(--bg-raised); }
+
+.prediction-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--border-faint);
+  background: var(--bg-sunken);
+  min-height: 64px;
+  justify-content: center;
+}
+
+.prediction-pick--header {
+  background: transparent;
+  padding: 8px 12px;
+  min-height: 0;
+}
+
+.prediction-pick-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  font-weight: 700;
+}
+
+.prediction-pick-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prediction-pick-prob {
+  font-size: 14px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  line-height: 1;
+}
+
+.prediction-pick-outcome {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.prediction-pick-conf {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.prediction-tracker-match {
+  display: flex;
+  align-items: center;
+}
+
+.prediction-tracker-match .match-row {
+  border-bottom: none;
+  padding-left: 12px;
+  padding-right: 16px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .prediction-tracker-row { grid-template-columns: 84px 1fr; }
+  .prediction-pick        { padding: 8px 10px; }
+  .prediction-pick-name   { font-size: 12px; }
+  .prediction-pick-prob   { font-size: 13px; }
+}
 
 /* ── Rating tier badge ───────────────────────────────── */
 

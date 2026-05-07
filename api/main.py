@@ -17,10 +17,26 @@ from fastapi.responses import HTMLResponse
 from api.routes.matches import router as matches_router
 from api.routes.players import router as players_router
 from api.routes.predictions import router as predictions_router
-from api.routes.lab import router as lab_router
-from api.routes.health import router as health_router
-from api.routes.diagnose import router as diagnose_router
 from api.routes.odds import router as odds_router
+
+# Optional routes — these files exist in dev but may not be in this image yet.
+# Wrap each so a missing module doesn't crash the whole API on startup.
+try:
+    from api.routes.lab import router as lab_router
+except ImportError:
+    lab_router = None
+try:
+    from api.routes.health import router as health_router
+except ImportError:
+    health_router = None
+try:
+    from api.routes.diagnose import router as diagnose_router
+except ImportError:
+    diagnose_router = None
+try:
+    from api.routes.tournaments import router as tournaments_router
+except ImportError:
+    tournaments_router = None
 
 log = logging.getLogger("api.main")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -58,10 +74,11 @@ app.add_middleware(
 app.include_router(matches_router, prefix="/api/v1")
 app.include_router(players_router, prefix="/api/v1")
 app.include_router(predictions_router, prefix="/api/v1")
-app.include_router(lab_router,         prefix="/api/v1")
-app.include_router(health_router,      prefix="/api/v1")
-app.include_router(diagnose_router,    prefix="/api/v1")
-app.include_router(odds_router,        prefix="/api/v1")
+app.include_router(odds_router, prefix="/api/v1")
+if lab_router:         app.include_router(lab_router,         prefix="/api/v1")
+if health_router:      app.include_router(health_router,      prefix="/api/v1")
+if diagnose_router:    app.include_router(diagnose_router,    prefix="/api/v1")
+if tournaments_router: app.include_router(tournaments_router, prefix="/api/v1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import MatchList from './pages/MatchList.jsx'
 import MatchDetail from './pages/MatchDetail.jsx'
 import PlayerPage from './pages/PlayerPage.jsx'
-import LivePage from './pages/LivePage.jsx'
+import InPlayPage from './pages/InPlayPage.jsx'
 import PredictionsToday from './pages/PredictionsToday.jsx'
 import PredictionsHistory from './pages/PredictionsHistory.jsx'
 import SystemsList from './pages/SystemsList.jsx'
@@ -20,12 +20,12 @@ function Header() {
         ratethat<span className="app-logo-dot">.</span>tennis
       </Link>
       <nav className="app-nav">
-        <Link to="/" className={`nav-link ${is('/') && !is('/predictions','/systems','/live') ? 'active' : ''}`}>
+        <Link to="/" className={`nav-link ${is('/') && !is('/predictions','/systems','/in-play','/players','/player') ? 'active' : ''}`}>
           Matches
         </Link>
-        <Link to="/live" className={`nav-link ${is('/live') ? 'active' : ''}`}>
+        <Link to="/in-play" className={`nav-link ${is('/in-play') ? 'active' : ''}`}>
           <span className="live-dot" style={{ width: 5, height: 5 }} />
-          Live
+          In play
         </Link>
         <Link to="/predictions" className={`nav-link ${is('/predictions') ? 'active' : ''}`}>
           Predictions
@@ -47,7 +47,7 @@ export default function App() {
       <Header />
       <Routes>
         <Route path="/"                       element={<MatchList />} />
-        <Route path="/live"                   element={<LivePage />} />
+        <Route path="/in-play"                element={<InPlayPage />} />
         <Route path="/match/:id"              element={<MatchDetail />} />
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />

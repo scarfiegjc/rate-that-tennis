@@ -13,100 +13,132 @@ function StatCard({ label, value, sub }) {
   )
 }
 
-function PredictionRow({ p }) {
+// ── Pick cell — thin column on the left showing the actual prediction ───────
+function PickCell({ p }) {
+  const predictedSide = p.predicted_winner === 'first_player' ? 'p1' : 'p2'
+  const pickPlayer    = predictedSide === 'p1' ? p.p1 : p.p2
+  const pickProb      = pickPlayer?.prob != null ? Math.round(pickPlayer.prob * 100) : null
+  const isPending     = pickProb == null
+  const isSettled     = p.is_correct !== null && p.is_correct !== undefined
+
+  // Use the player's last name to keep the column thin
+  const lastName = (pickPlayer?.name || '').trim().split(' ').slice(-1)[0] || pickPlayer?.name || '—'
+
+  let outcomeColor = 'var(--text-3)'
+  let outcomeIcon  = null
+  if (isSettled) {
+    outcomeColor = p.is_correct ? 'var(--green)' : 'var(--red)'
+    outcomeIcon  = p.is_correct ? '✓' : '✗'
+  }
+
+  return (
+    <div className="prediction-pick">
+      <div className="prediction-pick-label">Pick</div>
+      <div className="prediction-pick-name" title={pickPlayer?.name}>
+        {isPending ? '—' : lastName}
+      </div>
+      <div className="prediction-pick-prob">
+        {isPending ? <span style={{ fontStyle: 'italic', color: 'var(--text-3)' }}>pending</span> : `${pickProb}%`}
+      </div>
+      {outcomeIcon && (
+        <div className="prediction-pick-outcome" style={{ color: outcomeColor }}>
+          {outcomeIcon}
+        </div>
+      )}
+      {p.confidence && !isPending && (
+        <div className="prediction-pick-conf">
+          <span className={`confidence-dot ${p.confidence}`} />
+          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{p.confidence}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Match bar — same look as the rest of the site ──────────────────────────
+function MatchBar({ p }) {
   const p1Pct = p.p1?.prob != null ? Math.round(p.p1.prob * 100) : null
   const p2Pct = p.p2?.prob != null ? Math.round(p.p2.prob * 100) : null
   const isPending = p1Pct == null
   const isSettled = p.is_correct !== null && p.is_correct !== undefined
+  const isLive    = /in play|live|set \d|game/i.test(p.event_status || '')
   const winnerSide = p.actual_winner === 'first_player' ? 'p1'
                    : p.actual_winner === 'second_player' ? 'p2' : null
-  const predictedSide = p.predicted_winner === 'first_player' ? 'p1' : 'p2'
 
-  // colour coding for the row outcome
-  let outcomeStyle = {}
-  if (isSettled) {
-    outcomeStyle = p.is_correct
-      ? { background: 'var(--green-bg)', borderLeft: '3px solid var(--green)' }
-      : { background: 'var(--red-bg)',   borderLeft: '3px solid var(--red)' }
-  } else {
-    outcomeStyle = { borderLeft: '3px solid var(--border)' }
-  }
+  const liveSets = p.set_scores || p.final_result || ''
+  const liveGame = p.game_result || ''
 
   return (
     <Link
       to={`/match/${p.match_id}`}
-      className="match-row"
-      style={{ ...outcomeStyle, gridTemplateColumns: '60px 1fr auto 1fr 110px' }}
+      className={`match-row ${isLive ? 'match-row--live' : ''}`}
+      style={{
+        gridTemplateColumns: '50px 1fr auto 1fr 96px',
+        borderLeft: 'none',
+      }}
     >
-      <div className="match-row-time">
-        {p.event_time ? p.event_time.slice(0, 5) : '—'}
-        <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-          {(p.event_status || '').slice(0, 12)}
-        </div>
+      <div className={`match-row-time ${isLive ? 'live' : ''}`}>
+        {isLive ? <span className="live-dot" />
+                : isSettled ? <span style={{ fontSize: 10, color: 'var(--text-3)' }}>FT</span>
+                : (p.event_time ? p.event_time.slice(0, 5) : '—')}
       </div>
 
-      <div className={`match-player-cell ${winnerSide === 'p1' ? 'winner' : ''}`}>
+      {/* Player 1 */}
+      <div className="match-player-cell">
         <div className="match-player-name" style={
           winnerSide === 'p1' ? { color: 'var(--green)' } :
-          winnerSide === 'p2' ? { color: 'var(--text-3)' } : {}
+          winnerSide === 'p2' ? { color: 'var(--text-3)', fontWeight: 500 } : {}
         }>
           {p.p1?.name}
         </div>
         <div className="match-player-sub">
           <span className="match-player-country">{p.p1?.country_code}</span>
-          {predictedSide === 'p1' && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>· pick</span>
-          )}
+          {p1Pct != null && <span className="match-player-rtt"><span>{p1Pct}%</span></span>}
         </div>
       </div>
 
-      <div className="match-centre">
-        {isPending ? (
-          <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
-            pending
-          </span>
-        ) : (
+      {/* Centre */}
+      <div className={`match-centre ${isLive ? 'match-centre--inplay' : ''}`}>
+        {isSettled && liveSets ? (
+          <span className="match-final-score">{liveSets}</span>
+        ) : isLive ? (
           <>
-            <div className="match-probs">
-              <span className={p1Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p1Pct}%</span>
-              <span style={{ color: 'var(--text-3)' }}>·</span>
-              <span className={p2Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p2Pct}%</span>
-            </div>
-            {p.confidence && (
-              <span className="confidence">
-                <span className={`confidence-dot ${p.confidence}`} />
-                {p.confidence}
-              </span>
+            <span className="match-live-score-big">{liveSets || '—'}</span>
+            {liveGame && liveGame !== liveSets && (
+              <span className="match-live-game">{liveGame}</span>
             )}
           </>
+        ) : isPending ? (
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>pending</span>
+        ) : (
+          <div className="match-probs">
+            <span className={p1Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p1Pct}%</span>
+            <span style={{ color: 'var(--text-3)' }}>·</span>
+            <span className={p2Pct >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p2Pct}%</span>
+          </div>
         )}
       </div>
 
+      {/* Player 2 */}
       <div className="match-player-cell right">
         <div className="match-player-name" style={
           winnerSide === 'p2' ? { color: 'var(--green)' } :
-          winnerSide === 'p1' ? { color: 'var(--text-3)' } : {}
+          winnerSide === 'p1' ? { color: 'var(--text-3)', fontWeight: 500 } : {}
         }>
           {p.p2?.name}
         </div>
         <div className="match-player-sub">
-          {predictedSide === 'p2' && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>pick ·</span>
-          )}
+          {p2Pct != null && <span className="match-player-rtt"><span>{p2Pct}%</span></span>}
           <span className="match-player-country">{p.p2?.country_code}</span>
         </div>
       </div>
 
+      {/* Right meta */}
       <div className="match-row-meta">
         {p.surface && <SurfaceBadge surface={p.surface} />}
-        {isSettled && (
-          <span style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: p.is_correct ? 'var(--green-text)' : 'var(--red)',
-            marginLeft: 4,
-          }}>
-            {p.is_correct ? '✓' : '✗'}
+        {isLive && (
+          <span className="live-badge amber">
+            <span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE
           </span>
         )}
       </div>
@@ -114,8 +146,46 @@ function PredictionRow({ p }) {
   )
 }
 
+// ── Combined row: thin pick column + match bar ─────────────────────────────
+function PredictionTrackerRow({ p }) {
+  const isSettled = p.is_correct !== null && p.is_correct !== undefined
+  const rowAccent = isSettled
+    ? (p.is_correct ? 'prediction-tracker-row--correct' : 'prediction-tracker-row--wrong')
+    : ''
+
+  return (
+    <div className={`prediction-tracker-row ${rowAccent}`}>
+      <PickCell p={p} />
+      <div className="prediction-tracker-match">
+        <MatchBar p={p} />
+      </div>
+    </div>
+  )
+}
+
+// ── Header row for the table ────────────────────────────────────────────────
+function TableHeader() {
+  return (
+    <div className="prediction-tracker-row prediction-tracker-header">
+      <div className="prediction-pick prediction-pick--header">
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)',
+                      textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          Prediction
+        </div>
+      </div>
+      <div className="prediction-tracker-match prediction-tracker-match--header">
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)',
+                      textTransform: 'uppercase', letterSpacing: 0.6,
+                      padding: '8px 16px' }}>
+          Match
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function PredictionsToday() {
-  const [data, setData] = useState(null)
+  const [data, setData]   = useState(null)
   const [stats, setStats] = useState(null)
   const [error, setError] = useState(null)
 
@@ -215,8 +285,9 @@ export default function PredictionsToday() {
         return (
           <div key={d} style={{ marginTop: 24 }}>
             <div className="date-sep">{d}</div>
-            <div className="card" style={{ overflow: 'hidden' }}>
-              {sorted.map(p => <PredictionRow key={p.match_id} p={p} />)}
+            <div className="card prediction-tracker-table" style={{ overflow: 'hidden' }}>
+              <TableHeader />
+              {sorted.map(p => <PredictionTrackerRow key={p.match_id} p={p} />)}
             </div>
           </div>
         )

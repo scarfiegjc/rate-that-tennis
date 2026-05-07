@@ -58,7 +58,9 @@ function MatchRow({ match, showTournament }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  const liveScore = match.final_result || match.game_result || ''
+  // Sets are the headline live score (e.g. "6-4 3-2"); game is the live game (e.g. "30-15")
+  const liveSets  = match.set_scores || match.final_result || ''
+  const liveGame  = match.game_result || ''
 
   return (
     <button
@@ -91,13 +93,18 @@ function MatchRow({ match, showTournament }) {
       </div>
 
       {/* Centre */}
-      <div className="match-centre">
+      <div className={`match-centre ${isLive ? 'match-centre--inplay' : ''}`}>
         {isFinished && (match.set_scores || match.final_result) ? (
           <span className="match-final-score">
             {match.set_scores || match.final_result}
           </span>
-        ) : isLive && liveScore ? (
-          <span className="match-live-score">{liveScore}</span>
+        ) : isLive ? (
+          <>
+            <span className="match-live-score-big">{liveSets || '—'}</span>
+            {liveGame && liveGame !== liveSets && (
+              <span className="match-live-game">{liveGame}</span>
+            )}
+          </>
         ) : p1prob != null ? (
           <>
             <div className="match-probs">
