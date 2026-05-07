@@ -325,10 +325,47 @@ function todayLabel() {
   })
 }
 
+// Tour-level classifier — drives the Slam/Masters / Challenger / ITF tickboxes
+function detectLevel(match) {
+  const t = (match.tournament || '').trim()
+  const lc = t.toLowerCase()
+  if (/\b(m15|m25|w15|w25|w35|w50|w60|w75|w80|w100)\b/i.test(t)) return 'ITF'
+  if (/\bchallenger\b/i.test(lc))                                return 'Challenger'
+  if (/^utr\s+ptt/i.test(t))                                     return 'Challenger'
+  if (/\b(masters|1000|grand\s*slam|australian open|roland.?garros|wimbledon|us open)\b/i.test(lc))
+    return 'Slam / Masters'
+  return 'Tour'
+}
+
+// Tickbox component
+function Tickbox({ label, checked, onChange, accent }) {
+  const colour = accent || 'var(--green)'
+  return (
+    <label style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      cursor: 'pointer', fontSize: 12, color: 'var(--text-2)',
+      padding: '3px 8px', borderRadius: 6,
+      border: `1px solid ${checked ? colour : 'var(--border)'}`,
+      background: checked ? `color-mix(in srgb, ${colour} 12%, transparent)` : 'transparent',
+      transition: 'all 0.12s',
+      whiteSpace: 'nowrap', userSelect: 'none',
+    }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        style={{ accentColor: colour, cursor: 'pointer', width: 13, height: 13, margin: 0 }}
+      />
+      {label}
+    </label>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
 const GENDERS  = ['All', 'Men', 'Women']
+const LEVELS   = ['Slam / Masters', 'Challenger', 'ITF']
 const SORTS    = [
   { id: 'time',      label: 'By time' },
   { id: 'winchance', label: 'By win chance' },
@@ -340,9 +377,22 @@ export default function MatchList() {
   const [error,      setError]      = useState(null)
   const [surface,    setSurface]    = useState('All')
   const [gender,     setGender]     = useState('All')
+  const [levels,     setLevels]     = useState(() => new Set(LEVELS)) // all on by default
+  const [upcomingOnly,     setUpcomingOnly]     = useState(false)
+  const [ratedOnly,        setRatedOnly]        = useState(false)
+  const [hideUnidentified, setHideUnidentified] = useState(false)
   const [tournament, setTournament] = useState('')
   const [sortBy,     setSortBy]     = useState('time')
   const [lastFetch,  setLastFetch]  = useState(null)
+
+  function toggleLevel(level) {
+    setLevels(prev => {
+      const next = new Set(prev)
+      if (next.has(level)) next.delete(level)
+      else next.add(level)
+      return next
+    })
+  }
 
   function load() {
     setLoading(true)
@@ -373,9 +423,22 @@ export default function MatchList() {
       if (gender === 'Men'   && m.gender !== 'Men')   return false
       if (gender === 'Women' && m.gender !== 'Women') return false
       if (tournament && m.tournament !== tournament)   return false
+      // Tour level tickboxes — only Slam/Masters, Challenger and ITF are gated.
+      // Regular Tour 250/500 matches always show.
+      const lvl = detectLevel(m)
+      if (lvl !== 'Tour' && !levels.has(lvl)) return false
+      if (upcomingOnly) {
+        const st = (m.event_status || '').toLowerCase()
+        if (/finished/i.test(st)) return false
+      }
+      if (ratedOnly || hideUnidentified) {
+        const r1 = m.first_player?.rtt_score
+        const r2 = m.second_player?.rtt_score
+        if (r1 == null || r2 == null) return false
+      }
       return true
     })
-  }, [matches, surface, gender, tournament])
+  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified])
 
   // Clear tournament selection if it disappears from the filtered set
   useEffect(() => {
@@ -462,6 +525,41 @@ export default function MatchList() {
               {g}
             </button>
           ))}
+        </div>
+
+        {/* Level tickboxes */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Level</span>
+          {LEVELS.map(lvl => (
+            <Tickbox
+              key={lvl}
+              label={lvl}
+              checked={levels.has(lvl)}
+              onChange={() => toggleLevel(lvl)}
+            />
+          ))}
+        </div>
+
+        {/* Show / hide tickboxes */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Tickbox
+            label="Upcoming only"
+            checked={upcomingOnly}
+            onChange={() => setUpcomingOnly(v => !v)}
+            accent="var(--amber, #f59e0b)"
+          />
+          <Tickbox
+            label="Rated players only"
+            checked={ratedOnly}
+            onChange={() => setRatedOnly(v => !v)}
+            accent="var(--green, #4ade80)"
+          />
+          <Tickbox
+            label="Hide unidentified players"
+            checked={hideUnidentified}
+            onChange={() => setHideUnidentified(v => !v)}
+            accent="var(--accent, #3b82f6)"
+          />
         </div>
 
         {/* Tournament dropdown */}
