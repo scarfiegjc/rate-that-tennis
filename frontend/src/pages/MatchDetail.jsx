@@ -746,9 +746,10 @@ function fmtShortDate(iso) {
   return `${day} ${mon} '${yearShort}`
 }
 
-// FormRacecard: chip centred, date+score on the OUTSIDE (column edge), opponent toward centre.
-// align='left'  → [date+score]  [chip] [W/L] [opponent]   (P1 column — date hugs left edge)
-// align='right' → [opponent] [W/L] [chip]  [date+score]   (P2 column — date hugs right edge)
+// FormRacecard: chip on the INSIDE (toward centre divider), date+score on the
+// OUTSIDE edge of the column, on the same line. Reading inside→out:
+// align='left'  (P1 column)  → [chip] [W/L] [opponent]                [date · score]   ← chip hugs centre
+// align='right' (P2 column)  → [date · score]                [opponent] [W/L] [chip]   ← chip hugs centre
 function FormRacecard({ matches, playerName, align = 'left' }) {
   if (!matches || !matches.length) {
     return (
@@ -791,33 +792,32 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           </div>
         )
 
-        // Date + score block — sits on the outside edge of the column
+        // Date + score on a SINGLE line, sitting on the outside edge of the column.
         const dateScoreBlock = (
           <div style={{
-            minWidth: 76, flexShrink: 0,
+            flexShrink: 0,
             textAlign: isRight ? 'right' : 'left',
-            lineHeight: 1.2,
+            fontSize: 11, fontWeight: 500, color: 'var(--text-3)',
+            whiteSpace: 'nowrap',
+            display: 'flex', gap: 6, alignItems: 'baseline',
+            justifyContent: isRight ? 'flex-end' : 'flex-start',
           }}>
-            <div style={{
-              fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
-              whiteSpace: 'nowrap',
-            }}>
+            <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>
               {fmtShortDate(m.date)}
-            </div>
+            </span>
             {m.score && (
-              <div style={{
-                fontSize: 10, color: 'var(--text-3)',
-                fontFamily: 'var(--font-mono)', marginTop: 1,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              <span style={{
+                fontFamily: 'var(--font-mono)', fontSize: 10,
+                color: 'var(--text-3)',
               }}>
                 {m.score}
-              </div>
+              </span>
             )}
           </div>
         )
 
         const opponentText = (
-          <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'left' : 'right' }}>
+          <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'right' : 'left' }}>
             <div style={{
               fontSize: 12, fontWeight: 500, color: 'var(--text-2)',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -827,8 +827,9 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           </div>
         )
 
-        // For LEFT column, we want left-to-right: [date+score] [chip] [W/L] [opponent]
-        // For RIGHT column, we want left-to-right: [opponent] [W/L] [chip] [date+score]
+        // Layout (chip on the INSIDE, date+score on the OUTSIDE):
+        //   LEFT col, left→right:  [chip] [W/L] [opponent] [date · score]
+        //   RIGHT col, left→right: [date · score] [opponent] [W/L] [chip]
         return (
           <div key={i} style={{
             display: 'flex',
@@ -839,17 +840,17 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           }}>
             {isRight ? (
               <>
+                {dateScoreBlock}
                 {opponentText}
                 {wlBadge}
                 {chip}
-                {dateScoreBlock}
               </>
             ) : (
               <>
-                {dateScoreBlock}
                 {chip}
                 {wlBadge}
                 {opponentText}
+                {dateScoreBlock}
               </>
             )}
           </div>
