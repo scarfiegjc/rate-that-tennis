@@ -150,16 +150,39 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
     # through the whole list once and cache locally.
     cc3 = _to_cc3(player.get("country_code"))
     if cc3:
-        page = _get(
-            f"/tennis/v2/{tour}/player",
-            params={"filter": f"PlayerCountry:{{{cc3}}}", "pageSize": 100},
-        )
-        if not page.get("ok"):
-            return {"ms_id": None, "strategy": "country-list-failed", "error": page}
+        # The doc shows `PlayerCountry:{ITA}` but the live endpoint rejects
+        # braces. Try a sequence of plausible filter syntaxes and fall back
+        # to an unfiltered single-page fetch if all fail.
+        page = None
+        last_error = None
+        for filter_value in (
+            f"PlayerCountry:{cc3}",
+            f"PlayerCountry:{{{cc3}}}",
+        ):
+            attempt = _get(
+                f"/tennis/v2/{tour}/player",
+                params={"filter": filter_value, "pageSize": 100},
+            )
+            body = attempt.get("data") if attempt.get("ok") else None
+            # Bare list, or {data: [...]} — both are valid success shapes.
+            if isinstance(body, list):
+                page = attempt
+                break
+            if isinstance(body, dict) and isinstance(body.get("data"), list):
+                page = attempt
+                break
+            last_error = attempt
 
-        # Be defensive about response shape: some endpoints return a bare list,
-        # others return {data: [...], hasNextPage: ...}, and a few return a
-        # plain string error.
+        if page is None:
+            # Final fallback: fetch first page unfiltered and search there.
+            attempt = _get(f"/tennis/v2/{tour}/player", params={"pageSize": 200})
+            body = attempt.get("data") if attempt.get("ok") else None
+            if isinstance(body, (list, dict)):
+                page = attempt
+            else:
+                return {"ms_id": None, "strategy": "list-fetch-failed",
+                        "last_error_preview": str(last_error)[:300]}
+
         body = page.get("data")
         if isinstance(body, list):
             rows = body
