@@ -388,23 +388,34 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
     # 2) Pull profile (sanity check that ID works)
     profile = _get(f"/tennis/v2/{tour}/player/profile/{ms_id}",
                    params={"include": "form,ranking,country"})
-    if profile.get("ok") and profile.get("data"):
-        prof = profile["data"]
-        out["profile"] = {
-            "currentRank": prof.get("currentRank"),
-            "ch": prof.get("ch"),
-            "height": prof.get("height"),
-            "birthday": prof.get("birthday"),
-            "ep_present": bool(prof.get("ep")),
-        }
+    if profile.get("ok"):
+        prof = profile.get("data")
+        # Capture raw structure so we can see exactly what comes back
+        out["profile_raw_keys"] = sorted(list(prof.keys())) if isinstance(prof, dict) else None
+        out["profile_raw_preview"] = (
+            {k: prof.get(k) for k in list(prof.keys())[:25]}
+            if isinstance(prof, dict)
+            else (str(prof)[:300] if prof is not None else None)
+        )
     else:
         out["profile_error"] = profile
 
-    # 3) Past matches with stats — this is the headline test
-    matches = _get(f"/tennis/v2/{tour}/player/past-matches/{ms_id}",
-                   params={"include": "round,tournament.court,tournament.rank,stat",
-                           "pageSize": 20})
-    if not matches.get("ok"):
+    # 3) Past matches with stats — this is the headline test.
+    # Try a few `include` variants in case the docs name is wrong (stat/stats).
+    matches = None
+    include_used = None
+    for inc in ("round,tournament.court,tournament.rank,stat",
+                "round,tournament.court,tournament.rank,stats",
+                "round,tournament,stat",
+                "stat"):
+        attempt = _get(f"/tennis/v2/{tour}/player/past-matches/{ms_id}",
+                       params={"include": inc, "pageSize": 10})
+        if attempt.get("ok"):
+            matches = attempt
+            include_used = inc
+            break
+    out["include_param_used"] = include_used
+    if not matches or not matches.get("ok"):
         out["matches_error"] = matches
         return out
 
@@ -421,6 +432,21 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
         }
         rows = []
     out["match_count_returned"] = len(rows)
+
+    # Capture the FULL first match record so we can see if 'stat' lives
+    # under a different key. Truncate nested objects for safety.
+    if rows:
+        first = rows[0] if isinstance(rows[0], dict) else None
+        if first:
+            out["match_raw_keys"] = sorted(list(first.keys()))
+            # Top-level scalars + names of nested objects
+            preview = {}
+            for k, v in first.items():
+                if isinstance(v, (dict, list)):
+                    preview[k] = f"<{type(v).__name__}, keys={list(v.keys())[:8] if isinstance(v, dict) else f'len={len(v)}'}>"
+                else:
+                    preview[k] = v
+            out["match_raw_preview"] = preview
 
     # Coverage: how many matches actually have stat blocks at all,
     # and per-field how many populated.
