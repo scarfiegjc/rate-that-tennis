@@ -31,10 +31,41 @@ API_BASE = f"https://{API_HOST}"
 def _headers() -> dict:
     key = os.environ.get("MATCHSTAT_API_KEY", "").strip()
     return {
+        # Cloudflare in front of the upstream blocks Python's default UA, so
+        # send a real-looking one. RapidAPI itself doesn't gate on UA.
+        "User-Agent": "Mozilla/5.0 (compatible; ratethat-tennis/1.0; +https://ratethat.tennis)",
         "X-RapidAPI-Key": key,
         "X-RapidAPI-Host": API_HOST,
         "Accept": "application/json",
     }
+
+
+# 2-letter ISO → 3-letter ISO country codes (the subset that appears in our
+# players table — Matchstat's PlayerCountry filter expects the 3-letter form).
+_CC2_TO_CC3 = {
+    "AR": "ARG", "AT": "AUT", "AU": "AUS", "BA": "BIH", "BE": "BEL", "BG": "BUL",
+    "BO": "BOL", "BR": "BRA", "BY": "BLR", "CA": "CAN", "CH": "SUI", "CL": "CHI",
+    "CN": "CHN", "CO": "COL", "CR": "CRC", "CY": "CYP", "CZ": "CZE", "DE": "GER",
+    "DK": "DEN", "DO": "DOM", "EC": "ECU", "EE": "EST", "EG": "EGY", "ES": "ESP",
+    "FI": "FIN", "FR": "FRA", "GB": "GBR", "GE": "GEO", "GR": "GRE", "HK": "HKG",
+    "HR": "CRO", "HU": "HUN", "ID": "INA", "IE": "IRL", "IL": "ISR", "IN": "IND",
+    "IT": "ITA", "JP": "JPN", "KR": "KOR", "KZ": "KAZ", "LT": "LTU", "LU": "LUX",
+    "LV": "LAT", "MD": "MDA", "ME": "MNE", "MX": "MEX", "MY": "MAS", "NL": "NED",
+    "NO": "NOR", "NZ": "NZL", "PE": "PER", "PH": "PHI", "PL": "POL", "PT": "POR",
+    "PY": "PAR", "RO": "ROU", "RS": "SRB", "RU": "RUS", "SE": "SWE", "SI": "SLO",
+    "SK": "SVK", "TH": "THA", "TN": "TUN", "TR": "TUR", "TW": "TPE", "UA": "UKR",
+    "US": "USA", "UY": "URU", "UZ": "UZB", "VE": "VEN", "VN": "VIE", "ZA": "RSA",
+}
+
+
+def _to_cc3(cc2: Optional[str]) -> Optional[str]:
+    if not cc2:
+        return None
+    cc2 = cc2.upper()
+    # Already 3 letters? pass through.
+    if len(cc2) == 3:
+        return cc2
+    return _CC2_TO_CC3.get(cc2)
 
 
 def _get(path: str, params: Optional[dict] = None, timeout: int = 12) -> dict:
@@ -117,11 +148,11 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
     # page (the top of the rankings) to demonstrate ID lookup mechanics. A real
     # backfill would either use full-text search (/misc/search) or paginate
     # through the whole list once and cache locally.
-    if player.get("country_code"):
-        cc = player["country_code"].upper()
+    cc3 = _to_cc3(player.get("country_code"))
+    if cc3:
         page = _get(
             f"/tennis/v2/{tour}/player",
-            params={"filter": f"PlayerCountry:{{{cc}}}", "pageSize": 100},
+            params={"filter": f"PlayerCountry:{{{cc3}}}", "pageSize": 100},
         )
         if not page.get("ok"):
             return {"ms_id": None, "strategy": "country-list-failed", "error": page}
