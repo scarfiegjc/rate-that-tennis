@@ -157,7 +157,18 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
         if not page.get("ok"):
             return {"ms_id": None, "strategy": "country-list-failed", "error": page}
 
-        rows = page.get("data") or []
+        # Be defensive about response shape: some endpoints return a bare list,
+        # others return {data: [...], hasNextPage: ...}, and a few return a
+        # plain string error.
+        body = page.get("data")
+        if isinstance(body, list):
+            rows = body
+        elif isinstance(body, dict) and isinstance(body.get("data"), list):
+            rows = body["data"]
+        else:
+            return {"ms_id": None, "strategy": "unexpected-list-shape",
+                    "shape_type": type(body).__name__,
+                    "body_preview": (str(body)[:300] if body is not None else None)}
         last_token = full.replace(".", "").split()[-1].lower() if full else ""
         first_initial = (short[:1] or "").lower() if short else ""
 
@@ -231,7 +242,18 @@ def _spike_one_player(player: dict, tour: str = "atp") -> dict:
         out["matches_error"] = matches
         return out
 
-    rows = (matches.get("data") or {}).get("data") or []
+    # Same defensive pattern: matches may come back as { data: [...] } or as a bare list.
+    mbody = matches.get("data")
+    if isinstance(mbody, list):
+        rows = mbody
+    elif isinstance(mbody, dict) and isinstance(mbody.get("data"), list):
+        rows = mbody["data"]
+    else:
+        out["matches_unexpected_shape"] = {
+            "shape_type": type(mbody).__name__,
+            "preview": (str(mbody)[:400] if mbody is not None else None),
+        }
+        rows = []
     out["match_count_returned"] = len(rows)
 
     # Coverage: how many matches actually have stat blocks at all,
