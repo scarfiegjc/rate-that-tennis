@@ -160,6 +160,14 @@ W_PRESSURE_GAP_PER_POINT        = 0.015   # in best-of-5 / late rounds
 W_FATIGUE_PER_DAY               = -0.06   # |p1 days rest| - |p2 days rest|, only if <2 days
 W_SURFACE_RECORD_PER_POINT      = 0.012   # production surface win% diff (recent)
 
+# Slam-derived player-style features (from Matchstat, ms_player_career_stats)
+# These are CAREER averages computed only from Grand Slam matches (the only
+# matches with full premium stat coverage). Applied as soft style indicators
+# even when predicting non-Slam matches — players don't change much.
+W_SLAM_WUR_PER_POINT            = 0.50    # winners-to-UE-ratio diff (typical span 0.6–1.5)
+W_SLAM_NET_PCT_PER_POINT        = 0.012   # net-points-won % diff
+W_SLAM_SERVE_SPEED_PER_POINT    = 0.010   # avg first serve speed (km/h) diff
+
 # Caps to keep any single factor from dominating
 CAP_RTT_GAP_LOGIT               = 1.0
 CAP_SURFACE_GAP_LOGIT           = 1.0
@@ -167,6 +175,7 @@ CAP_HAND_LOGIT                  = 0.30
 CAP_H2H_LOGIT                   = 0.40
 CAP_FORM_LOGIT                  = 0.40
 CAP_BIG_MATCH_LOGIT             = 0.30
+CAP_SLAM_FEATURE_LOGIT          = 0.25    # individual slam-derived feature cap
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -323,6 +332,30 @@ class RttPredictor:
                 result["rtt_score"] = est
                 result["_rtt_estimated"] = True
         return result
+
+    def _ms_career_stats(self, player_id: int) -> dict:
+        """
+        Fetch this player's Matchstat-derived career stats (Slam-only premium
+        + universal averages). Returns {} when the player isn't linked.
+        """
+        conn = self._get_conn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT cs.*
+                    FROM ms_player_links pl
+                    JOIN ms_player_career_stats cs ON cs.ms_player_id = pl.ms_id
+                    WHERE pl.player_id = %s
+                    """,
+                    (player_id,),
+                )
+                row = cur.fetchone()
+            return dict(row) if row else {}
+        except Exception:
+            # ms_* tables may not exist yet — fail soft so the predictor
+            # keeps working in environments without the Matchstat layer.
+            return {}
 
     def _estimate_rtt_from_rank(self, player_id: int) -> Optional[float]:
         """
@@ -829,6 +862,65 @@ class RttPredictor:
                 factors.append(self._factor(
                     "punching_above_weight", "Form vs rating divergence",
                     round(p1_punch, 1), round(p2_punch, 1), logit,
+                ))
+
+        # ── 14) Slam-derived player-style features (from Matchstat) ─────────
+        # Career averages computed from each player's Grand Slam matches —
+        # the only matches with full premium-stat coverage. These features
+        # describe playing STYLE, not form, so they apply on every surface.
+        # Falls back silently to {} when the player isn't ingested.
+        ms_p1 = self._ms_career_stats(p1_id)
+        ms_p2 = self._ms_career_stats(p2_id)
+
+        if ms_p1.get("slam_matches") and ms_p2.get("slam_matches"):
+            # Both players have Slam history → safe to compare.
+            snapshot["p1_slam_matches"] = ms_p1.get("slam_matches")
+            snapshot["p2_slam_matches"] = ms_p2.get("slam_matches")
+
+            # Winners-to-UE ratio — efficiency indicator
+            p1_wur = f(ms_p1.get("slam_winner_ue_ratio"))
+            p2_wur = f(ms_p2.get("slam_winner_ue_ratio"))
+            if p1_wur is not None and p2_wur is not None:
+                gap = p1_wur - p2_wur
+                logit = _clip(gap * W_SLAM_WUR_PER_POINT,
+                              -CAP_SLAM_FEATURE_LOGIT, CAP_SLAM_FEATURE_LOGIT)
+                snapshot["slam_wur_gap"] = round(gap, 3)
+                factors.append(self._factor(
+                    "slam_winner_ue_ratio", "Winners-to-errors ratio (Slam career)",
+                    round(p1_wur, 2), round(p2_wur, 2), logit,
+                ))
+
+            # Net point %
+            p1_net = f(ms_p1.get("slam_net_won_pct"))
+            p2_net = f(ms_p2.get("slam_net_won_pct"))
+            if p1_net is not None and p2_net is not None:
+                gap = p1_net - p2_net
+                logit = _clip(gap * W_SLAM_NET_PCT_PER_POINT,
+                              -CAP_SLAM_FEATURE_LOGIT, CAP_SLAM_FEATURE_LOGIT)
+                snapshot["slam_net_pct_gap"] = round(gap, 2)
+                factors.append(self._factor(
+                    "slam_net_pct", "Net-point win % (Slam career)",
+                    round(p1_net, 1), round(p2_net, 1), logit,
+                ))
+
+            # Avg first serve speed (only matters on faster surfaces)
+            p1_serve = f(ms_p1.get("slam_avg_first_serve_kmh"))
+            p2_serve = f(ms_p2.get("slam_avg_first_serve_kmh"))
+            surface_lower = (surface or "").lower()
+            on_fast_surface = (
+                "grass" in surface_lower
+                or "hard" in surface_lower
+                or "indoor" in surface_lower
+                or "carpet" in surface_lower
+            )
+            if p1_serve is not None and p2_serve is not None and on_fast_surface:
+                gap = p1_serve - p2_serve
+                logit = _clip(gap * W_SLAM_SERVE_SPEED_PER_POINT,
+                              -CAP_SLAM_FEATURE_LOGIT, CAP_SLAM_FEATURE_LOGIT)
+                snapshot["slam_serve_speed_gap"] = round(gap, 1)
+                factors.append(self._factor(
+                    "slam_serve_speed", f"Avg 1st serve speed (Slam career, {surface or 'fast'})",
+                    round(p1_serve, 1), round(p2_serve, 1), logit,
                 ))
 
         return factors, snapshot
