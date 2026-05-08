@@ -17,26 +17,6 @@ from fastapi.responses import HTMLResponse
 from api.routes.matches import router as matches_router
 from api.routes.players import router as players_router
 from api.routes.predictions import router as predictions_router
-from api.routes.odds import router as odds_router
-
-# Optional routes — these files exist in dev but may not be in this image yet.
-# Wrap each so a missing module doesn't crash the whole API on startup.
-try:
-    from api.routes.lab import router as lab_router
-except ImportError:
-    lab_router = None
-try:
-    from api.routes.health import router as health_router
-except ImportError:
-    health_router = None
-try:
-    from api.routes.diagnose import router as diagnose_router
-except ImportError:
-    diagnose_router = None
-try:
-    from api.routes.tournaments import router as tournaments_router
-except ImportError:
-    tournaments_router = None
 
 log = logging.getLogger("api.main")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -74,11 +54,6 @@ app.add_middleware(
 app.include_router(matches_router, prefix="/api/v1")
 app.include_router(players_router, prefix="/api/v1")
 app.include_router(predictions_router, prefix="/api/v1")
-app.include_router(odds_router, prefix="/api/v1")
-if lab_router:         app.include_router(lab_router,         prefix="/api/v1")
-if health_router:      app.include_router(health_router,      prefix="/api/v1")
-if diagnose_router:    app.include_router(diagnose_router,    prefix="/api/v1")
-if tournaments_router: app.include_router(tournaments_router, prefix="/api/v1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -303,6 +278,18 @@ def admin_predict(days_ahead: int = 7):
     return _safe_admin(run_rtt_predictions, days_ahead=days_ahead)
 
 
+@app.get("/admin/matchstat-spike")
+def admin_matchstat_spike(n: int = 10, tour: str = "atp"):
+    """
+    Diagnostic: probe the Matchstat API on N active players, report on
+    name-resolution success, per-match stat coverage, and field population.
+    Writes nothing to the database — purely a data-quality check before
+    any backfill commitment.
+    """
+    from api.routes._matchstat_spike import run_spike
+    return _safe_admin(run_spike, n_players=n, tour=tour)
+
+
 @app.get("/admin/surface-backfill")
 def admin_surface_backfill():
     """Run tournament surface backfill."""
@@ -329,6 +316,103 @@ def admin_point_analysis():
     """Compute point stats (hold %, break %, BP save/conversion, tiebreak win %) per player."""
     from api.bootstrap import run_point_analysis
     return _safe_admin(run_point_analysis)
+
+
+@app.get("/admin/point-backfill")
+def admin_point_backfill():
+    """Backfill sequential metrics (longest game run + deuce return %) only."""
+    from api.bootstrap import run_point_backfill_only
+    return _safe_admin(run_point_backfill_only)
+
+
+@app.get("/admin/point-diag")
+def admin_point_diag():
+    """Show what point-by-point data we actually have in the DB."""
+    from api.db import query_one, query
+    out = {}
+    try:
+        out["total_matches"] = (query_one("SELECT COUNT(*) AS n FROM matches WHERE event_status = 'Finished'") or {}).get("n", 0)
+        out["total_match_games"] = (query_one("SELECT COUNT(*) AS n FROM match_games") or {}).get("n", 0)
+        out["match_games_with_player_served"] = (query_one(
+            "SELECT COUNT(*) AS n FROM match_games WHERE player_served IS NOT NULL AND player_served != ''"
+        ) or {}).get("n", 0)
+        out["match_games_with_serve_winner"] = (query_one(
+            "SELECT COUNT(*) AS n FROM match_games WHERE serve_winner IS NOT NULL AND serve_winner != ''"
+        ) or {}).get("n", 0)
+        out["sample_player_served_values"] = query(
+            "SELECT player_served, COUNT(*) AS n FROM match_games GROUP BY player_served ORDER BY n DESC LIMIT 5"
+        )
+        out["total_match_points"] = (query_one("SELECT COUNT(*) AS n FROM match_points") or {}).get("n", 0)
+        out["matches_with_games"] = (query_one(
+            "SELECT COUNT(DISTINCT match_id) AS n FROM match_games") or {}).get("n", 0)
+        out["matches_with_games_24m"] = (query_one("""
+            SELECT COUNT(DISTINCT mg.match_id) AS n FROM match_games mg
+            JOIN matches m ON m.id = mg.match_id
+            WHERE m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+        """) or {}).get("n", 0)
+        out["distinct_players_with_games"] = (query_one("""
+            SELECT COUNT(DISTINCT pid) AS n FROM (
+                SELECT m.first_player_id AS pid FROM matches m JOIN match_games mg ON mg.match_id = m.id
+                UNION
+                SELECT m.second_player_id      FROM matches m JOIN match_games mg ON mg.match_id = m.id
+            ) x
+            WHERE pid IS NOT NULL
+        """) or {}).get("n", 0)
+        out["player_point_stats_rows"] = (query_one("SELECT COUNT(*) AS n FROM player_point_stats") or {}).get("n", 0)
+        # Top 5 players by service games
+        out["top_players_by_service_games"] = query("""
+            SELECT pps.player_id, p.name, pps.service_games, pps.service_hold_pct, pps.matches_analyzed
+            FROM player_point_stats pps
+            JOIN players p ON p.id = pps.player_id
+            ORDER BY pps.service_games DESC NULLS LAST
+            LIMIT 5
+        """)
+    except Exception as e:
+        out["error"] = str(e)
+    return out
+
+
+@app.get("/admin/intel/wipe")
+def admin_intel_wipe(days_ahead: int = 7):
+    """
+    Wipe existing intelligence text from upcoming matches so the next scheduled
+    run regenerates it with the new prompt. Returns count wiped.
+    """
+    from api.db import query_one
+    try:
+        row = query_one(
+            """
+            UPDATE model_predictions mp
+            SET p1_intel = NULL, p2_intel = NULL, match_preview = NULL,
+                did_you_know = NULL, confidence_line = NULL,
+                intel_generated_at = NULL
+            FROM matches m
+            WHERE mp.match_id = m.id
+              AND m.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + (%s || ' days')::interval
+              AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Finished')
+              AND mp.match_preview IS NOT NULL
+            RETURNING mp.match_id
+            """ if False else
+            """
+            WITH wipe AS (
+                UPDATE model_predictions mp
+                SET p1_intel = NULL, p2_intel = NULL, match_preview = NULL,
+                    did_you_know = NULL, confidence_line = NULL,
+                    intel_generated_at = NULL
+                FROM matches m
+                WHERE mp.match_id = m.id
+                  AND m.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + (%s || ' days')::interval
+                  AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Finished')
+                  AND mp.match_preview IS NOT NULL
+                RETURNING mp.match_id
+            )
+            SELECT COUNT(*) AS n FROM wipe
+            """,
+            (days_ahead,),
+        )
+        return {"wiped": int((row or {}).get("n") or 0)}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/admin/hand-backfill")
@@ -396,588 +480,6 @@ def admin_settle():
     """Settle finished predictions."""
     from api.bootstrap import run_settle
     return _safe_admin(run_settle)
-
-
-@app.get("/admin/run-odds")
-def admin_run_odds():
-    """
-    Fetch latest bookmaker odds from The Odds API and write to bookmaker_odds.
-    Skips silently if ODDS_API_KEY is not set on the environment.
-    Same job the scheduler runs at 20:00 + 05:00 UTC — useful for an instant
-    refresh after applying schema changes or resetting the cache.
-    """
-    def _run():
-        if not os.environ.get("ODDS_API_KEY"):
-            return {"skipped": True, "reason": "ODDS_API_KEY not set on Railway env vars"}
-        try:
-            from pipeline.odds import run as odds_run
-        except ImportError:
-            from odds import run as odds_run  # flat-image fallback
-        return odds_run()
-    return _safe_admin(_run)
-
-
-_BZZOIRO_BIOS_STATUS = {"running": False, "started_at": None, "finished_at": None,
-                        "updated": None, "error": None}
-
-
-def _bzzoiro_bios_worker():
-    """Background worker — paginates ~10k bzzoiro players, can take 60-180s."""
-    import os, traceback, time
-    import psycopg2
-    _BZZOIRO_BIOS_STATUS.update({"running": True, "started_at": time.time(),
-                                  "finished_at": None, "updated": None, "error": None})
-    try:
-        try:
-            from pipeline.bzzoiro_ingest import sync_player_bios
-        except ImportError:
-            from bzzoiro_ingest import sync_player_bios
-
-        db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
-        if not db_url:
-            _BZZOIRO_BIOS_STATUS["error"] = "DATABASE_URL not set"
-            return
-        conn = psycopg2.connect(db_url)
-        conn.autocommit = True
-        try:
-            n = sync_player_bios(conn)
-            _BZZOIRO_BIOS_STATUS["updated"] = n
-        finally:
-            conn.close()
-    except Exception as e:
-        _BZZOIRO_BIOS_STATUS["error"] = f"{type(e).__name__}: {e}"
-        log.error(f"bzzoiro bios worker failed: {e}")
-        log.error(traceback.format_exc())
-    finally:
-        _BZZOIRO_BIOS_STATUS["finished_at"] = time.time()
-        _BZZOIRO_BIOS_STATUS["running"] = False
-
-
-@app.get("/admin/bzzoiro-bios")
-def admin_bzzoiro_bios():
-    """
-    Trigger the bzzoiro bios backfill in a BACKGROUND thread (fire and forget).
-    Returns immediately with a status URL — poll /admin/bzzoiro-bios/status.
-
-    Iterates every bzzoiro player and fills DOB / country / hand / height on
-    existing players rows where those fields are NULL. Most reliable way to
-    populate Krejcikova-style ghosts.
-    """
-    if _BZZOIRO_BIOS_STATUS.get("running"):
-        return {"status": "already_running", "started_at": _BZZOIRO_BIOS_STATUS["started_at"]}
-
-    threading.Thread(target=_bzzoiro_bios_worker, daemon=True).start()
-    return {
-        "status": "started",
-        "poll":   "/admin/bzzoiro-bios/status",
-        "note":   "Job runs in background, takes 60-180s. Poll the status URL.",
-    }
-
-
-_BZZOIRO_MATCHES_STATUS = {"running": False, "started_at": None, "finished_at": None,
-                           "result": None, "error": None}
-
-
-def _bzzoiro_matches_worker(days_back: int):
-    import os, traceback, time
-    from datetime import date, timedelta
-    import psycopg2
-    _BZZOIRO_MATCHES_STATUS.update({"running": True, "started_at": time.time(),
-                                     "finished_at": None, "result": None, "error": None})
-    try:
-        try:
-            from pipeline.bzzoiro_ingest import sync_matches, get_db_conn
-        except ImportError:
-            from bzzoiro_ingest import sync_matches, get_db_conn
-
-        date_from = (date.today() - timedelta(days=days_back)).isoformat()
-        date_to   = (date.today() + timedelta(days=2)).isoformat()
-        conn = get_db_conn()
-        try:
-            res = sync_matches(conn, date_from, date_to)
-            _BZZOIRO_MATCHES_STATUS["result"] = res
-        finally:
-            conn.close()
-    except SystemExit as e:
-        _BZZOIRO_MATCHES_STATUS["error"] = f"SystemExit: {e.code}"
-    except BaseException as e:
-        _BZZOIRO_MATCHES_STATUS["error"] = f"{type(e).__name__}: {e}"
-        log.error(f"bzzoiro matches worker failed: {e}")
-        log.error(traceback.format_exc())
-    finally:
-        _BZZOIRO_MATCHES_STATUS["finished_at"] = time.time()
-        _BZZOIRO_MATCHES_STATUS["running"] = False
-
-
-@app.get("/admin/bzzoiro-live")
-def admin_bzzoiro_live():
-    """
-    Refresh live bzzoiro matches RIGHT NOW. Synchronous (fast, ~5-10s) — pulls
-    today's matches from bzzoiro and upserts their current status, set scores,
-    and serve stats. Fixes the 'stuck on live all day' problem for matches
-    bzzoiro marked live but never refreshed.
-
-    Schedule this every 5 minutes during play hours via the pipeline service.
-    """
-    import os, traceback
-    from datetime import date
-    try:
-        try:
-            from pipeline.bzzoiro_ingest import sync_matches, get_db_conn
-        except ImportError:
-            from bzzoiro_ingest import sync_matches, get_db_conn
-        d = date.today().isoformat()
-        conn = get_db_conn()
-        try:
-            res = sync_matches(conn, d, d)
-        finally:
-            conn.close()
-        return {"ok": True, "date": d, "result": res}
-    except Exception as e:
-        return {"error": str(e), "type": type(e).__name__,
-                "traceback": traceback.format_exc().splitlines()[-10:]}
-
-
-@app.get("/admin/bzzoiro-matches")
-def admin_bzzoiro_matches(days_back: int = 7):
-    """Fetch bzzoiro matches for the last `days_back` days + next 2 days.
-    Background-threaded — returns immediately, poll /status."""
-    if _BZZOIRO_MATCHES_STATUS.get("running"):
-        return {"status": "already_running"}
-    threading.Thread(target=_bzzoiro_matches_worker, args=(days_back,), daemon=True).start()
-    return {"status": "started", "poll": "/admin/bzzoiro-matches/status",
-            "days_back": days_back}
-
-
-@app.get("/admin/bzzoiro-matches/status")
-def admin_bzzoiro_matches_status():
-    import time
-    s = dict(_BZZOIRO_MATCHES_STATUS)
-    if s.get("started_at"):
-        s["elapsed_sec"] = round((s.get("finished_at") or time.time()) - s["started_at"], 1)
-    return s
-
-
-# ─── /admin/run-daily — chain everything in one fire-and-forget ────────────
-_DAILY_STATUS = {"running": False, "phase": None, "started_at": None,
-                 "finished_at": None, "log": [], "error": None}
-
-
-def _daily_worker():
-    import os, time, traceback
-    import psycopg2
-
-    def _log(msg):
-        log.info(f"[daily] {msg}")
-        _DAILY_STATUS["log"].append(msg)
-        _DAILY_STATUS["log"] = _DAILY_STATUS["log"][-100:]
-
-    _DAILY_STATUS.update({"running": True, "started_at": time.time(),
-                           "finished_at": None, "log": [], "error": None})
-    try:
-        # 1. bzzoiro matches (last 7 + next 2 days)
-        _DAILY_STATUS["phase"] = "bzzoiro_matches"
-        _log("Step 1/6: bzzoiro matches sync (last 7d + next 2d)")
-        try:
-            try:
-                from pipeline.bzzoiro_ingest import sync_matches, get_db_conn
-            except ImportError:
-                from bzzoiro_ingest import sync_matches, get_db_conn
-            from datetime import date, timedelta
-            date_from = (date.today() - timedelta(days=7)).isoformat()
-            date_to   = (date.today() + timedelta(days=2)).isoformat()
-            conn = get_db_conn()
-            try:
-                res = sync_matches(conn, date_from, date_to)
-                _log(f"bzzoiro matches: {res}")
-            finally:
-                conn.close()
-        except Exception as e:
-            _log(f"bzzoiro matches FAILED: {e}")
-
-        # 2. bzzoiro bios (DOB / country / full_name backfill)
-        _DAILY_STATUS["phase"] = "bzzoiro_bios"
-        _log("Step 2/6: bzzoiro bios fill")
-        try:
-            try:
-                from pipeline.bzzoiro_ingest import sync_player_bios
-            except ImportError:
-                from bzzoiro_ingest import sync_player_bios
-            db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
-            conn = psycopg2.connect(db_url); conn.autocommit = True
-            try:
-                n = sync_player_bios(conn)
-                _log(f"bzzoiro bios: updated {n} players")
-            finally:
-                conn.close()
-        except Exception as e:
-            _log(f"bzzoiro bios FAILED: {e}")
-
-        # 3. Heal everything (3 enrichment passes)
-        _DAILY_STATUS["phase"] = "heal_everything"
-        _log("Step 3/6: heal-everything (heal-ghosts → enrich → fuzzy)")
-        try:
-            from api.routes.diagnose import heal_everything as _he
-            r = _he()
-            _log(f"heal-everything: {r}")
-        except Exception as e:
-            _log(f"heal-everything FAILED: {e}")
-
-        # 4. Bootstrap (surface + ratings + hand splits + predictions + settle + systems)
-        _DAILY_STATUS["phase"] = "bootstrap"
-        _log("Step 4/6: full bootstrap (surface → ratings → predictions → settle → systems)")
-        try:
-            from api.bootstrap import full_bootstrap
-            r = full_bootstrap()
-            _log(f"bootstrap: {r}")
-        except Exception as e:
-            _log(f"bootstrap FAILED: {e}")
-
-        # 5. Force fill ratings (recompute cold-start)
-        _DAILY_STATUS["phase"] = "fill_ratings_force"
-        _log("Step 5/6: force fill_ratings (refresh cold-start values)")
-        try:
-            from api.bootstrap import run_fill_ratings
-            r = run_fill_ratings(force=True)
-            _log(f"fill_ratings: {r}")
-        except Exception as e:
-            _log(f"fill_ratings FAILED: {e}")
-
-        # 6. Healthcheck + auto-repair + email
-        _DAILY_STATUS["phase"] = "healthcheck"
-        _log("Step 6/6: healthcheck + auto-repair + email digest")
-        try:
-            try:
-                from pipeline.healthcheck import (_connect, run_checks, log_results,
-                                                    apply_auto_repair, _reopen)
-            except ImportError:
-                from healthcheck import (_connect, run_checks, log_results,
-                                         apply_auto_repair, _reopen)
-            try:
-                from pipeline.health_email import send_digest
-            except ImportError:
-                try:
-                    from health_email import send_digest
-                except ImportError:
-                    send_digest = None
-            import uuid as _uuid
-            from datetime import datetime as _dt
-            run_id = _dt.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + _uuid.uuid4().hex[:8]
-            conn = _connect()
-            try:
-                results = run_checks(conn)
-                rcon = _connect()
-                try:
-                    apply_auto_repair(rcon, results)
-                finally:
-                    rcon.close()
-                # Re-check
-                results = run_checks(_reopen(conn))
-                conn = _connect()
-                log_results(conn, run_id, results)
-            finally:
-                conn.close()
-            if send_digest:
-                try:
-                    send_digest(run_id, results, force=True)
-                except TypeError:
-                    send_digest(run_id, results)
-            _log(f"healthcheck done: run_id={run_id}, "
-                 f"crit_fail={sum(1 for r in results if r.status=='FAIL' and r.severity=='CRITICAL')}")
-        except Exception as e:
-            _log(f"healthcheck FAILED: {e}")
-
-        _DAILY_STATUS["phase"] = "done"
-        _log("✅ Daily run complete")
-    except SystemExit as e:
-        _DAILY_STATUS["error"] = f"SystemExit: {e.code}"
-    except BaseException as e:
-        _DAILY_STATUS["error"] = f"{type(e).__name__}: {e}"
-        log.error(f"daily worker failed: {e}")
-        log.error(traceback.format_exc())
-    finally:
-        _DAILY_STATUS["finished_at"] = time.time()
-        _DAILY_STATUS["running"] = False
-
-
-@app.get("/admin/run-daily")
-def admin_run_daily():
-    """
-    Run the full daily automation pipeline RIGHT NOW. Background-threaded —
-    returns immediately, takes 5-15 min total.
-
-    Sequence:
-      1. bzzoiro matches sync (fresh fixture data)
-      2. bzzoiro bios fill (DOB / country / full_name)
-      3. heal-everything (twin merges + enrichment + fuzzy)
-      4. full bootstrap (surface + ratings + predictions + settle + systems)
-      5. force fill_ratings (refresh cold-start)
-      6. healthcheck + auto-repair + email digest
-
-    Poll /admin/run-daily/status for progress.
-    """
-    if _DAILY_STATUS.get("running"):
-        return {"status": "already_running",
-                "phase":  _DAILY_STATUS.get("phase"),
-                "started_at": _DAILY_STATUS.get("started_at")}
-    threading.Thread(target=_daily_worker, daemon=True).start()
-    return {
-        "status": "started",
-        "poll":   "/admin/run-daily/status",
-        "note":   "Background, 5-15 min. Same as scheduler does at 04:30/05:30/06:00/06:30/07:00 UTC.",
-    }
-
-
-@app.get("/admin/run-daily/status")
-def admin_run_daily_status():
-    import time
-    s = dict(_DAILY_STATUS)
-    if s.get("started_at"):
-        s["elapsed_sec"] = round((s.get("finished_at") or time.time()) - s["started_at"], 1)
-    s["log_tail"] = s.get("log", [])[-15:]
-    s.pop("log", None)
-    return s
-
-
-@app.get("/admin/bzzoiro-bios/status")
-def admin_bzzoiro_bios_status():
-    """Return the latest bzzoiro-bios run state."""
-    import time
-    s = dict(_BZZOIRO_BIOS_STATUS)
-    if s.get("started_at"):
-        s["elapsed_sec"] = round(
-            (s.get("finished_at") or time.time()) - s["started_at"], 1)
-    return s
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Sackmann WTA backfill — one-off; downloads + ingests Jeff Sackmann's
-# tennis_wta repo to fill the gap that's stopping all WTA enrichment.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SACKMANN_WTA_STATUS = {
-    "running": False, "phase": None, "started_at": None, "finished_at": None,
-    "error": None, "log": [],
-}
-
-
-def _sackmann_wta_worker():
-    import os, time, tempfile, traceback, shutil
-    from pathlib import Path
-    import psycopg2
-    _SACKMANN_WTA_STATUS.update({
-        "running": True, "phase": "starting",
-        "started_at": time.time(), "finished_at": None, "error": None, "log": [],
-    })
-
-    def _log(msg):
-        log.info(f"[sackmann-wta] {msg}")
-        _SACKMANN_WTA_STATUS["log"].append(msg)
-        _SACKMANN_WTA_STATUS["log"] = _SACKMANN_WTA_STATUS["log"][-200:]
-
-    try:
-        try:
-            from pipeline.sackmann_ingest import (
-                SACKMANN_REPOS, download_repo_zip,
-                ingest_players, ingest_matches, ingest_rankings,
-            )
-        except ImportError:
-            from sackmann_ingest import (
-                SACKMANN_REPOS, download_repo_zip,
-                ingest_players, ingest_matches, ingest_rankings,
-            )
-
-        db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
-        if not db_url:
-            _SACKMANN_WTA_STATUS["error"] = "DATABASE_URL not set"
-            return
-
-        conn = psycopg2.connect(db_url)
-        # WTA-only ingestion (skip ATP — already loaded).
-        # Skip run_schema — sa_players/sa_matches already exist in production
-        # (ATP is loaded). Calling run_schema in a thread can sys.exit() the
-        # thread silently if the SQL file isn't packaged in the image, which
-        # is the case here.
-        try:
-            tmpdir = Path(tempfile.mkdtemp(prefix="sackmann_wta_"))
-            try:
-                _SACKMANN_WTA_STATUS["phase"] = "downloading"
-                _log(f"Downloading WTA zip from {SACKMANN_REPOS['WTA']}")
-                extracted = download_repo_zip(SACKMANN_REPOS["WTA"], tmpdir)
-                _log(f"Extracted to {extracted}")
-
-                _SACKMANN_WTA_STATUS["phase"] = "players"
-                _log("Ingesting WTA players...")
-                ingest_players(conn, extracted, "WTA")
-
-                _SACKMANN_WTA_STATUS["phase"] = "matches"
-                _log("Ingesting WTA matches (this is the long one)...")
-                ingest_matches(conn, extracted, "WTA")
-
-                _SACKMANN_WTA_STATUS["phase"] = "rankings"
-                _log("Ingesting WTA rankings...")
-                ingest_rankings(conn, extracted, "WTA")
-
-                _SACKMANN_WTA_STATUS["phase"] = "done"
-                _log("✅ WTA Sackmann backfill complete")
-            finally:
-                shutil.rmtree(tmpdir, ignore_errors=True)
-        finally:
-            conn.close()
-    except SystemExit as e:
-        _SACKMANN_WTA_STATUS["error"] = f"SystemExit: code={e.code}"
-        log.error(f"sackmann-wta thread sys.exit() with code={e.code}")
-    except BaseException as e:
-        _SACKMANN_WTA_STATUS["error"] = f"{type(e).__name__}: {e}"
-        log.error(f"sackmann-wta worker failed: {e}")
-        log.error(traceback.format_exc())
-    finally:
-        _SACKMANN_WTA_STATUS["finished_at"] = time.time()
-        _SACKMANN_WTA_STATUS["running"] = False
-
-
-@app.get("/admin/sackmann-wta")
-def admin_sackmann_wta():
-    """
-    Background WTA-only Sackmann ingestion. Downloads ~20MB zip, parses
-    decades of WTA matches and players. Total runtime ~5-15 minutes.
-    Idempotent — safe to retry; uses sa_ingest_log for resumability.
-    """
-    if _SACKMANN_WTA_STATUS.get("running"):
-        return {"status": "already_running",
-                "phase":  _SACKMANN_WTA_STATUS.get("phase"),
-                "started_at": _SACKMANN_WTA_STATUS.get("started_at")}
-    threading.Thread(target=_sackmann_wta_worker, daemon=True).start()
-    return {
-        "status": "started",
-        "poll":   "/admin/sackmann-wta/status",
-        "note":   "Runs in background, takes 5-15 min. Poll status URL.",
-    }
-
-
-@app.get("/admin/sackmann-wta/status")
-def admin_sackmann_wta_status():
-    """Latest Sackmann WTA ingestion state."""
-    import time
-    s = dict(_SACKMANN_WTA_STATUS)
-    if s.get("started_at"):
-        s["elapsed_sec"] = round(
-            (s.get("finished_at") or time.time()) - s["started_at"], 1)
-    # truncate log preview
-    s["log_tail"] = s.get("log", [])[-15:]
-    s.pop("log", None)
-    return s
-
-
-@app.get("/admin/healthcheck")
-def admin_healthcheck(auto_repair: bool = True, email: bool = True):
-    """
-    Run the full healthcheck panel right now. Optionally auto-repair failing
-    checks (default: yes) and send the email digest (default: yes).
-
-    Hit this URL in your browser whenever the site looks broken:
-        /admin/healthcheck?auto_repair=true&email=true
-
-    Returns a JSON summary so you can see what passed/failed/was repaired.
-    """
-    def _run():
-        import uuid as _uuid
-        from datetime import datetime as _dt
-        # Pipeline modules may live at pipeline.X (local dev) OR flat in /app
-        # (Docker image built by api/Dockerfile — see scheduler.py for the same shim).
-        try:
-            from pipeline.healthcheck import (
-                _connect, run_checks, log_results, apply_auto_repair, _reopen,
-            )
-        except ImportError:
-            from healthcheck import (
-                _connect, run_checks, log_results, apply_auto_repair, _reopen,
-            )
-        try:
-            from pipeline.health_email import send_digest
-        except ImportError:
-            try:
-                from health_email import send_digest
-            except ImportError:
-                send_digest = None
-        except Exception:
-            send_digest = None
-
-        run_id = _dt.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + _uuid.uuid4().hex[:8]
-        conn = _connect()
-        try:
-            results = run_checks(conn)
-        finally:
-            pass
-
-        if auto_repair:
-            repair_conn = _connect()
-            try:
-                apply_auto_repair(repair_conn, results)
-            finally:
-                repair_conn.close()
-            # Re-check after repair
-            try:
-                after = run_checks(_reopen(conn))
-                by_name = {r.name: r for r in results}
-                for r in after:
-                    prev = by_name.get(r.name)
-                    if prev and prev.auto_repaired:
-                        r.auto_repaired = True
-                        r.repair_message = prev.repair_message
-                results = after
-                conn = _connect()
-            except Exception as e:
-                log.warning(f"Re-check after repair failed: {e}")
-
-        try:
-            log_results(conn, run_id, results)
-        except Exception as e:
-            log.error(f"log_results failed: {e}")
-        finally:
-            conn.close()
-
-        if email and send_digest is not None:
-            try:
-                send_digest(run_id, results, force=True)
-            except TypeError:
-                # Older send_digest signature without 'force'
-                try:
-                    send_digest(run_id, results)
-                except Exception as e:
-                    log.error(f"send_digest failed: {e}")
-            except Exception as e:
-                log.error(f"send_digest failed: {e}")
-
-        # Return a tidy summary
-        crit = sum(1 for r in results if r.status == "FAIL" and r.severity == "CRITICAL")
-        warn = sum(1 for r in results if r.status == "FAIL" and r.severity == "WARNING")
-        repaired = sum(1 for r in results if r.auto_repaired)
-        return {
-            "run_id":     run_id,
-            "auto_repair": auto_repair,
-            "summary": {
-                "total":         len(results),
-                "critical_fail": crit,
-                "warning_fail":  warn,
-                "auto_repaired": repaired,
-                "all_passing":   crit == 0 and warn == 0,
-            },
-            "checks": [
-                {
-                    "name":           r.name,
-                    "severity":       r.severity,
-                    "status":         r.status,
-                    "value":          r.value,
-                    "threshold":      r.threshold,
-                    "message":        r.message,
-                    "auto_repaired":  r.auto_repaired,
-                    "repair_message": r.repair_message,
-                } for r in results
-            ],
-        }
-
-    return _safe_admin(_run)
 
 
 @app.get("/admin/systems")
