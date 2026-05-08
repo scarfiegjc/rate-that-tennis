@@ -433,20 +433,24 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
         rows = []
     out["match_count_returned"] = len(rows)
 
-    # Capture the FULL first match record so we can see if 'stat' lives
-    # under a different key. Truncate nested objects for safety.
+    # Capture the FULL first match record + drill into the stats block.
     if rows:
         first = rows[0] if isinstance(rows[0], dict) else None
         if first:
             out["match_raw_keys"] = sorted(list(first.keys()))
-            # Top-level scalars + names of nested objects
-            preview = {}
-            for k, v in first.items():
-                if isinstance(v, (dict, list)):
-                    preview[k] = f"<{type(v).__name__}, keys={list(v.keys())[:8] if isinstance(v, dict) else f'len={len(v)}'}>"
-                else:
-                    preview[k] = v
-            out["match_raw_preview"] = preview
+            stats_block = first.get("stats") or first.get("stat")
+            if isinstance(stats_block, dict):
+                p1_stats = stats_block.get("player1") or {}
+                p2_stats = stats_block.get("player2") or {}
+                out["stats_block_player1_keys"] = sorted(list(p1_stats.keys())) if isinstance(p1_stats, dict) else None
+                out["stats_block_player1_preview"] = (
+                    {k: p1_stats.get(k) for k in list(p1_stats.keys())[:30]}
+                    if isinstance(p1_stats, dict) else str(p1_stats)[:300]
+                )
+                out["stats_block_player2_preview"] = (
+                    {k: p2_stats.get(k) for k in list(p2_stats.keys())[:30]}
+                    if isinstance(p2_stats, dict) else str(p2_stats)[:300]
+                )
 
     # Coverage: how many matches actually have stat blocks at all,
     # and per-field how many populated.
@@ -454,9 +458,27 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
     matches_with_stats = 0
     sample_match = None
     for m in rows:
-        stat = m.get("stat") or {}
-        if isinstance(stat, list):
-            stat = stat[0] if stat else {}
+        # The actual key is `stats` (plural) and it splits into player1/player2.
+        stats_block = m.get("stats") or m.get("stat") or {}
+        # Flatten the player1/player2 dicts back into a single namespace
+        # using the doc convention (suffix 1/2) so the rest of the coverage
+        # logic can stay generic.
+        flat: dict = {}
+        if isinstance(stats_block, dict):
+            for side_idx, side_key in (("1", "player1"), ("2", "player2")):
+                side = stats_block.get(side_key) or {}
+                if isinstance(side, dict):
+                    for k, v in side.items():
+                        # Handle keys like "aces" -> "aces1"/"aces2"
+                        flat[k + side_idx] = v
+                        # And "of" wrappers — some endpoints split into firstServe + firstServeOf
+                        if isinstance(k, str):
+                            flat[k] = v  # also keep bare name
+        # Also handle the legacy already-flat shape (aces1/aces2)
+        if isinstance(stats_block, dict) and stats_block.get("aces1") is not None:
+            for k, v in stats_block.items():
+                flat.setdefault(k, v)
+        stat = flat
         if stat:
             matches_with_stats += 1
         for f in TARGET_STAT_FIELDS:
