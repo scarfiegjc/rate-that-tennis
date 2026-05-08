@@ -401,19 +401,11 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
         out["profile_error"] = profile
 
     # 3) Past matches with stats — this is the headline test.
-    # Try a few `include` variants in case the docs name is wrong (stat/stats).
-    matches = None
-    include_used = None
-    for inc in ("round,tournament.court,tournament.rank,stat",
-                "round,tournament.court,tournament.rank,stats",
-                "round,tournament,stat",
-                "stat"):
-        attempt = _get(f"/tennis/v2/{tour}/player/past-matches/{ms_id}",
-                       params={"include": inc, "pageSize": 10})
-        if attempt.get("ok"):
-            matches = attempt
-            include_used = inc
-            break
+    # Pull a wider sample (50 matches) and look across tournament tiers.
+    matches = _get(f"/tennis/v2/{tour}/player/past-matches/{ms_id}",
+                   params={"include": "round,tournament.court,tournament.rank,stat",
+                           "pageSize": 50})
+    include_used = "round,tournament.court,tournament.rank,stat"
     out["include_param_used"] = include_used
     if not matches or not matches.get("ok"):
         out["matches_error"] = matches
@@ -457,6 +449,9 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
     field_counts = {f: 0 for f in TARGET_STAT_FIELDS}
     matches_with_stats = 0
     sample_match = None
+    # Track which fields ever appear (any match, any tier) for this player.
+    fields_ever_populated: set = set()
+    by_tier: dict = {}  # tier_name -> { matches: int, fields_populated: dict }
     for m in rows:
         # The actual key is `stats` (plural) and it splits into player1/player2.
         stats_block = m.get("stats") or m.get("stat") or {}
@@ -481,9 +476,15 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
         stat = flat
         if stat:
             matches_with_stats += 1
+        # Bucket by tier (Grand Slam, Masters, ATP 500, ATP 250, Challenger…)
+        tier_name = (((m.get("tournament") or {}).get("rank") or {}).get("name")) or "Unknown"
+        tb = by_tier.setdefault(tier_name, {"matches": 0, "fp": {}})
+        tb["matches"] += 1
         for f in TARGET_STAT_FIELDS:
             if stat and stat.get(f) is not None:
                 field_counts[f] += 1
+                fields_ever_populated.add(f)
+                tb["fp"][f] = tb["fp"].get(f, 0) + 1
         if not sample_match and stat:
             # Save one fully-populated match as an example (truncated player objs)
             sample_match = {
@@ -504,6 +505,8 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
         "matches_with_stat_block": matches_with_stats,
         "matches_total":           len(rows),
         "stat_field_population":   field_counts,
+        "fields_ever_populated":   sorted(list(fields_ever_populated)),
+        "by_tier":                 by_tier,
     }
     if sample_match:
         out["sample_match"] = sample_match
