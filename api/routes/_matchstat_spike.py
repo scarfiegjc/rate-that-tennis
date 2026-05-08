@@ -210,8 +210,11 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
                 return {"ms_id": r.get("id"), "ms_name": r.get("name"),
                         "strategy": "surname-initial"}
 
-        # 3: surname only
-        last_matches = [r for r in rows if (r.get("name") or "").lower().endswith(last_token)]
+        # 3: surname only (also case-insensitive substring)
+        last_matches = [
+            r for r in rows
+            if last_token and last_token in (r.get("name") or "").lower()
+        ]
         if len(last_matches) == 1:
             r = last_matches[0]
             return {"ms_id": r.get("id"), "ms_name": r.get("name"),
@@ -220,7 +223,16 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
             return {"ms_id": None, "strategy": "ambiguous-surname",
                     "candidates": [{"id": r["id"], "name": r["name"]} for r in last_matches[:5]]}
 
-    return {"ms_id": None, "strategy": "no-match"}
+        # No match — return debug info so we can see what the list looked like
+        return {
+            "ms_id": None,
+            "strategy": "no-match",
+            "list_size": len(rows),
+            "sample_names": [r.get("name") for r in rows[:8]],
+            "looking_for": {"full": full, "last_token": last_token, "first_initial": first_initial},
+        }
+
+    return {"ms_id": None, "strategy": "no-country-code"}
 
 
 def _spike_one_player(player: dict, tour: str = "atp") -> dict:
