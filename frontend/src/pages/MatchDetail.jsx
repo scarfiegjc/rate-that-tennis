@@ -746,10 +746,14 @@ function fmtShortDate(iso) {
   return `${day} ${mon} '${yearShort}`
 }
 
-// FormRacecard: chip on the INSIDE (toward centre divider), date+score on the
-// OUTSIDE edge of the column, on the same line. Reading inside→out:
-// align='left'  (P1 column)  → [chip] [W/L] [opponent]                [date · score]   ← chip hugs centre
-// align='right' (P2 column)  → [date · score]                [opponent] [W/L] [chip]   ← chip hugs centre
+// FormRacecard: chip on the INSIDE of the column (right edge of left col,
+// left edge of right col — i.e. closest to the centre divider). Reading
+// from the centre outward: chip → W/L → opponent → ... → date+score on the
+// far edge (left-aligned in left col, right-aligned in right col).
+//
+// L→R reading order:
+//   align='left'  (P1)  → [date · score]              [opponent] [W/L] [chip]   ← chip hugs centre
+//   align='right' (P2)  → [chip] [W/L] [opponent]              [date · score]   ← chip hugs centre
 function FormRacecard({ matches, playerName, align = 'left' }) {
   if (!matches || !matches.length) {
     return (
@@ -816,8 +820,11 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           </div>
         )
 
+        // Opponent text aligns toward the chip (= toward the centre divider):
+        // LEFT col → opponent is right-aligned (toward chip on its right)
+        // RIGHT col → opponent is left-aligned (toward chip on its left)
         const opponentText = (
-          <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'right' : 'left' }}>
+          <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'left' : 'right' }}>
             <div style={{
               fontSize: 12, fontWeight: 500, color: 'var(--text-2)',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -827,9 +834,10 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           </div>
         )
 
-        // Layout (chip on the INSIDE, date+score on the OUTSIDE):
-        //   LEFT col, left→right:  [chip] [W/L] [opponent] [date · score]
-        //   RIGHT col, left→right: [date · score] [opponent] [W/L] [chip]
+        // Layout (chip on the INSIDE = closest to centre divider,
+        //         date+score on the OUTSIDE = column edge):
+        //   LEFT col, left→right:  [date · score] [opponent] [W/L] [chip]
+        //   RIGHT col, left→right: [chip] [W/L] [opponent] [date · score]
         return (
           <div key={i} style={{
             display: 'flex',
@@ -840,17 +848,17 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           }}>
             {isRight ? (
               <>
-                {dateScoreBlock}
-                {opponentText}
-                {wlBadge}
                 {chip}
+                {wlBadge}
+                {opponentText}
+                {dateScoreBlock}
               </>
             ) : (
               <>
-                {chip}
-                {wlBadge}
-                {opponentText}
                 {dateScoreBlock}
+                {opponentText}
+                {wlBadge}
+                {chip}
               </>
             )}
           </div>
