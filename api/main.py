@@ -312,17 +312,22 @@ def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
     players we've already ingested — set false to refresh in-place.
     """
     def _run():
+        # Use a fresh psycopg2 connection (NOT the SQLAlchemy engine, whose
+        # implicit transactions silently roll back our commits).
+        import os, psycopg2
         from matchstat_ingest import backfill_active
-        from api.db import get_engine
-        engine = get_engine()
-        with engine.connect() as sa_conn:
-            raw = sa_conn.connection.dbapi_connection
+        conn = psycopg2.connect(
+            os.environ.get("DATABASE_URL", "")
+        )
+        try:
             return backfill_active(
-                raw, tour=tour,
+                conn, tour=tour,
                 limit=(limit or None),
                 max_match_pages=max_match_pages,
                 skip_already_linked=skip_already_linked,
             )
+        finally:
+            conn.close()
     return _safe_admin(_run)
 
 
@@ -330,12 +335,13 @@ def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
 def admin_matchstat_aggregate():
     """Recompute ms_player_career_stats from ms_match_stats."""
     def _run():
+        import os, psycopg2
         from matchstat_ingest import compute_career_stats
-        from api.db import get_engine
-        engine = get_engine()
-        with engine.connect() as sa_conn:
-            raw = sa_conn.connection.dbapi_connection
-            return compute_career_stats(raw)
+        conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
+        try:
+            return compute_career_stats(conn)
+        finally:
+            conn.close()
     return _safe_admin(_run)
 
 
