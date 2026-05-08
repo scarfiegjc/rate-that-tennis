@@ -542,26 +542,34 @@ def backfill_one(conn, player_id: int, tour: str = "atp",
     ms_id = resolved["ms_id"]
     strategy = resolved["strategy"]
 
-    # 1. Profile
+    # 1. Profile + link in their own transaction so a later match-stat error
+    # can't undo this work.
     profile = _get(f"/tennis/v2/{tour}/player/profile/{ms_id}",
                    params={"include": "form,ranking,country"})
     if not profile.get("ok"):
         return {"player_id": player_id, "ms_id": ms_id,
                 "status": "profile-failed", "error": profile}
-    _upsert_player(conn, ms_id, tour, profile["data"])
+    try:
+        _upsert_player(conn, ms_id, tour, profile["data"])
+        _upsert_player_link(conn, player_id, ms_id, tour, strategy)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return {"player_id": player_id, "ms_id": ms_id,
+                "status": "profile-write-failed", "error": str(e)}
 
-    # 2. Player link
-    _upsert_player_link(conn, player_id, ms_id, tour, strategy)
-
-    # 3. Matches with stats — paginate
+    # 2. Matches with stats — savepoint per match so a single bad row
+    # (FK violation, schema mismatch, etc.) doesn't abort the rest.
     matches_seen = 0
     matches_with_stats = 0
     matches_with_premium = 0
+    last_match_error: Optional[str] = None
     for page_no in range(1, max_match_pages + 1):
         page = _get(f"/tennis/v2/{tour}/player/past-matches/{ms_id}",
                     params={"include": "round,tournament.court,tournament.rank,stat",
                             "pageSize": page_size, "pageNo": page_no})
         if not page.get("ok"):
+            last_match_error = f"matches page {page_no}: {page.get('status')} {page.get('error') or page.get('body','')[:200]}"
             break
         body = page.get("data") or {}
         rows = body.get("data") if isinstance(body, dict) else (body if isinstance(body, list) else [])
@@ -569,7 +577,11 @@ def backfill_one(conn, player_id: int, tour: str = "atp",
             break
         for m in rows:
             try:
+                with conn.cursor() as cur:
+                    cur.execute("SAVEPOINT match_upsert")
                 _upsert_match(conn, m, tour)
+                with conn.cursor() as cur:
+                    cur.execute("RELEASE SAVEPOINT match_upsert")
                 matches_seen += 1
                 stats = (m.get("stats") or m.get("stat") or {})
                 if isinstance(stats, dict) and (stats.get("player1") or stats.get("player2")):
@@ -578,16 +590,28 @@ def backfill_one(conn, player_id: int, tour: str = "atp",
                     if isinstance(p1s, dict) and p1s.get("winners") is not None:
                         matches_with_premium += 1
             except Exception as e:
-                log.warning(f"  match upsert failed for {m.get('id')}: {e}")
+                last_match_error = f"match {m.get('id')}: {type(e).__name__}: {e}"
+                log.warning(f"  {last_match_error}")
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("ROLLBACK TO SAVEPOINT match_upsert")
+                except Exception:
+                    conn.rollback()
+        # Commit at the end of every page so progress is durable even if
+        # a later page errors out.
+        try:
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            last_match_error = f"page {page_no} commit: {e}"
         if not body.get("hasNextPage"):
             break
-
-    conn.commit()
     return {
         "player_id": player_id, "ms_id": ms_id, "ms_name": resolved.get("ms_name"),
         "strategy": strategy, "matches_ingested": matches_seen,
         "matches_with_stats": matches_with_stats,
         "matches_with_premium": matches_with_premium,
+        "last_match_error": last_match_error,
         "status": "ok",
     }
 
@@ -647,6 +671,7 @@ def backfill_active(conn, tour: str = "atp", limit: Optional[int] = None,
                 "matches_ingested": res.get("matches_ingested", 0),
                 "matches_with_premium": res.get("matches_with_premium", 0),
                 "error": res.get("error"),
+                "last_match_error": res.get("last_match_error"),
             })
             if res.get("status") == "ok":
                 summary["resolved"] += 1

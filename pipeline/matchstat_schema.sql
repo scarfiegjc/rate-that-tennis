@@ -109,8 +109,10 @@ CREATE TABLE IF NOT EXISTS ms_matches (
     court_name       TEXT,                  -- "Hard" / "Clay" / "Grass" / "Indoor Hard"
 
     -- Players (winner = p1, loser = p2)
-    p1_ms_id         INTEGER REFERENCES ms_players(ms_id) ON DELETE SET NULL,
-    p2_ms_id         INTEGER REFERENCES ms_players(ms_id) ON DELETE SET NULL,
+    -- No FK to ms_players: opponents may not be ingested yet, and we'd rather
+    -- have a stat row with a soft-reference id than an aborted transaction.
+    p1_ms_id         INTEGER,
+    p2_ms_id         INTEGER,
     p1_name          TEXT,
     p2_name          TEXT,
 
@@ -141,7 +143,8 @@ CREATE INDEX IF NOT EXISTS ms_matches_date_idx   ON ms_matches (match_date DESC)
 CREATE TABLE IF NOT EXISTS ms_match_stats (
     ms_match_id              BIGINT NOT NULL REFERENCES ms_matches(ms_match_id) ON DELETE CASCADE,
     side                     CHAR(1) NOT NULL CHECK (side IN ('1', '2')),
-    ms_player_id             INTEGER REFERENCES ms_players(ms_id) ON DELETE SET NULL,
+    -- No FK to ms_players: opponents may not be ingested yet.
+    ms_player_id             INTEGER,
 
     -- Universal (all stat-block matches)
     aces                     INTEGER,
@@ -173,6 +176,21 @@ CREATE TABLE IF NOT EXISTS ms_match_stats (
 );
 
 CREATE INDEX IF NOT EXISTS ms_match_stats_player_idx ON ms_match_stats (ms_player_id);
+
+-- Migration: drop the foreign keys on the player-id columns that were
+-- enforced in the very first version of this schema. They blocked any
+-- backfill where an opponent hadn't been ingested yet. Idempotent —
+-- silently no-ops once the constraints are gone.
+DO $$
+BEGIN
+    BEGIN
+        ALTER TABLE ms_matches      DROP CONSTRAINT IF EXISTS ms_matches_p1_ms_id_fkey;
+        ALTER TABLE ms_matches      DROP CONSTRAINT IF EXISTS ms_matches_p2_ms_id_fkey;
+        ALTER TABLE ms_match_stats  DROP CONSTRAINT IF EXISTS ms_match_stats_ms_player_id_fkey;
+    EXCEPTION WHEN OTHERS THEN
+        NULL;
+    END;
+END$$;
 
 
 -- ═════════════════════════════════════════════════════════════════════════
