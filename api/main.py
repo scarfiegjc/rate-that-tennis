@@ -302,35 +302,107 @@ def admin_predict(days_ahead: int = 7):
     from api.bootstrap import run_rtt_predictions
     return _safe_admin(run_rtt_predictions, days_ahead=days_ahead)
 
-@app.get("/admin/matchstat-backfill")
-def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
-                              max_match_pages: int = 3,
-                              page_size: int = 50,
-                              skip_already_linked: bool = True):
-    """
-    Run the Matchstat ingestion backfill across active rated players.
-    `limit=0` means no limit (whole pool). `skip_already_linked=true` skips
-    players we've already ingested — set false to refresh in-place.
-    """
-    def _run():
-        # Use a fresh psycopg2 connection (NOT the SQLAlchemy engine, whose
-        # implicit transactions silently roll back our commits).
-        import os, psycopg2
+_MS_BACKFILL_STATUS = {
+    "running": False, "started_at": None, "finished_at": None,
+    "tour": None, "params": None,
+    "progress": None,         # {"current": i, "total": n, "resolved": k, "matches": m}
+    "result": None, "error": None,
+}
+
+
+def _matchstat_backfill_worker(tour: str, limit: int, max_match_pages: int,
+                                page_size: int, skip_already_linked: bool):
+    import os, time, traceback, psycopg2
+    _MS_BACKFILL_STATUS.update({
+        "running": True, "started_at": time.time(), "finished_at": None,
+        "tour": tour,
+        "params": {"limit": limit, "max_match_pages": max_match_pages,
+                    "page_size": page_size,
+                    "skip_already_linked": skip_already_linked},
+        "progress": None, "result": None, "error": None,
+    })
+    try:
         from matchstat_ingest import backfill_active
-        conn = psycopg2.connect(
-            os.environ.get("DATABASE_URL", "")
-        )
+        conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
         try:
-            return backfill_active(
+            res = backfill_active(
                 conn, tour=tour,
                 limit=(limit or None),
                 max_match_pages=max_match_pages,
                 page_size=page_size,
                 skip_already_linked=skip_already_linked,
             )
+            # Strip the per-player details list to keep the status payload small.
+            res_summary = {k: v for k, v in res.items() if k != "details"}
+            res_summary["details_count"] = len(res.get("details") or [])
+            _MS_BACKFILL_STATUS["result"] = res_summary
         finally:
             conn.close()
-    return _safe_admin(_run)
+    except Exception as e:
+        _MS_BACKFILL_STATUS["error"] = f"{type(e).__name__}: {e}"
+        log.error(f"matchstat backfill worker failed: {e}")
+        log.error(traceback.format_exc())
+    finally:
+        _MS_BACKFILL_STATUS["finished_at"] = time.time()
+        _MS_BACKFILL_STATUS["running"] = False
+
+
+@app.get("/admin/matchstat-backfill")
+def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
+                              max_match_pages: int = 3,
+                              page_size: int = 50,
+                              skip_already_linked: bool = True,
+                              sync: bool = False):
+    """
+    Run the Matchstat ingestion backfill across active rated players.
+
+    `limit=0` means no limit (whole pool). `skip_already_linked=true` skips
+    players we've already ingested.
+
+    Default mode is ASYNC (fire-and-forget) — returns immediately, poll
+    /admin/matchstat-backfill/status for progress. Pass `sync=true` to run
+    synchronously (only safe for small `limit` values — Railway will time
+    out long requests).
+    """
+    if sync:
+        # Legacy synchronous path for small probe runs.
+        def _run():
+            import os, psycopg2
+            from matchstat_ingest import backfill_active
+            conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
+            try:
+                return backfill_active(
+                    conn, tour=tour, limit=(limit or None),
+                    max_match_pages=max_match_pages, page_size=page_size,
+                    skip_already_linked=skip_already_linked,
+                )
+            finally:
+                conn.close()
+        return _safe_admin(_run)
+
+    if _MS_BACKFILL_STATUS.get("running"):
+        return {"status": "already_running",
+                "started_at": _MS_BACKFILL_STATUS["started_at"],
+                "tour": _MS_BACKFILL_STATUS.get("tour"),
+                "poll": "/admin/matchstat-backfill/status"}
+
+    threading.Thread(
+        target=_matchstat_backfill_worker,
+        args=(tour, limit, max_match_pages, page_size, skip_already_linked),
+        daemon=True,
+    ).start()
+    return {
+        "status": "started",
+        "poll":   "/admin/matchstat-backfill/status",
+        "tour":   tour,
+        "note":   "Backfill runs in background. Whole pool ≈ 30-90 minutes; "
+                  "poll the status URL.",
+    }
+
+
+@app.get("/admin/matchstat-backfill/status")
+def admin_matchstat_backfill_status():
+    return _MS_BACKFILL_STATUS
 
 
 @app.get("/admin/merge-duplicate-players")
