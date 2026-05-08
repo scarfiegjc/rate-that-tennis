@@ -78,13 +78,18 @@ FK_TABLES_COMPOSITE: List[Tuple[str, str, List[str]]] = [
 
 def find_duplicate_groups(conn) -> list[dict]:
     """
-    Return a list of duplicate groups. Each group is:
-        {
-          "norm_name": str,
-          "members": [ { "id": int, "name": str, "api_key": int,
-                         "match_count": int, "ratings_count": int }, ... ]
-        }
-    Groups have at least 2 members.
+    Return a list of duplicate groups — each group is a set of player rows
+    that almost certainly represent the SAME physical player.
+
+    A pair is treated as the same person ONLY when ALL of:
+      • Their normalised names match (lower-case, diacritics stripped),
+      • They share a country (or one's country is NULL — name+country match
+        carries more weight than country presence),
+      • If both have a `full_name`, the normalised full_names also match.
+
+    Short-form name collisions like "J. Adams" / "M. Clark" — where two
+    legitimately different players share an initial.surname token — are
+    NOT merged unless the full_name and country agree.
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
@@ -92,6 +97,7 @@ def find_duplicate_groups(conn) -> list[dict]:
               p.id,
               p.api_key,
               p.name,
+              p.full_name,
               p.country,
               (SELECT COUNT(*) FROM matches m
                  WHERE m.first_player_id = p.id OR m.second_player_id = p.id) AS match_count,
@@ -101,6 +107,7 @@ def find_duplicate_groups(conn) -> list[dict]:
         """)
         rows = cur.fetchall()
 
+    # First-pass bucket by normalised SHORT name.
     by_norm: dict[str, list[dict]] = {}
     for r in rows:
         n = normalise_name(r["name"])
@@ -112,9 +119,43 @@ def find_duplicate_groups(conn) -> list[dict]:
     for norm, members in by_norm.items():
         if len(members) < 2:
             continue
-        # Sort: most matches first, then most ratings, then lowest id
-        members.sort(key=lambda m: (-m["match_count"], -m["ratings_count"], m["id"]))
-        groups.append({"norm_name": norm, "members": members})
+
+        # Now refine within the bucket: cluster members that genuinely look
+        # like the same person (same country, same full_name when both have it).
+        clusters: list[list[dict]] = []
+        for m in members:
+            placed = False
+            m_country = (m.get("country") or "").strip().upper() or None
+            m_fullnorm = normalise_name(m.get("full_name") or "")
+            for c in clusters:
+                head = c[0]
+                h_country = (head.get("country") or "").strip().upper() or None
+                h_fullnorm = normalise_name(head.get("full_name") or "")
+                # Country: match if same OR either is NULL.
+                country_ok = (m_country == h_country) or (not m_country) or (not h_country)
+                # Full-name: if both have one, must agree (after normalisation).
+                if m_fullnorm and h_fullnorm:
+                    fullname_ok = (m_fullnorm == h_fullnorm)
+                else:
+                    fullname_ok = True   # at least one missing — fall back to short-name+country
+                if country_ok and fullname_ok:
+                    c.append(m)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([m])
+
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            # Sort: most matches first, then most ratings, then lowest id (canonical first).
+            cluster.sort(key=lambda x: (-x["match_count"], -x["ratings_count"], x["id"]))
+            groups.append({
+                "norm_name": norm,
+                "country":   (cluster[0].get("country") or None),
+                "full_name": cluster[0].get("full_name") or None,
+                "members":   cluster,
+            })
 
     # Order groups by total match count across members (most impactful first).
     groups.sort(key=lambda g: -sum(m["match_count"] for m in g["members"]))
