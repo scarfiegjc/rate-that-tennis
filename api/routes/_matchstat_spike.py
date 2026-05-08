@@ -156,6 +156,8 @@ def _build_rankings_index(tour: str = "atp", max_pages: int = 20, page_size: int
     surnames: dict[str, list[dict]] = {}
     pages_fetched = 0
     last_count = 0
+    sample_first_row = None
+    sample_first_keys: list[str] = []
     for page_no in range(1, max_pages + 1):
         page = _get(
             f"/tennis/v2/{tour}/ranking/singles",
@@ -171,16 +173,28 @@ def _build_rankings_index(tour: str = "atp", max_pages: int = 20, page_size: int
             break
         last_count = len(rows)
         pages_fetched += 1
+        # Capture first row of first page so we can see the actual response shape
+        if sample_first_row is None and rows:
+            r0 = rows[0]
+            sample_first_row = r0 if isinstance(r0, (dict, list, str, int, float)) else str(r0)
+            if isinstance(r0, dict):
+                sample_first_keys = sorted(r0.keys())
         for r in rows:
-            name = (r.get("name") or "").strip()
+            if not isinstance(r, dict):
+                continue
+            # Some endpoints wrap the player as {player: {...}} (the race format)
+            inner = r.get("player") if isinstance(r.get("player"), dict) else r
+            name = (inner.get("name") or "").strip()
             if not name:
                 continue
             entry = {
-                "id": r.get("id"),
+                "id": inner.get("id"),
                 "name": name,
-                "currentRank": r.get("currentRank"),
-                "countryAcr": r.get("countryAcr"),
+                "currentRank": r.get("currentRank") or r.get("position") or inner.get("currentRank"),
+                "countryAcr": inner.get("countryAcr"),
             }
+            if not entry["id"]:
+                continue
             index[name.lower()] = entry
             tokens = name.replace(".", "").split()
             if tokens:
@@ -188,7 +202,12 @@ def _build_rankings_index(tour: str = "atp", max_pages: int = 20, page_size: int
         if len(rows) < page_size:
             break
 
-    cache = {"by_name": index, "by_surname": surnames, "pages": pages_fetched, "rows_last_page": last_count}
+    cache = {
+        "by_name": index, "by_surname": surnames,
+        "pages": pages_fetched, "rows_last_page": last_count,
+        "sample_first_row": sample_first_row,
+        "sample_first_keys": sample_first_keys,
+    }
     _RANK_INDEX_CACHE[tour] = cache
     return cache
 
@@ -462,6 +481,8 @@ def run_spike(n_players: int = 10, tour: str = "atp") -> dict:
         "names_indexed": len(rank_idx.get("by_name", {})),
         "surnames_indexed": len(rank_idx.get("by_surname", {})),
         "rows_last_page": rank_idx.get("rows_last_page", 0),
+        "sample_first_row": rank_idx.get("sample_first_row"),
+        "sample_first_keys": rank_idx.get("sample_first_keys"),
     }
 
     results: list[dict] = []
