@@ -191,6 +191,57 @@ def upsert_tournament(cur, api_key: int, name: str, event_type_id: int, surface_
 
 
 def upsert_player(cur, api_key: int, name: str, logo_url: Optional[str] = None) -> int:
+    """
+    Resolve `(api_key, name)` to a `players.id`.
+
+    Resolution order:
+      1. Existing row with this api_key → return that id (the api_key is
+         the primary upstream identifier for this provider).
+      2. No api_key match, but an existing row matches by NORMALISED name
+         (lower-case, diacritics stripped, whitespace collapsed) → return that
+         existing id WITHOUT inserting a new row. This prevents duplicate
+         player records when api-tennis.com hands us a different api_key for
+         the same physical player (typically a diacritic spelling variant).
+      3. Otherwise — insert a fresh row.
+    """
+    # 1. Direct api_key lookup.
+    cur.execute("""
+        UPDATE players
+           SET name       = COALESCE(%s, name),
+               logo_url   = COALESCE(%s, logo_url),
+               updated_at = NOW()
+         WHERE api_key = %s
+         RETURNING id
+    """, (name, logo_url, api_key))
+    row = cur.fetchone()
+    if row:
+        return row["id"]
+
+    # 2. Normalised-name fallback — prevents diacritic-driven duplicates.
+    if name:
+        try:
+            from pipeline.merge_duplicate_players import normalise_name
+        except ImportError:
+            from merge_duplicate_players import normalise_name  # when running from /app
+        norm = normalise_name(name)
+        if norm:
+            # Compare normalisation server-side via Python-equivalent SQL.
+            # Postgres: lower(unaccent(name)) ≈ Python normalise_name(name).
+            # We build the candidate set via a less-strict LIKE filter then
+            # confirm in Python to avoid requiring the unaccent extension.
+            base = norm.split(" ")[-1] if " " in norm else norm
+            like_param = f"%{base}%"
+            cur.execute("""
+                SELECT id, name FROM players
+                 WHERE LENGTH(name) > 0
+                   AND LOWER(name) LIKE %s
+                 LIMIT 25
+            """, (like_param,))
+            for cand in cur.fetchall():
+                if normalise_name(cand["name"]) == norm:
+                    return cand["id"]
+
+    # 3. Brand-new player — insert.
     cur.execute("""
         INSERT INTO players (api_key, name, logo_url)
         VALUES (%s, %s, %s)

@@ -333,6 +333,28 @@ def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
     return _safe_admin(_run)
 
 
+@app.get("/admin/merge-duplicate-players")
+def admin_merge_duplicate_players(dry_run: bool = True, limit: int = 0):
+    """
+    Find and merge duplicate `players` rows that share the same physical
+    identity but ended up with different IDs (typically because api-tennis.com
+    handed us different api_key values for diacritic spelling variants).
+
+    `dry_run=true` (default) → returns the merge plan without writing anything.
+    `dry_run=false`          → executes the merges and deletes shadow rows.
+    `limit=N`                → process only the top N most-impactful groups.
+    """
+    def _run():
+        import os, psycopg2
+        from merge_duplicate_players import merge_all
+        conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
+        try:
+            return merge_all(conn, dry_run=dry_run, limit=limit)
+        finally:
+            conn.close()
+    return _safe_admin(_run)
+
+
 @app.get("/admin/matchstat-aggregate")
 def admin_matchstat_aggregate():
     """Recompute ms_player_career_stats from ms_match_stats."""
