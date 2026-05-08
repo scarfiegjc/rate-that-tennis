@@ -406,6 +406,7 @@ def get_player_form(
             m.event_date                   AS date,
             t.name                         AS tournament,
             s.name                         AS surface,
+            ms.score                       AS score,
             CASE WHEN m.first_player_id = %s THEN p2.name ELSE p1.name END AS opponent_name,
             NULL::integer                  AS opponent_rank,
             CASE WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
@@ -473,6 +474,7 @@ def get_player_form(
                 sm.tourney_date AS date,
                 sm.tourney_name AS tournament,
                 sm.surface,
+                sm.score AS score,
                 CASE WHEN sm.winner_id = ANY(%s) THEN sm.loser_name ELSE sm.winner_name END AS opponent_name,
                 CASE WHEN sm.winner_id = ANY(%s) THEN sm.loser_rank  ELSE sm.winner_rank  END AS opponent_rank,
                 (sm.winner_id = ANY(%s)) AS won,

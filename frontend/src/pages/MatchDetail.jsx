@@ -5,10 +5,6 @@ import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import FormChart from '../components/FormChart.jsx'
-import OddsComparison from '../components/OddsComparison.jsx'
-import courtClayImg  from '../assets/court-clay.jpg'
-import courtGrassImg from '../assets/court-grass.jpg'
-import courtHardImg  from '../assets/court-hard.jpg'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers
@@ -122,124 +118,43 @@ function MomentumSquares({ momentum, form_dots }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Non-sticky header (tournament info) — full-bleed court photo background
+// Non-sticky header (tournament info)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function courtImage(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return courtClayImg
-  if (s.includes('grass')) return courtGrassImg
-  if (s.includes('hard') || s.includes('indoor') || s.includes('carpet')) return courtHardImg
-  return courtHardImg
-}
-
 function MatchMeta({ match }) {
-  const pred   = match.prediction || {}
-  const imgSrc = courtImage(match.surface)
-
-  const confidenceColor = pred.confidence === 'high'   ? '#4ade80'
-                        : pred.confidence === 'medium' ? '#fbbf24'
-                        : 'rgba(255,255,255,0.5)'
-
+  const pred = match.prediction || {}
   return (
     <div style={{
-      position: 'relative',
-      minHeight: 170,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
       textAlign: 'center',
-      overflow: 'hidden',
-      padding: '28px 32px 24px',
-      background: imgSrc ? undefined : 'var(--bg-sunken)',
+      padding: '18px 24px 0',
     }}>
-
-      {/* Court photo background */}
-      {imgSrc && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          backgroundImage: `url(${imgSrc})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center 40%',
-        }} />
-      )}
-
-      {/* Dark gradient overlay for readability */}
-      {imgSrc && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.68) 100%)',
-        }} />
-      )}
-
-      {/* ← Today — top left */}
-      <Link to="/" style={{
-        position: 'absolute', top: 14, left: 18,
-        color: 'rgba(255,255,255,0.85)',
-        fontSize: 12, fontWeight: 500,
-        zIndex: 2,
-        textDecoration: 'none',
-        letterSpacing: 0.1,
-      }}>
-        ← Today
-      </Link>
-
-      {/* Content — centred over image */}
-      <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
-
-        {/* Surface lozenge — centred */}
-        <div style={{ marginBottom: 12 }}>
-          <SurfaceBadge surface={match.surface} light />
-        </div>
-
-        {/* Tournament name */}
-        <div style={{
-          fontSize: 22, fontWeight: 800,
-          color: '#ffffff',
-          letterSpacing: '-0.4px',
-          marginBottom: 4,
-          textShadow: '0 1px 4px rgba(0,0,0,0.4)',
-          lineHeight: 1.2,
-        }}>
-          {match.tournament}
-        </div>
-
-        {/* Round */}
-        {match.round && (
-          <div style={{
-            fontSize: 14, fontWeight: 600,
-            color: 'rgba(255,255,255,0.85)',
-            marginBottom: 8,
-            letterSpacing: 0.1,
-            textShadow: '0 1px 3px rgba(0,0,0,0.4)',
-          }}>
-            {match.round}
-          </div>
-        )}
-
-        {/* Confidence pill */}
-        {pred.confidence && (
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'rgba(0,0,0,0.35)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            borderRadius: 999,
-            padding: '4px 10px',
-            fontSize: 11,
-            color: 'rgba(255,255,255,0.95)',
-            fontWeight: 600,
-            letterSpacing: 0.2,
-          }}>
-            <span style={{
-              display: 'inline-block',
-              width: 6, height: 6, borderRadius: '50%',
-              background: confidenceColor,
-            }} />
-            {pred.confidence} confidence
-          </div>
-        )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+        <Link to="/" style={{ color: 'var(--text-3)', fontSize: 12 }}>← Today</Link>
+        <span style={{ color: 'var(--text-3)' }}>·</span>
+        <SurfaceBadge surface={match.surface} />
       </div>
+      <div style={{
+        fontSize: 17, fontWeight: 700, color: 'var(--text)',
+        letterSpacing: '-0.3px', marginBottom: 2,
+      }}>
+        {match.tournament}
+      </div>
+      {match.round && (
+        <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>
+          {match.round}
+        </div>
+      )}
+      {pred.confidence && (
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>
+          <span style={{
+            display: 'inline-block',
+            width: 6, height: 6, borderRadius: '50%',
+            background: pred.confidence === 'high' ? '#166534' : pred.confidence === 'medium' ? '#92400e' : '#a8a29e',
+            marginRight: 4, verticalAlign: 'middle',
+          }} />
+          {pred.confidence} confidence
+        </div>
+      )}
     </div>
   )
 }
@@ -610,9 +525,6 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {/* Market vs RTT odds comparison — best-value lozenges + bookmaker compare */}
-      <OddsComparison matchId={matchId} />
-
       {/* Bet recommendations — kept below the journalistic block */}
       {bets.length > 0 && (
         <div style={{
@@ -821,9 +733,22 @@ function SectionRatings({ match }) {
 // Form — chart + racecard rows
 // ─────────────────────────────────────────────────────────────────────────────
 
-// FormRacecard: chip centred, opponent/WL/score on the outside — mirrors RatingRow style.
-// align='left'  → [opponent + score | text-right] [W/L] [chip] (P1 column)
-// align='right' → [chip] [W/L] [opponent + score | text-left] (P2 column)
+// Format ISO date as short "8 May" / "23 Jan" form.
+function fmtShortDate(iso) {
+  if (!iso) return ''
+  const s = String(iso).slice(0, 10)
+  const m = s.match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return s
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const day = parseInt(m[3], 10)
+  const mon = months[parseInt(m[2], 10) - 1] || ''
+  const yearShort = m[1].slice(2)
+  return `${day} ${mon} '${yearShort}`
+}
+
+// FormRacecard: chip centred, date+score on the OUTSIDE (column edge), opponent toward centre.
+// align='left'  → [date+score]  [chip] [W/L] [opponent]   (P1 column — date hugs left edge)
+// align='right' → [opponent] [W/L] [chip]  [date+score]   (P2 column — date hugs right edge)
 function FormRacecard({ matches, playerName, align = 'left' }) {
   if (!matches || !matches.length) {
     return (
@@ -866,6 +791,31 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
           </div>
         )
 
+        // Date + score block — sits on the outside edge of the column
+        const dateScoreBlock = (
+          <div style={{
+            minWidth: 76, flexShrink: 0,
+            textAlign: isRight ? 'right' : 'left',
+            lineHeight: 1.2,
+          }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
+              whiteSpace: 'nowrap',
+            }}>
+              {fmtShortDate(m.date)}
+            </div>
+            {m.score && (
+              <div style={{
+                fontSize: 10, color: 'var(--text-3)',
+                fontFamily: 'var(--font-mono)', marginTop: 1,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {m.score}
+              </div>
+            )}
+          </div>
+        )
+
         const opponentText = (
           <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'left' : 'right' }}>
             <div style={{
@@ -874,31 +824,34 @@ function FormRacecard({ matches, playerName, align = 'left' }) {
             }}>
               {m.opponent_name || 'Unknown'}
             </div>
-            {m.score && (
-              <div style={{
-                fontSize: 10, color: 'var(--text-3)',
-                fontFamily: 'var(--font-mono)', marginTop: 1,
-              }}>
-                {m.score}
-              </div>
-            )}
           </div>
         )
 
+        // For LEFT column, we want left-to-right: [date+score] [chip] [W/L] [opponent]
+        // For RIGHT column, we want left-to-right: [opponent] [W/L] [chip] [date+score]
         return (
           <div key={i} style={{
             display: 'flex',
-            flexDirection: isRight ? 'row' : 'row-reverse',
             alignItems: 'center',
-            gap: 7,
-            padding: '5px 0',
+            gap: 8,
+            padding: '6px 0',
             borderBottom: i < Math.min(matches.length, 10) - 1 ? '1px solid var(--border-faint)' : 'none',
           }}>
-            {/* Right player: chip | WL | opponent */}
-            {/* Left player (row-reverse): opponent | WL | chip */}
-            {chip}
-            {wlBadge}
-            {opponentText}
+            {isRight ? (
+              <>
+                {opponentText}
+                {wlBadge}
+                {chip}
+                {dateScoreBlock}
+              </>
+            ) : (
+              <>
+                {dateScoreBlock}
+                {chip}
+                {wlBadge}
+                {opponentText}
+              </>
+            )}
           </div>
         )
       })}
@@ -1037,64 +990,108 @@ function SectionStatistics({ match }) {
 // Points Analysis tab — service hold %, break %, BP save/conversion, etc.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PointsBar({ label, v1, v2, suffix = '%', betterIsHigher = true, sample1, sample2 }) {
+// Pastel colour scaled per-metric — each stat has its own "good / average / bad" thresholds.
+function pointsPastel(value, good, avg, betterIsHigher = true) {
+  if (value == null) return null
+  const v = Number(value)
+  const passes = (threshold) => betterIsHigher ? v >= threshold : v <= threshold
+  if (passes(good))  return { bg: '#bbf0d0', text: '#166534' }   // green — strong
+  if (passes(avg))   return { bg: '#fef3c7', text: '#92400e' }   // amber — average
+  return                    { bg: '#fecaca', text: '#991b1b' }   // red   — below par
+}
+
+
+function PointsBar({ label, v1, v2, suffix = '%', good = 70, avg = 55,
+                     betterIsHigher = true, sample1, sample2 }) {
   const n1 = v1 != null ? Number(v1) : null
   const n2 = v2 != null ? Number(v2) : null
-  const has = n1 != null || n2 != null
+  const maxBar = 80
 
-  // Colour the side with the advantage
+  // Bar widths
+  const w1 = n1 != null ? Math.round((Math.min(n1, 100) / 100) * maxBar) : 0
+  const w2 = n2 != null ? Math.round((Math.min(n2, 100) / 100) * maxBar) : 0
+
+  // Lozenge colour — per-metric threshold instead of generic RTT scale
+  const chip1 = pointsPastel(n1, good, avg, betterIsHigher)
+  const chip2 = pointsPastel(n2, good, avg, betterIsHigher)
+
+  // Which side has the advantage? Drives the bar colour
   const advantage = (n1 != null && n2 != null)
     ? (betterIsHigher ? (n1 > n2 ? 'p1' : n2 > n1 ? 'p2' : 'eq')
                       : (n1 < n2 ? 'p1' : n2 < n1 ? 'p2' : 'eq'))
     : null
 
-  const c1 = advantage === 'p1' ? 'var(--green)' : advantage === 'p2' ? 'var(--text-3)' : 'var(--text-2)'
-  const c2 = advantage === 'p2' ? 'var(--blue)'  : advantage === 'p1' ? 'var(--text-3)' : 'var(--text-2)'
+  const t1 = sample1 != null ? `Based on ${sample1} samples` : ''
+  const t2 = sample2 != null ? `Based on ${sample2} samples` : ''
 
-  // Bar width — scale 0-100 mapped to 0-72px
-  const w1 = n1 != null ? Math.round((Math.min(n1, 100) / 100) * 72) : 0
-  const w2 = n2 != null ? Math.round((Math.min(n2, 100) / 100) * 72) : 0
+  // Format: "75%" or "8.4 pts" — drop suffix-only when 0
+  const fmt = (n) => n == null ? '—' :
+    suffix === '%' ? `${Math.round(n)}` :
+    `${n.toFixed(1)}${suffix}`
 
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '60px 72px 30px 140px 30px 72px 60px',
-      alignItems: 'center', gap: 4,
-      margin: '6px 0', fontSize: 12,
+      gridTemplateColumns: `${maxBar}px 44px 160px 44px ${maxBar}px`,
+      alignItems: 'center',
+      gap: 6,
+      margin: '6px auto',
+      maxWidth: 460,
     }}>
-      {/* P1 sample */}
-      <div style={{ textAlign: 'left', fontSize: 10, color: 'var(--text-3)' }}>
-        {sample1 != null ? `n=${sample1}` : ''}
-      </div>
       {/* P1 bar (grows left) */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div title={t1} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <div style={{
           width: w1, height: 6, borderRadius: 3,
-          background: advantage === 'p1' ? '#bbf0d0' : '#f4f4f5',
+          background: advantage === 'p1' ? '#bbf0d0' :
+                      advantage === 'p2' ? '#fecaca' :
+                      n1 != null ? '#fef3c7' : 'var(--bg-raised)',
+          transition: 'width 0.5s ease',
         }} />
       </div>
-      {/* P1 value */}
-      <div style={{ textAlign: 'right', fontWeight: 700, color: c1, fontVariantNumeric: 'tabular-nums' }}>
-        {n1 != null ? `${n1.toFixed(0)}${suffix}` : '—'}
-      </div>
+
+      {/* P1 lozenge */}
+      {chip1 ? (
+        <div title={t1} style={{
+          background: chip1.bg, color: chip1.text,
+          borderRadius: 6, padding: '2px 6px',
+          fontSize: 13, fontWeight: 700, textAlign: 'center',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {fmt(n1)}{suffix === '%' && n1 != null ? '%' : ''}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>—</div>
+      )}
+
       {/* Label */}
-      <div style={{ textAlign: 'center', color: 'var(--text-3)', fontWeight: 500 }}>
+      <div style={{ textAlign: 'center', fontSize: 11,
+                    color: 'var(--text-3)', fontWeight: 500 }}>
         {label}
       </div>
-      {/* P2 value */}
-      <div style={{ textAlign: 'left', fontWeight: 700, color: c2, fontVariantNumeric: 'tabular-nums' }}>
-        {n2 != null ? `${n2.toFixed(0)}${suffix}` : '—'}
-      </div>
+
+      {/* P2 lozenge */}
+      {chip2 ? (
+        <div title={t2} style={{
+          background: chip2.bg, color: chip2.text,
+          borderRadius: 6, padding: '2px 6px',
+          fontSize: 13, fontWeight: 700, textAlign: 'center',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {fmt(n2)}{suffix === '%' && n2 != null ? '%' : ''}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>—</div>
+      )}
+
       {/* P2 bar (grows right) */}
-      <div>
+      <div title={t2}>
         <div style={{
           width: w2, height: 6, borderRadius: 3,
-          background: advantage === 'p2' ? '#bfdbfe' : '#f4f4f5',
+          background: advantage === 'p2' ? '#bbf0d0' :
+                      advantage === 'p1' ? '#fecaca' :
+                      n2 != null ? '#fef3c7' : 'var(--bg-raised)',
+          transition: 'width 0.5s ease',
         }} />
-      </div>
-      {/* P2 sample */}
-      <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-3)' }}>
-        {sample2 != null ? `n=${sample2}` : ''}
       </div>
     </div>
   )
@@ -1158,13 +1155,16 @@ function SectionPointsAnalysis({ match }) {
           Service
         </div>
         <PointsBar label="Hold %"           v1={s1.service_hold_pct}     v2={s2.service_hold_pct}
+                   good={80} avg={70}
                    sample1={s1.service_games} sample2={s2.service_games} />
         <PointsBar label="BP save %"        v1={s1.bp_save_pct}          v2={s2.bp_save_pct}
+                   good={65} avg={55}
                    sample1={s1.bp_faced}      sample2={s2.bp_faced} />
         <PointsBar label="Love hold %"      v1={s1.love_hold_pct}        v2={s2.love_hold_pct}
+                   good={15} avg={8}
                    sample1={s1.service_games} sample2={s2.service_games} />
         <PointsBar label="Avg pts / game"   v1={s1.avg_service_game_pts} v2={s2.avg_service_game_pts}
-                   suffix=" pts" betterIsHigher={false}
+                   suffix=" pts" betterIsHigher={false} good={5} avg={6}
                    sample1={s1.service_games} sample2={s2.service_games} />
       </div>
 
@@ -1178,8 +1178,10 @@ function SectionPointsAnalysis({ match }) {
           Return
         </div>
         <PointsBar label="Break %"          v1={s1.break_pct}            v2={s2.break_pct}
+                   good={25} avg={15}
                    sample1={s1.return_games} sample2={s2.return_games} />
         <PointsBar label="BP conversion"    v1={s1.bp_conversion_pct}    v2={s2.bp_conversion_pct}
+                   good={45} avg={30}
                    sample1={s1.bp_chances}   sample2={s2.bp_chances} />
       </div>
 
@@ -1193,15 +1195,26 @@ function SectionPointsAnalysis({ match }) {
           Pressure & clutch
         </div>
         <PointsBar label="Pressure point %"  v1={s1.pressure_win_pct}     v2={s2.pressure_win_pct}
+                   good={55} avg={45}
                    sample1={s1.pressure_pts_faced} sample2={s2.pressure_pts_faced} />
         <PointsBar label="Tiebreak win %"    v1={s1.tiebreak_win_pct}     v2={s2.tiebreak_win_pct}
+                   good={55} avg={45}
                    sample1={s1.tiebreaks_played} sample2={s2.tiebreaks_played} />
         <PointsBar label="Set point save"    v1={s1.set_point_save_pct}   v2={s2.set_point_save_pct}
+                   good={65} avg={50}
                    sample1={s1.set_points_faced} sample2={s2.set_points_faced} />
         <PointsBar label="Match point save"  v1={s1.match_point_save_pct} v2={s2.match_point_save_pct}
+                   good={70} avg={55}
                    sample1={s1.match_points_faced} sample2={s2.match_points_faced} />
         <PointsBar label="Set 1 recovery"    v1={s1.set1_recovery_pct}    v2={s2.set1_recovery_pct}
+                   good={35} avg={20}
                    sample1={s1.set1_lost}     sample2={s2.set1_lost} />
+        <PointsBar label="Longest game run"  v1={s1.longest_game_run}     v2={s2.longest_game_run}
+                   suffix=" g" good={8} avg={5}
+                   sample1={s1.matches_analyzed} sample2={s2.matches_analyzed} />
+        <PointsBar label="Deuce win % (ret)" v1={s1.deuce_win_pct_ret}    v2={s2.deuce_win_pct_ret}
+                   good={55} avg={45}
+                   sample1={s1.deuce_pts_total_ret} sample2={s2.deuce_pts_total_ret} />
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', marginTop: 12 }}>
@@ -1395,54 +1408,115 @@ function SectionH2H({ match }) {
   const summary  = h2h?.summary  || {}
   const meetings = h2h?.matches  || []
 
+  const cardStyle = {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--r-lg)',
+    padding: '18px 22px',
+    marginBottom: 16,
+  }
+
+  const cardHeaderStyle = {
+    fontSize: 11,
+    color: 'var(--text-3)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontWeight: 700,
+    marginBottom: 12,
+  }
+
   return (
     <div>
-      <div className="h2h-summary">
-        <div>
-          <div className="h2h-wins p1">{summary.p1_wins ?? 0}</div>
-          <div className="h2h-label">{p1.name}</div>
+      {/* Headline summary */}
+      <div style={{
+        ...cardStyle,
+        display: 'grid',
+        gridTemplateColumns: '1fr auto 1fr',
+        alignItems: 'center',
+        gap: 16,
+        padding: '24px 22px',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="h2h-wins p1" style={{ fontSize: 36, fontWeight: 800 }}>
+            {summary.p1_wins ?? 0}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>{p1.name}</div>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>
           {summary.total ?? 0} meetings
         </div>
-        <div>
-          <div className="h2h-wins p2">{summary.p2_wins ?? 0}</div>
-          <div className="h2h-label">{p2.name}</div>
+        <div style={{ textAlign: 'center' }}>
+          <div className="h2h-wins p2" style={{ fontSize: 36, fontWeight: 800 }}>
+            {summary.p2_wins ?? 0}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>{p2.name}</div>
         </div>
       </div>
 
       {summary.by_surface && Object.keys(summary.by_surface).length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-header">By surface</div>
-          {Object.entries(summary.by_surface).map(([surf, counts]) => (
-            <div key={surf} className="stat-bar-row">
-              <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 600 }}>{counts.p1}</div>
-              <div className="stat-bar-label"><SurfaceBadge surface={surf} /></div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{counts.p2}</div>
-            </div>
-          ))}
+        <div style={cardStyle}>
+          <div style={cardHeaderStyle}>By surface</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {Object.entries(summary.by_surface).map(([surf, counts]) => (
+              <div key={surf} style={{
+                display: 'grid',
+                gridTemplateColumns: '40px 1fr 40px',
+                alignItems: 'center',
+                gap: 12,
+              }}>
+                <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  {counts.p1}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <SurfaceBadge surface={surf} />
+                </div>
+                <div style={{ textAlign: 'left', fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  {counts.p2}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {meetings.length === 0 ? (
-        <div className="loading" style={{ minHeight: 80 }}>No H2H meetings on record</div>
+        <div style={{ ...cardStyle, textAlign: 'center', color: 'var(--text-3)', fontSize: 14, padding: '32px 22px' }}>
+          No H2H meetings on record
+        </div>
       ) : (
-        <div className="card">
-          <div className="card-header">Recent meetings</div>
-          {meetings.slice(0, 10).map((m, i) => (
-            <div key={i} className="h2h-match">
-              <div className="h2h-winner-dot"
-                style={{ background: m.winner === 'first_player' ? 'var(--accent-green)' : 'var(--accent-blue)' }}
-              />
-              <div className="h2h-match-info">
-                <div className="h2h-match-score">{m.score || '—'}</div>
-                <div className="h2h-match-detail">
-                  {m.tournament} · {m.round} · {m.date?.slice(0, 10)}
+        <div style={cardStyle}>
+          <div style={cardHeaderStyle}>Recent meetings</div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {meetings.slice(0, 10).map((m, i) => (
+              <div key={i} style={{
+                display: 'grid',
+                gridTemplateColumns: '12px 1fr auto',
+                alignItems: 'center',
+                gap: 14,
+                padding: '10px 0',
+                borderBottom: i < Math.min(meetings.length, 10) - 1
+                  ? '1px solid var(--border-faint)'
+                  : 'none',
+              }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: m.winner === 'first_player' ? 'var(--accent-green)' : 'var(--accent-blue)',
+                }} />
+                <div>
+                  <div style={{
+                    fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-1)',
+                  }}>
+                    {m.score || '—'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+                    {m.tournament} · {m.round} · {fmtShortDate(m.date)}
+                  </div>
                 </div>
+                <SurfaceBadge surface={m.surface} />
               </div>
-              <SurfaceBadge surface={m.surface} />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
