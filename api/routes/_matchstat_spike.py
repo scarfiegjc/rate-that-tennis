@@ -148,6 +148,33 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
     # page (the top of the rankings) to demonstrate ID lookup mechanics. A real
     # backfill would either use full-text search (/misc/search) or paginate
     # through the whole list once and cache locally.
+    # Strategy 0: try the global search endpoint with the surname.
+    # Docs say it returns name+country+birthday only, but worth testing the
+    # actual response — some endpoints return more than the docs claim.
+    last_token = full.replace(".", "").split()[-1] if full else (
+        short.replace(".", "").split()[-1] if short else "")
+    if last_token:
+        search = _get("/tennis/v2/search", params={"search": last_token})
+        if search.get("ok"):
+            sbody = search.get("data") or {}
+            buckets = sbody.get("data") if isinstance(sbody, dict) else None
+            if isinstance(buckets, list):
+                # Bucket order per docs: player_atp, player_wta, tournament_atp, tournament_wta
+                want = "player_atp" if tour == "atp" else "player_wta"
+                for b in buckets:
+                    if (b.get("category") or "").lower() == want:
+                        results = b.get("result") or []
+                        # Print one full record so we can see if 'id' is there
+                        if results:
+                            return {
+                                "ms_id": results[0].get("id"),
+                                "ms_name": results[0].get("name"),
+                                "strategy": "search",
+                                "search_total": b.get("total"),
+                                "search_first_record_keys": sorted(list(results[0].keys())),
+                                "search_first_record": results[0],
+                            }
+
     cc3 = _to_cc3(player.get("country_code"))
     if cc3:
         # The doc shows `PlayerCountry:{ITA}` but the live endpoint rejects
