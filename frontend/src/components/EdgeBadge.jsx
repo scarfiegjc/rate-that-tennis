@@ -6,14 +6,11 @@ export default function EdgeBadge({ edge, playerName }) {
   if (Math.abs(pct) < 2) {
     return <span className="edge-badge neutral">Market aligned</span>
   }
-  // Use just the last name to keep the badge compact and prevent overflow on
-  // the match row meta column.
-  const lastName = (playerName || '').trim().split(/\s+/).pop() || playerName || ''
   if (pct >= 5) {
-    return <span className="edge-badge high" title={`+${pct}% edge on ${playerName}`}>+{pct}% {lastName}</span>
+    return <span className="edge-badge high">+{pct}% on {playerName}</span>
   }
   if (pct > 2) {
-    return <span className="edge-badge medium" title={`+${pct}% edge on ${playerName}`}>+{pct}% {lastName}</span>
+    return <span className="edge-badge medium">+{pct}% on {playerName}</span>
   }
   return <span className="edge-badge review">Review ({pct}%)</span>
 }

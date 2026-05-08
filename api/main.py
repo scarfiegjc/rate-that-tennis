@@ -18,6 +18,8 @@ from api.routes.matches import router as matches_router
 from api.routes.players import router as players_router
 from api.routes.predictions import router as predictions_router
 from api.routes.odds import router as odds_router
+from api.routes.auth import router as auth_router
+from api.routes.picks import router as picks_router
 
 # Optional routes — these files exist in dev but may not be in this image yet.
 # Wrap each so a missing module doesn't crash the whole API on startup.
@@ -62,8 +64,8 @@ ALLOWED_ORIGINS = os.environ.get(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -75,6 +77,8 @@ app.include_router(matches_router, prefix="/api/v1")
 app.include_router(players_router, prefix="/api/v1")
 app.include_router(predictions_router, prefix="/api/v1")
 app.include_router(odds_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(picks_router, prefix="/api/v1")
 if lab_router:         app.include_router(lab_router,         prefix="/api/v1")
 if health_router:      app.include_router(health_router,      prefix="/api/v1")
 if diagnose_router:    app.include_router(diagnose_router,    prefix="/api/v1")

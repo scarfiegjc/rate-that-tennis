@@ -5,6 +5,7 @@ import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import FormChart from '../components/FormChart.jsx'
+import StarPick from '../components/StarPick.jsx'
 import courtClayImg  from '../assets/court-clay.jpg'
 import courtGrassImg from '../assets/court-grass.jpg'
 import courtHardImg  from '../assets/court-hard.jpg'
@@ -333,6 +334,15 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
               {p1.name || '—'}
             </Link>
             <RttLozenge score={p1.ratings?.rtt_score} />
+            {!isFinished && p1.player_id && (
+              <StarPick
+                matchId={match.match_id}
+                playerId={p1.player_id}
+                playerName={p1.name}
+                ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
+                size="md"
+              />
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {/* W/L dots */}
@@ -378,6 +388,15 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <RttLozenge score={p2.ratings?.rtt_score} />
+            {!isFinished && p2.player_id && (
+              <StarPick
+                matchId={match.match_id}
+                playerId={p2.player_id}
+                playerName={p2.name}
+                ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
+                size="md"
+              />
+            )}
             <Link to={`/player/${p2.player_id}`} style={{
               fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px',
               color: 'var(--text)', textDecoration: 'none',

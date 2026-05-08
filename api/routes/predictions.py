@@ -60,9 +60,6 @@ def _serialise_prediction_row(r: dict) -> dict:
         "event_date": str(r["event_date"]) if r.get("event_date") else None,
         "event_time": str(r["event_time"]) if r.get("event_time") else None,
         "event_status": r.get("event_status"),
-        "set_scores": r.get("set_scores"),
-        "final_result": r.get("final_result"),
-        "game_result": r.get("game_result"),
         "tournament": r.get("tournament_name"),
         "surface": r.get("surface_name"),
         "round": r.get("tournament_round"),
@@ -175,6 +172,58 @@ def match_intelligence(match_id: int):
     p1_form = _form(row["p1_id"]) if row.get("p1_id") else []
     p2_form = _form(row["p2_id"]) if row.get("p2_id") else []
 
+    def _enrich_form(form, p_rtt):
+        """Pull out narrative-friendly signals from the recent form list."""
+        wins = [f for f in form if f.get("result") == "W"]
+        losses = [f for f in form if f.get("result") == "L"]
+        # Best recent win = the highest-status W (Slam > Masters > 500 > 250 > Challenger > ITF)
+        best_win = wins[0] if wins else None
+        # Current streak
+        streak_type, streak_len = ("W" if form and form[0]["result"] == "W" else "L"), 0
+        for f in form:
+            if f["result"] == streak_type:
+                streak_len += 1
+            else:
+                break
+        return {
+            "win_loss_last_10":  f"{len(wins)}-{len(losses)}",
+            "current_streak":    f"{streak_type}{streak_len}",
+            "current_streak_type": streak_type,
+            "current_streak_len": streak_len,
+            "most_recent_win":   best_win,
+            "most_recent_match": form[0] if form else None,
+        }
+
+    p1_summary = _enrich_form(p1_form, row.get("p1_rtt"))
+    p2_summary = _enrich_form(p2_form, row.get("p2_rtt"))
+
+    # Surface preference call-out: which surface is each player rated highest on
+    def _best_surface(p):
+        rts = {
+            "clay":   p.get("clay_rating"),
+            "hard":   p.get("hard_rating"),
+            "grass":  p.get("grass_rating"),
+            "indoor": p.get("indoor_rating"),
+        }
+        valid = {k: v for k, v in rts.items() if v is not None}
+        if not valid:
+            return None
+        best_surf = max(valid, key=valid.get)
+        return {"surface": best_surf, "rating": valid[best_surf]}
+
+    p1_best = _best_surface({
+        "clay_rating":   float(row["p1_clay"])   if row.get("p1_clay")   is not None else None,
+        "hard_rating":   float(row["p1_hard"])   if row.get("p1_hard")   is not None else None,
+        "grass_rating":  float(row["p1_grass"])  if row.get("p1_grass")  is not None else None,
+        "indoor_rating": float(row["p1_indoor"]) if row.get("p1_indoor") is not None else None,
+    })
+    p2_best = _best_surface({
+        "clay_rating":   float(row["p2_clay"])   if row.get("p2_clay")   is not None else None,
+        "hard_rating":   float(row["p2_hard"])   if row.get("p2_hard")   is not None else None,
+        "grass_rating":  float(row["p2_grass"])  if row.get("p2_grass")  is not None else None,
+        "indoor_rating": float(row["p2_indoor"]) if row.get("p2_indoor") is not None else None,
+    })
+
     # H2H — quick lookup
     h2h = safe_query_one(
         """
@@ -279,10 +328,121 @@ def match_intelligence(match_id: int):
                 "p1_wins": int(h2h.get("p1_wins") or 0) if h2h else 0,
                 "p2_wins": int(h2h.get("p2_wins") or 0) if h2h else 0,
                 "total":   int(h2h.get("total")   or 0) if h2h else 0,
+                "last_meeting": _last_h2h_meeting(row["p1_id"], row["p2_id"]) if row.get("p1_id") and row.get("p2_id") else None,
             },
             "market": _latest_odds_for_match(match_id),
+            "summaries": {
+                "p1": p1_summary,
+                "p2": p2_summary,
+                "p1_best_surface": p1_best,
+                "p2_best_surface": p2_best,
+            },
+            "did_you_know_candidates": _did_you_know_candidates(
+                row, p1_summary, p2_summary, p1_best, p2_best, h2h, p1_form, p2_form
+            ),
         },
     }
+
+
+def _last_h2h_meeting(p1_id: int, p2_id: int) -> Optional[dict]:
+    return safe_query_one(
+        """
+        SELECT m.event_date, t.name AS tournament, s.name AS surface,
+               m.tournament_round AS round, m.final_result,
+               CASE WHEN m.winner = 'First Player'  AND m.first_player_id  = %s THEN 'p1'
+                    WHEN m.winner = 'Second Player' AND m.second_player_id = %s THEN 'p1'
+                    WHEN m.winner = 'First Player'  AND m.first_player_id  = %s THEN 'p2'
+                    WHEN m.winner = 'Second Player' AND m.second_player_id = %s THEN 'p2'
+                    ELSE NULL END AS winner
+        FROM matches m
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s    ON s.id = t.surface_id
+        WHERE ((m.first_player_id = %s AND m.second_player_id = %s)
+            OR (m.first_player_id = %s AND m.second_player_id = %s))
+          AND m.event_status = 'Finished'
+          AND m.winner IS NOT NULL
+        ORDER BY m.event_date DESC
+        LIMIT 1
+        """,
+        (p1_id, p1_id, p2_id, p2_id, p1_id, p2_id, p2_id, p1_id),
+    )
+
+
+def _did_you_know_candidates(row, p1s, p2s, p1_best, p2_best, h2h, p1_form, p2_form):
+    """Pre-cooked striking facts the AI can pick from."""
+    cands = []
+    p1_name = row.get("p1_name") or "P1"
+    p2_name = row.get("p2_name") or "P2"
+    surface = (row.get("surface_name") or "").lower()
+
+    # 1. Win/loss over last 10
+    cands.append({
+        "code": "p1_recent_wl",
+        "fact": f"{p1_name} is {p1s['win_loss_last_10']} in his last 10 matches.",
+    })
+    cands.append({
+        "code": "p2_recent_wl",
+        "fact": f"{p2_name} is {p2s['win_loss_last_10']} in his last 10 matches.",
+    })
+    # 2. Current streak (if 3+)
+    if p1s["current_streak_len"] >= 3:
+        verb = "winning" if p1s["current_streak_type"] == "W" else "losing"
+        cands.append({"code": "p1_streak",
+                      "fact": f"{p1_name} comes in {verb} {p1s['current_streak_len']} matches in a row."})
+    if p2s["current_streak_len"] >= 3:
+        verb = "winning" if p2s["current_streak_type"] == "W" else "losing"
+        cands.append({"code": "p2_streak",
+                      "fact": f"{p2_name} comes in {verb} {p2s['current_streak_len']} matches in a row."})
+    # 3. Best surface match-up
+    if p1_best and surface and p1_best["surface"] in surface:
+        cands.append({
+            "code": "p1_on_best_surface",
+            "fact": f"{p1_name} is playing his strongest surface ({p1_best['surface']}, rated {round(p1_best['rating'])}).",
+        })
+    if p2_best and surface and p2_best["surface"] in surface:
+        cands.append({
+            "code": "p2_on_best_surface",
+            "fact": f"{p2_name} is playing his strongest surface ({p2_best['surface']}, rated {round(p2_best['rating'])}).",
+        })
+    # 4. H2H
+    total = (h2h.get("total") or 0) if h2h else 0
+    p1w = (h2h.get("p1_wins") or 0) if h2h else 0
+    p2w = (h2h.get("p2_wins") or 0) if h2h else 0
+    if total >= 1:
+        if p1w > p2w:
+            cands.append({"code": "h2h",
+                          "fact": f"{p1_name} leads the head-to-head {p1w}-{p2w} from {total} previous meetings."})
+        elif p2w > p1w:
+            cands.append({"code": "h2h",
+                          "fact": f"{p2_name} leads the head-to-head {p2w}-{p1w} from {total} previous meetings."})
+        else:
+            cands.append({"code": "h2h",
+                          "fact": f"They have met {total} time{'s' if total > 1 else ''} before with the head-to-head locked at {p1w}-{p2w}."})
+    # 5. Big recent win
+    def _big_win(form, name):
+        if not form:
+            return None
+        for f in form[:5]:
+            if f.get("result") != "W":
+                continue
+            tour = (f.get("tournament") or "").lower()
+            if any(k in tour for k in ("masters","slam","wimbledon","roland","open","atp","wta","championship","finals")):
+                return f"{name} beat {f.get('opp')} {f.get('score') or ''} in the {f.get('round') or 'previous round'} at {f.get('tournament')}."
+        return None
+    bw1 = _big_win(p1_form, p1_name)
+    if bw1: cands.append({"code": "p1_big_win", "fact": bw1.strip()})
+    bw2 = _big_win(p2_form, p2_name)
+    if bw2: cands.append({"code": "p2_big_win", "fact": bw2.strip()})
+    # 6. RTT gap call-out
+    p1_rtt = float(row["p1_rtt"]) if row.get("p1_rtt") is not None else None
+    p2_rtt = float(row["p2_rtt"]) if row.get("p2_rtt") is not None else None
+    if p1_rtt is not None and p2_rtt is not None and abs(p1_rtt - p2_rtt) >= 12:
+        leader, gap = (p1_name, p1_rtt - p2_rtt) if p1_rtt > p2_rtt else (p2_name, p2_rtt - p1_rtt)
+        cands.append({
+            "code": "rtt_gap",
+            "fact": f"{leader} comes in with a {round(gap)}-point RTT advantage — a clear class gap.",
+        })
+    return cands
 
 
 def _latest_odds_for_match(match_id: int) -> dict:
@@ -438,8 +598,6 @@ def predictions_today(
             m.event_time,
             m.event_status,
             m.winner          AS match_winner_text,
-            m.final_result,
-            m.game_result,
             t.name            AS tournament_name,
             s.name            AS surface_name,
             m.tournament_round,
@@ -462,19 +620,13 @@ def predictions_today(
             mp.form_gap,
             mp.total_logit,
             mp.predicted_at,
-            mp.key_factors,
-            ms.set_scores
+            mp.key_factors
         FROM matches m
         LEFT JOIN tournaments t       ON t.id = m.tournament_id
         LEFT JOIN surfaces s          ON s.id = t.surface_id
         LEFT JOIN players p1          ON p1.id = m.first_player_id
         LEFT JOIN players p2          ON p2.id = m.second_player_id
         LEFT JOIN model_predictions mp ON mp.match_id = m.id
-        LEFT JOIN LATERAL (
-            SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number) AS set_scores
-            FROM match_scores ms_inner
-            WHERE ms_inner.match_id = m.id
-        ) ms ON TRUE
         WHERE m.event_date BETWEEN %s AND %s
           AND m.event_status NOT IN ('Cancelled','Walkover','Postponed')
           AND m.first_player_id IS NOT NULL

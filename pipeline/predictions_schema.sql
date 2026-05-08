@@ -100,6 +100,22 @@ CREATE TABLE IF NOT EXISTS player_point_stats (
 
 CREATE INDEX IF NOT EXISTS idx_pps_matches ON player_point_stats(matches_analyzed DESC);
 
+-- Migration: extend player_point_stats with new columns added after first deploy.
+ALTER TABLE player_point_stats
+    ADD COLUMN IF NOT EXISTS love_holds           INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS love_hold_pct        NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS avg_service_game_pts NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS pressure_pts_faced   INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS pressure_pts_won     INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS pressure_win_pct     NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS set1_lost            INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS set1_lost_recovered  INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS set1_recovery_pct    NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS longest_game_run     INTEGER,
+    ADD COLUMN IF NOT EXISTS deuce_pts_won_ret    INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS deuce_pts_total_ret  INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS deuce_win_pct_ret    NUMERIC(5,2);
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Hand-matchup splits — per-player record vs each opponent hand
 --    Refreshed nightly from production matches + sa_matches (training-only).

@@ -1,0 +1,1109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Player page mockup — ratethat.tennis</title>
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --bg-card:   #161b22;
+      --bg-raised: #21262d;
+      --bg-sunken: #0a0d12;
+      --border:    #30363d;
+      --border-faint: #21262d;
+      --text:      #e6edf3;
+      --text-2:    #c9d1d9;
+      --text-3:    #8b949e;
+      --green:     #00cc7a;
+      --green-bg:  rgba(0,204,122,0.12);
+      --red:       #f85149;
+      --red-bg:    rgba(248,81,73,0.10);
+      --amber:     #d29922;
+      --amber-bg:  rgba(210,153,34,0.12);
+      --clay:      #e07a3a;
+      --hard:      #4493f8;
+      --grass:     #28a745;
+      --indoor:    #a371f7;
+      --r:         8px;
+      --r-sm:      6px;
+      --mono:      ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+    }
+    .mockup-banner {
+      background: linear-gradient(90deg, #1a1f29, #161b22);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 24px; font-size: 12px; color: var(--text-3);
+      text-align: center;
+    }
+    .mockup-banner strong { color: var(--amber); }
+    .page { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+    /* ── Hero ─────────────────────────────────── */
+    .hero { background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--r); padding: 20px 24px; }
+    .hero-row { display: flex; gap: 24px; align-items: flex-start; }
+    .hero-id { flex: 1; min-width: 0; }
+    .hero-name { font-size: 32px; font-weight: 900; letter-spacing: -0.4px; line-height: 1.05; }
+    .hero-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+                 font-size: 12px; color: var(--text-3); margin-top: 6px; }
+    .hero-meta .sep { color: var(--border); }
+    .hero-chip { background: var(--bg-raised); padding: 3px 10px; border-radius: 99px;
+                 font-size: 11px; font-weight: 600; color: var(--text-2); }
+    .hero-status { margin-top: 12px; font-size: 13px;
+                   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .hero-status .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+                              box-shadow: 0 0 0 4px rgba(248,81,73,0.18); }
+    .hero-status-live { color: var(--red); font-weight: 700; text-transform: uppercase;
+                        font-size: 11px; letter-spacing: 0.6px; }
+
+    .hero-rtt { text-align: center; flex-shrink: 0; }
+    .hero-rtt-num { font-size: 64px; font-weight: 900; line-height: 1;
+                     background: linear-gradient(180deg, var(--green) 0%, #00b073 100%);
+                     -webkit-background-clip: text; background-clip: text;
+                     -webkit-text-fill-color: transparent; font-variant-numeric: tabular-nums; }
+    .hero-rtt-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+                       color: var(--text-3); margin-top: 4px; font-weight: 700; }
+    .hero-rtt-tier { display: inline-block; margin-top: 6px; font-size: 10px;
+                      text-transform: uppercase; letter-spacing: 0.5px;
+                      padding: 3px 10px; border-radius: 99px; font-weight: 700;
+                      background: var(--green-bg); color: var(--green); }
+
+    /* sparkline */
+    .hero-sparkline { width: 110px; height: 30px; margin-top: 6px; }
+
+    /* ── Tabs ─────────────────────────────────── */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border);
+            margin-top: 24px; position: sticky; top: 0; background: var(--bg);
+            z-index: 10; padding-top: 4px; }
+    .tab { background: none; border: none; color: var(--text-3); font-size: 13px;
+           font-weight: 500; padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent;
+           transition: color 0.15s, border-color 0.15s;
+           font-family: inherit; }
+    .tab:hover { color: var(--text-2); }
+    .tab.active { color: var(--text); border-bottom-color: var(--green); font-weight: 700; }
+
+    .tab-panel { padding: 24px 0; }
+    .tab-panel[hidden] { display: none; }
+
+    /* ── At-a-glance row ──────────────────────── */
+    .glance-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .glance-card { background: var(--bg-card); border: 1px solid var(--border);
+                   border-radius: var(--r); padding: 14px 16px; }
+    .glance-title { font-size: 10px; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: 0.6px; color: var(--text-3); margin-bottom: 10px; }
+    .form-dot-row { display: flex; gap: 4px; margin-bottom: 8px; }
+    .form-dot { width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
+                align-items: center; justify-content: center; font-size: 10px; font-weight: 800; }
+    .form-dot.W { background: var(--green-bg); color: var(--green); }
+    .form-dot.L { background: var(--red-bg); color: var(--red); }
+    .glance-sub { font-size: 12px; color: var(--text-3); }
+    .momentum { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+                font-weight: 700; padding: 2px 8px; border-radius: 99px;
+                background: var(--green-bg); color: var(--green); }
+
+    /* surface bars */
+    .surf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+    .surf-row:last-child { margin-bottom: 0; }
+    .surf-label { width: 50px; color: var(--text-2); font-weight: 600; }
+    .surf-bar-wrap { flex: 1; height: 8px; background: var(--bg-raised); border-radius: 4px;
+                     overflow: hidden; }
+    .surf-bar { height: 100%; border-radius: 4px; }
+    .surf-stats { width: 80px; text-align: right; color: var(--text-3); font-family: var(--mono);
+                  font-variant-numeric: tabular-nums; }
+    .surf-stats b { color: var(--text-2); }
+    .surf-bar.clay   { background: var(--clay); }
+    .surf-bar.hard   { background: var(--hard); }
+    .surf-bar.grass  { background: var(--grass); }
+    .surf-bar.indoor { background: var(--indoor); }
+
+    /* pressure stats */
+    .pressure-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .pressure-stat { text-align: center; }
+    .pressure-stat .v { font-size: 22px; font-weight: 800; color: var(--text);
+                        font-variant-numeric: tabular-nums; line-height: 1; }
+    .pressure-stat .l { font-size: 10px; color: var(--text-3); margin-top: 4px;
+                        text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* ── Skill bars ───────────────────────────── */
+    .section-h { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 0.6px; color: var(--text-3); margin: 0 0 12px;  }
+    .skill-card { background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: var(--r); padding: 16px 18px; margin-bottom: 16px; }
+    .skill-row { display: grid; grid-template-columns: 110px 1fr 90px 80px;
+                 gap: 14px; align-items: center; padding: 7px 0;
+                 border-bottom: 1px solid var(--border-faint); font-size: 13px; }
+    .skill-row:last-child { border-bottom: none; }
+    .skill-name { color: var(--text-2); font-weight: 600; }
+    .skill-bar-wrap { height: 8px; background: var(--bg-raised); border-radius: 4px; overflow: hidden; }
+    .skill-bar { height: 100%; border-radius: 4px;
+                 background: linear-gradient(90deg, #00b073, var(--green)); }
+    .skill-val { font-family: var(--mono); font-variant-numeric: tabular-nums;
+                 font-weight: 700; color: var(--text); text-align: right; }
+    .skill-pct { font-size: 11px; color: var(--green); font-weight: 700; text-align: right; }
+    .skill-pct.mid { color: var(--amber); }
+    .skill-pct.low { color: var(--text-3); }
+
+    /* narrative */
+    .narrative { background: var(--bg-card); border-left: 3px solid var(--green);
+                 padding: 14px 18px; border-radius: var(--r-sm); font-size: 13px;
+                 line-height: 1.6; color: var(--text-2); margin-bottom: 16px; }
+    .narrative b { color: var(--text); font-weight: 700; }
+
+    /* ── Form chart placeholder ───────────────── */
+    .chart-card { background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: var(--r); padding: 16px; margin-bottom: 16px; }
+    .filter-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .filter-row .l { font-size: 11px; color: var(--text-3); margin-right: 4px;
+                     align-self: center; text-transform: uppercase; letter-spacing: 0.4px; }
+    .pill { background: var(--bg-raised); border: 1px solid var(--border);
+            color: var(--text-2); font-size: 12px; padding: 4px 12px; border-radius: 99px;
+            cursor: pointer; font-family: inherit; transition: all 0.12s; }
+    .pill.active { background: rgba(0,204,122,0.15); color: var(--green); border-color: var(--green); }
+    .pill:hover:not(.active) { background: var(--border); color: var(--text); }
+
+    /* heatmap */
+    .heat-grid { display: grid; grid-template-columns: 60px repeat(12, 1fr); gap: 3px; }
+    .heat-row-label { font-size: 11px; color: var(--text-3); align-self: center; }
+    .heat-cell { aspect-ratio: 1; border-radius: 3px; background: var(--bg-raised);
+                 display: flex; align-items: center; justify-content: center;
+                 font-size: 10px; font-family: var(--mono); color: var(--text-3); position: relative; }
+    .heat-cell.w-3 { background: rgba(0,204,122,0.85); color: white; font-weight: 700; }
+    .heat-cell.w-2 { background: rgba(0,204,122,0.5); color: white; font-weight: 600; }
+    .heat-cell.w-1 { background: rgba(0,204,122,0.25); color: var(--green); font-weight: 600; }
+    .heat-cell.l-1 { background: rgba(248,81,73,0.20); color: var(--red); }
+    .heat-cell.l-2 { background: rgba(248,81,73,0.40); color: white; }
+
+    .heat-month { font-size: 9px; color: var(--text-3); text-align: center; margin-top: 4px;
+                  text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* recent matches list */
+    .match-list { display: flex; flex-direction: column; }
+    .match-item { display: grid; grid-template-columns: 24px 1fr auto auto auto auto;
+                   gap: 10px; align-items: center; padding: 10px 12px;
+                   border-bottom: 1px solid var(--border-faint); }
+    .match-item:last-child { border-bottom: none; }
+    .res { width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
+            align-items: center; justify-content: center; font-size: 10px; font-weight: 800; }
+    .res.W { background: var(--green-bg); color: var(--green); border: 1px solid rgba(0,204,122,0.3); }
+    .res.L { background: var(--red-bg); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+    .opp-name { font-weight: 600; font-size: 13px; }
+    .opp-rank { color: var(--text-3); font-size: 11px; margin-left: 4px; }
+    .meta-tag { font-size: 11px; color: var(--text-3); }
+    .surf-pill { font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 99px;
+                 text-transform: uppercase; letter-spacing: 0.4px; }
+    .surf-pill.clay   { background: rgba(224,122,58,0.15); color: var(--clay); }
+    .surf-pill.hard   { background: rgba(68,147,248,0.15); color: var(--hard); }
+    .surf-pill.grass  { background: rgba(40,167,69,0.15); color: var(--grass); }
+    .surf-pill.indoor { background: rgba(163,113,247,0.15); color: var(--indoor); }
+    .perf-bar { width: 50px; height: 4px; background: var(--bg-raised); border-radius: 2px;
+                overflow: hidden; }
+    .perf-bar > span { display: block; height: 100%; background: var(--green); }
+    .score { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
+    /* ── Splits grid ──────────────────────────── */
+    .splits-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .split-card { background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: var(--r); padding: 14px 16px; }
+    .split-title { font-size: 12px; font-weight: 700; color: var(--text-2);
+                   margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .split-row { display: grid; grid-template-columns: 80px 1fr 86px;
+                 gap: 10px; align-items: center; padding: 6px 0; font-size: 12px;
+                 border-bottom: 1px dashed var(--border-faint); }
+    .split-row:last-child { border-bottom: none; }
+    .split-name { color: var(--text-2); font-weight: 500; }
+    .split-bar-wrap { height: 6px; background: var(--bg-raised); border-radius: 3px; overflow: hidden; }
+    .split-bar { height: 100%; border-radius: 3px;
+                 background: linear-gradient(90deg, var(--green) 0%, #00b073 100%); }
+    .split-bar.warn { background: linear-gradient(90deg, var(--amber) 0%, #b87b1c 100%); }
+    .split-bar.bad  { background: linear-gradient(90deg, var(--red) 0%, #c53030 100%); }
+    .split-stats { font-family: var(--mono); font-size: 11px; color: var(--text-3);
+                   text-align: right; font-variant-numeric: tabular-nums; }
+    .split-stats b { color: var(--text); font-weight: 700; }
+
+    /* ── Serve & return ───────────────────────── */
+    .stat-card { background: var(--bg-card); border: 1px solid var(--border);
+                 border-radius: var(--r); padding: 16px 18px; margin-bottom: 14px; }
+    .stat-row { display: grid; grid-template-columns: 130px 1fr 90px 80px;
+                gap: 12px; align-items: center; padding: 8px 0;
+                border-bottom: 1px solid var(--border-faint); font-size: 12px; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-name { color: var(--text-2); font-weight: 600; }
+    .stat-bench-wrap { position: relative; height: 8px; background: var(--bg-raised);
+                       border-radius: 4px; }
+    .stat-bench-bar { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px;
+                      background: linear-gradient(90deg, var(--hard), #2563eb); }
+    .stat-bench-line { position: absolute; top: -2px; bottom: -2px; width: 2px;
+                       background: var(--text-3); }
+    .stat-val { font-family: var(--mono); font-weight: 700; color: var(--text);
+                text-align: right; font-variant-numeric: tabular-nums; }
+    .stat-vs-tour { font-size: 10px; text-align: right; font-weight: 700; }
+    .stat-vs-tour.up   { color: var(--green); }
+    .stat-vs-tour.down { color: var(--red); }
+    .stat-vs-tour.flat { color: var(--text-3); }
+
+    /* ── Schedule ─────────────────────────────── */
+    .sched-row { display: grid; grid-template-columns: 60px 1fr 100px 60px;
+                 gap: 10px; align-items: center; padding: 10px 14px;
+                 border-bottom: 1px solid var(--border-faint); font-size: 13px; }
+    .sched-time { font-family: var(--mono); color: var(--text-3); font-size: 11px;
+                  font-variant-numeric: tabular-nums; }
+    .sched-vs { font-weight: 600; }
+    .sched-pick { font-size: 11px; color: var(--text-3); }
+    .sched-pick b { color: var(--green); font-weight: 700; }
+    .edge-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px;
+                 background: var(--green-bg); color: var(--green); }
+
+    /* ── H2H ──────────────────────────────────── */
+    .h2h-search { display: flex; gap: 10px; margin-bottom: 16px; }
+    .h2h-search input { flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+                        color: var(--text); padding: 10px 14px; border-radius: var(--r);
+                        font-size: 13px; font-family: inherit; }
+    .h2h-search input::placeholder { color: var(--text-3); }
+    .h2h-card { background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: var(--r); padding: 14px 18px; margin-bottom: 10px;
+                display: grid; grid-template-columns: 1fr 110px 1fr;
+                gap: 16px; align-items: center; }
+    .h2h-name { font-weight: 700; font-size: 14px; }
+    .h2h-name.right { text-align: right; }
+    .h2h-bar-wrap { display: flex; height: 26px; border-radius: 13px; overflow: hidden;
+                    background: var(--bg-raised); }
+    .h2h-bar-l { background: var(--green); display: flex; align-items: center;
+                 justify-content: flex-start; padding-left: 10px; color: white;
+                 font-weight: 800; font-size: 12px; font-family: var(--mono); }
+    .h2h-bar-r { background: var(--red); display: flex; align-items: center;
+                 justify-content: flex-end; padding-right: 10px; color: white;
+                 font-weight: 800; font-size: 12px; font-family: var(--mono); }
+
+    /* ── Compare button ───────────────────────── */
+    .compare-btn { background: var(--bg-card); border: 1px solid var(--border);
+                   color: var(--text-2); padding: 6px 14px; border-radius: var(--r-sm);
+                   font-size: 12px; font-family: inherit; cursor: pointer;
+                   transition: all 0.12s; }
+    .compare-btn:hover { background: var(--bg-raised); color: var(--text);
+                         border-color: var(--green); }
+
+  </style>
+</head>
+<body>
+
+<div class="mockup-banner">
+  <strong>Player page mockup</strong> — proposed redesign · click the tabs · this is a static demo with example data for Jannik Sinner
+</div>
+
+<div class="page">
+
+  <!-- ── HERO ───────────────────────────── -->
+  <div class="hero">
+    <div class="hero-row">
+      <div class="hero-id">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div class="hero-name">Jannik Sinner</div>
+          <button class="compare-btn">⇄ Compare with…</button>
+        </div>
+        <div class="hero-meta">
+          🇮🇹 Italy <span class="sep">·</span>
+          24 yrs <span class="sep">·</span>
+          Right-handed <span class="sep">·</span>
+          188 cm <span class="sep">·</span>
+          Pro since 2018
+        </div>
+        <div class="hero-meta" style="margin-top: 8px;">
+          <span class="hero-chip">ATP #1</span>
+          <span class="hero-chip">Best surface · Hard</span>
+          <span class="hero-chip">Last 12 wks · 22-3 (88%)</span>
+          <span class="hero-chip">2 Slams in 2025</span>
+        </div>
+        <div class="hero-status">
+          <span class="live-dot"></span>
+          <span class="hero-status-live">Currently in</span>
+          ATP Rome Masters · Quarter-finals
+          <span class="sep">·</span>
+          <span style="color: var(--text-2); font-weight: 600;">Next: Tue 14:00 vs Alcaraz</span>
+        </div>
+      </div>
+      <div class="hero-rtt">
+        <div class="hero-rtt-num">94</div>
+        <div class="hero-rtt-label">RTT Score</div>
+        <div class="hero-rtt-tier">Elite · Top 1%</div>
+        <svg class="hero-sparkline" viewBox="0 0 110 30">
+          <polyline points="0,22 10,20 20,18 30,19 40,15 50,13 60,11 70,8 80,7 90,6 100,5 110,4"
+                    fill="none" stroke="#00cc7a" stroke-width="2" />
+          <polyline points="0,22 10,20 20,18 30,19 40,15 50,13 60,11 70,8 80,7 90,6 100,5 110,4 110,30 0,30"
+                    fill="rgba(0,204,122,0.12)" stroke="none" />
+        </svg>
+        <div style="font-size: 10px; color: var(--text-3); margin-top: -4px;">
+          90-day trajectory · +6
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TABS ───────────────────────────── -->
+  <div class="tabs">
+    <button class="tab active" data-tab="snapshot">Snapshot</button>
+    <button class="tab" data-tab="form">Form &amp; momentum</button>
+    <button class="tab" data-tab="splits">Splits</button>
+    <button class="tab" data-tab="serve">Serve &amp; return</button>
+    <button class="tab" data-tab="schedule">Schedule</button>
+    <button class="tab" data-tab="h2h">Head-to-head</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 1 — SNAPSHOT
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="snapshot">
+
+    <div class="narrative">
+      <b>Sinner is in the form of his life on hard courts</b>, having won 7 of his last 10 hard-court
+      matches. Surface gap is at a career high — his hard-court rating (96) is now <b>11 points</b>
+      ahead of his next-best surface (clay, 85). 12-month form line is rising sharply, driven by a
+      <b>+9 jump in return rating</b>. One concern: 0-3 indoor since November.
+    </div>
+
+    <!-- 3 at-a-glance panels -->
+    <div class="glance-row">
+      <div class="glance-card">
+        <div class="glance-title">Form · Last 10</div>
+        <div class="form-dot-row">
+          <span class="form-dot W">W</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot L">L</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot W">W</span>
+          <span class="form-dot L">L</span>
+          <span class="form-dot W">W</span>
+        </div>
+        <div class="glance-sub">
+          <span class="momentum">↑ Rising</span>
+          &nbsp;<b style="color: var(--text-2);">8W &mdash; 2L</b>
+          &nbsp;· avg perf index <b style="color: var(--text-2);">82</b>
+        </div>
+      </div>
+
+      <div class="glance-card">
+        <div class="glance-title">Surface strength · This season</div>
+        <div class="surf-row">
+          <span class="surf-label">Hard</span>
+          <span class="surf-bar-wrap"><span class="surf-bar hard" style="width: 96%;"></span></span>
+          <span class="surf-stats"><b>17-2</b> · 89%</span>
+        </div>
+        <div class="surf-row">
+          <span class="surf-label">Clay</span>
+          <span class="surf-bar-wrap"><span class="surf-bar clay" style="width: 85%;"></span></span>
+          <span class="surf-stats"><b>11-3</b> · 79%</span>
+        </div>
+        <div class="surf-row">
+          <span class="surf-label">Grass</span>
+          <span class="surf-bar-wrap"><span class="surf-bar grass" style="width: 78%;"></span></span>
+          <span class="surf-stats"><b>5-2</b> · 71%</span>
+        </div>
+        <div class="surf-row">
+          <span class="surf-label">Indoor</span>
+          <span class="surf-bar-wrap"><span class="surf-bar indoor" style="width: 38%;"></span></span>
+          <span class="surf-stats"><b>0-3</b> · 0%</span>
+        </div>
+      </div>
+
+      <div class="glance-card">
+        <div class="glance-title">Pressure metrics</div>
+        <div class="pressure-grid">
+          <div class="pressure-stat">
+            <div class="v">71%</div>
+            <div class="l">Tiebreaks</div>
+          </div>
+          <div class="pressure-stat">
+            <div class="v">68%</div>
+            <div class="l">Decider sets</div>
+          </div>
+          <div class="pressure-stat">
+            <div class="v">11-4</div>
+            <div class="l">vs Top 10</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skill ratings as horizontal bars with percentile -->
+    <div class="skill-card">
+      <div class="section-h">Skill ratings &nbsp;·&nbsp; <span style="color: var(--text-3); text-transform: none; font-weight: 400; letter-spacing: 0;">click any bar for the underlying stats</span></div>
+      <div class="skill-row">
+        <div class="skill-name">Serve</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 88%;"></div></div>
+        <div class="skill-val">88</div>
+        <div class="skill-pct">Top 5%</div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-name">Return</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 91%;"></div></div>
+        <div class="skill-val">91</div>
+        <div class="skill-pct">Top 2%</div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-name">Pressure</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 83%;"></div></div>
+        <div class="skill-val">83</div>
+        <div class="skill-pct">Top 8%</div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-name">Consistency</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 86%;"></div></div>
+        <div class="skill-val">86</div>
+        <div class="skill-pct">Top 6%</div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-name">Big match</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 79%;"></div></div>
+        <div class="skill-val">79</div>
+        <div class="skill-pct mid">Top 12%</div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-name">vs Top 10</div>
+        <div class="skill-bar-wrap"><div class="skill-bar" style="width: 81%;"></div></div>
+        <div class="skill-val">81</div>
+        <div class="skill-pct">Top 9%</div>
+      </div>
+    </div>
+
+    <!-- Career bests -->
+    <div class="skill-card">
+      <div class="section-h">Career bests</div>
+      <div class="splits-grid">
+        <div class="split-row" style="border-bottom: none;">
+          <span class="split-name">Career-high rank</span>
+          <span></span>
+          <span class="split-stats"><b>#1</b> · since Mar 2024</span>
+        </div>
+        <div class="split-row" style="border-bottom: none;">
+          <span class="split-name">Grand Slam titles</span>
+          <span></span>
+          <span class="split-stats"><b>3</b> · AO ×2, US</span>
+        </div>
+        <div class="split-row" style="border-bottom: none;">
+          <span class="split-name">Masters 1000 titles</span>
+          <span></span>
+          <span class="split-stats"><b>4</b></span>
+        </div>
+        <div class="split-row" style="border-bottom: none;">
+          <span class="split-name">Career match wins</span>
+          <span></span>
+          <span class="split-stats"><b>318</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 2 — FORM & MOMENTUM
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="form" hidden>
+
+    <div class="filter-row">
+      <span class="l">Surface</span>
+      <button class="pill active">All</button>
+      <button class="pill">Hard</button>
+      <button class="pill">Clay</button>
+      <button class="pill">Grass</button>
+      <button class="pill">Indoor</button>
+    </div>
+    <div class="filter-row">
+      <span class="l">Tournament</span>
+      <button class="pill active">All</button>
+      <button class="pill">Slam</button>
+      <button class="pill">Masters</button>
+      <button class="pill">500</button>
+      <button class="pill">250</button>
+      <button class="pill">Challenger</button>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-h">RTT Score · Last 12 months</div>
+      <svg viewBox="0 0 700 200" style="width: 100%; height: 200px;">
+        <!-- Grid lines -->
+        <line x1="0"   y1="50"  x2="700" y2="50"  stroke="#21262d" stroke-dasharray="2,3" />
+        <line x1="0"   y1="100" x2="700" y2="100" stroke="#21262d" stroke-dasharray="2,3" />
+        <line x1="0"   y1="150" x2="700" y2="150" stroke="#21262d" stroke-dasharray="2,3" />
+        <text x="3" y="48"  fill="#484f58" font-size="9">95</text>
+        <text x="3" y="98"  fill="#484f58" font-size="9">85</text>
+        <text x="3" y="148" fill="#484f58" font-size="9">75</text>
+        <!-- area -->
+        <polyline points="20,140 78,135 136,128 194,118 252,110 310,98 368,85 426,75 484,68 542,60 600,52 658,40 658,200 20,200"
+                  fill="rgba(0,204,122,0.10)" stroke="none" />
+        <!-- line -->
+        <polyline points="20,140 78,135 136,128 194,118 252,110 310,98 368,85 426,75 484,68 542,60 600,52 658,40"
+                  fill="none" stroke="#00cc7a" stroke-width="2.5" />
+        <!-- markers -->
+        <g fill="#00cc7a">
+          <circle cx="20"  cy="140" r="3" /><circle cx="78"  cy="135" r="3" />
+          <circle cx="136" cy="128" r="3" /><circle cx="194" cy="118" r="3" />
+          <circle cx="252" cy="110" r="3" /><circle cx="310" cy="98"  r="3" />
+          <circle cx="368" cy="85"  r="3" /><circle cx="426" cy="75"  r="3" />
+          <circle cx="484" cy="68"  r="3" /><circle cx="542" cy="60"  r="3" />
+          <circle cx="600" cy="52"  r="3" /><circle cx="658" cy="40"  r="3" />
+        </g>
+        <!-- months on x -->
+        <g fill="#8b949e" font-size="9" text-anchor="middle">
+          <text x="20"  y="195">Jun</text><text x="78"  y="195">Jul</text>
+          <text x="136" y="195">Aug</text><text x="194" y="195">Sep</text>
+          <text x="252" y="195">Oct</text><text x="310" y="195">Nov</text>
+          <text x="368" y="195">Dec</text><text x="426" y="195">Jan</text>
+          <text x="484" y="195">Feb</text><text x="542" y="195">Mar</text>
+          <text x="600" y="195">Apr</text><text x="658" y="195">May</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Heatmap calendar -->
+    <div class="chart-card">
+      <div class="section-h">Wins / losses by month</div>
+      <div class="heat-grid">
+        <span class="heat-row-label">2026</span>
+        <span class="heat-cell w-2">5-1</span>
+        <span class="heat-cell w-3">7-0</span>
+        <span class="heat-cell w-2">6-2</span>
+        <span class="heat-cell w-2">5-1</span>
+        <span class="heat-cell w-2">4-1</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+        <span class="heat-cell">—</span>
+
+        <span class="heat-row-label">2025</span>
+        <span class="heat-cell w-2">4-1</span>
+        <span class="heat-cell w-3">6-0</span>
+        <span class="heat-cell w-1">3-2</span>
+        <span class="heat-cell w-2">5-1</span>
+        <span class="heat-cell w-2">5-2</span>
+        <span class="heat-cell w-1">2-1</span>
+        <span class="heat-cell w-2">5-1</span>
+        <span class="heat-cell w-3">7-0</span>
+        <span class="heat-cell w-2">4-1</span>
+        <span class="heat-cell l-1">2-3</span>
+        <span class="heat-cell l-2">0-2</span>
+        <span class="heat-cell w-1">3-1</span>
+
+        <span></span>
+        <span class="heat-month">Jan</span><span class="heat-month">Feb</span>
+        <span class="heat-month">Mar</span><span class="heat-month">Apr</span>
+        <span class="heat-month">May</span><span class="heat-month">Jun</span>
+        <span class="heat-month">Jul</span><span class="heat-month">Aug</span>
+        <span class="heat-month">Sep</span><span class="heat-month">Oct</span>
+        <span class="heat-month">Nov</span><span class="heat-month">Dec</span>
+      </div>
+    </div>
+
+    <!-- Recent matches with perf bars -->
+    <div class="chart-card">
+      <div class="section-h">Last 15 matches</div>
+      <div class="match-list">
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Alcaraz</span><span class="opp-rank">#2</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Rome QF</span>
+          <span class="score">7-6 6-4</span>
+          <span class="perf-bar"><span style="width: 91%;"></span></span>
+        </div>
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Tsitsipas</span><span class="opp-rank">#11</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Rome R16</span>
+          <span class="score">6-3 6-2</span>
+          <span class="perf-bar"><span style="width: 84%;"></span></span>
+        </div>
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Rune</span><span class="opp-rank">#15</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Madrid F</span>
+          <span class="score">7-5 6-3</span>
+          <span class="perf-bar"><span style="width: 86%;"></span></span>
+        </div>
+        <div class="match-item">
+          <span class="res L">L</span>
+          <span><span class="opp-name">Djokovic</span><span class="opp-rank">#5</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Monte-Carlo SF</span>
+          <span class="score">6-7 4-6</span>
+          <span class="perf-bar"><span style="width: 62%;"></span></span>
+        </div>
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Ruud</span><span class="opp-rank">#7</span></span>
+          <span class="surf-pill hard">Hard</span>
+          <span class="meta-tag">Miami F</span>
+          <span class="score">6-1 6-2</span>
+          <span class="perf-bar"><span style="width: 95%;"></span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 3 — SPLITS
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="splits" hidden>
+
+    <div style="font-size: 12px; color: var(--text-3); margin-bottom: 14px;">
+      Slice and dice the player's record by every dimension that matters for a punt.
+    </div>
+
+    <div class="splits-grid">
+      <div class="split-card">
+        <div class="split-title">By surface · Career</div>
+        <div class="split-row">
+          <span class="split-name">Hard</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 78%;"></span></span>
+          <span class="split-stats"><b>156-44</b> · 78%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Clay</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 71%;"></span></span>
+          <span class="split-stats"><b>62-25</b> · 71%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Grass</span>
+          <span class="split-bar-wrap"><span class="split-bar warn" style="width: 64%;"></span></span>
+          <span class="split-stats"><b>14-8</b> · 64%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Indoor</span>
+          <span class="split-bar-wrap"><span class="split-bar warn" style="width: 60%;"></span></span>
+          <span class="split-stats"><b>18-12</b> · 60%</span>
+        </div>
+      </div>
+
+      <div class="split-card">
+        <div class="split-title">By tournament level</div>
+        <div class="split-row">
+          <span class="split-name">Slam</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 76%;"></span></span>
+          <span class="split-stats"><b>43-14</b> · 76%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Masters</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 74%;"></span></span>
+          <span class="split-stats"><b>78-27</b> · 74%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Tour 500</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 81%;"></span></span>
+          <span class="split-stats"><b>52-12</b> · 81%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Tour 250</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 79%;"></span></span>
+          <span class="split-stats"><b>61-16</b> · 79%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Challenger</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 84%;"></span></span>
+          <span class="split-stats"><b>16-3</b> · 84%</span>
+        </div>
+      </div>
+
+      <div class="split-card">
+        <div class="split-title">By opponent ranking</div>
+        <div class="split-row">
+          <span class="split-name">vs Top 10</span>
+          <span class="split-bar-wrap"><span class="split-bar warn" style="width: 58%;"></span></span>
+          <span class="split-stats"><b>22-16</b> · 58%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">11–25</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 73%;"></span></span>
+          <span class="split-stats"><b>47-17</b> · 73%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">26–50</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 81%;"></span></span>
+          <span class="split-stats"><b>62-14</b> · 81%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">51–100</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 87%;"></span></span>
+          <span class="split-stats"><b>71-11</b> · 87%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">101+</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 93%;"></span></span>
+          <span class="split-stats"><b>48-4</b> · 92%</span>
+        </div>
+      </div>
+
+      <div class="split-card">
+        <div class="split-title">By round</div>
+        <div class="split-row">
+          <span class="split-name">R128</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 90%;"></span></span>
+          <span class="split-stats"><b>28-3</b> · 90%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">R64</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 86%;"></span></span>
+          <span class="split-stats"><b>52-8</b> · 87%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">R16</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 78%;"></span></span>
+          <span class="split-stats"><b>43-12</b> · 78%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">QF</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 71%;"></span></span>
+          <span class="split-stats"><b>27-11</b> · 71%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">SF</span>
+          <span class="split-bar-wrap"><span class="split-bar warn" style="width: 65%;"></span></span>
+          <span class="split-stats"><b>17-9</b> · 65%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Final</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 76%;"></span></span>
+          <span class="split-stats"><b>13-4</b> · 76%</span>
+        </div>
+      </div>
+
+      <div class="split-card">
+        <div class="split-title">By format</div>
+        <div class="split-row">
+          <span class="split-name">Best of 3</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 76%;"></span></span>
+          <span class="split-stats"><b>207-65</b> · 76%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Best of 5</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 80%;"></span></span>
+          <span class="split-stats"><b>43-11</b> · 80%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">In tiebreaks</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 71%;"></span></span>
+          <span class="split-stats"><b>74-30</b> · 71%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">Decider sets</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 68%;"></span></span>
+          <span class="split-stats"><b>32-15</b> · 68%</span>
+        </div>
+      </div>
+
+      <div class="split-card">
+        <div class="split-title">By year</div>
+        <div class="split-row">
+          <span class="split-name">2026 YTD</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 89%;"></span></span>
+          <span class="split-stats"><b>27-3</b> · 90%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">2025</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 86%;"></span></span>
+          <span class="split-stats"><b>69-11</b> · 86%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">2024</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 81%;"></span></span>
+          <span class="split-stats"><b>73-17</b> · 81%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">2023</span>
+          <span class="split-bar-wrap"><span class="split-bar" style="width: 73%;"></span></span>
+          <span class="split-stats"><b>64-23</b> · 74%</span>
+        </div>
+        <div class="split-row">
+          <span class="split-name">2022</span>
+          <span class="split-bar-wrap"><span class="split-bar warn" style="width: 65%;"></span></span>
+          <span class="split-stats"><b>40-21</b> · 66%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 4 — SERVE & RETURN
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="serve" hidden>
+
+    <div class="filter-row">
+      <span class="l">Surface</span>
+      <button class="pill active">All</button>
+      <button class="pill">Hard</button>
+      <button class="pill">Clay</button>
+      <button class="pill">Grass</button>
+      <button class="pill">Indoor</button>
+    </div>
+
+    <div class="stat-card">
+      <div class="section-h">Serve · Career averages &nbsp;·&nbsp; <span style="color: var(--text-3); text-transform: none; font-weight: 400; letter-spacing: 0;">vertical line = ATP tour average</span></div>
+
+      <div class="stat-row">
+        <div class="stat-name">1st serve in %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 67%;"></div>
+          <div class="stat-bench-line" style="left: 62%;"></div>
+        </div>
+        <div class="stat-val">66.8%</div>
+        <div class="stat-vs-tour up">+4.5 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">1st serve won %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 76%;"></div>
+          <div class="stat-bench-line" style="left: 72%;"></div>
+        </div>
+        <div class="stat-val">76.2%</div>
+        <div class="stat-vs-tour up">+4.0 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">2nd serve won %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 56%;"></div>
+          <div class="stat-bench-line" style="left: 51%;"></div>
+        </div>
+        <div class="stat-val">56.1%</div>
+        <div class="stat-vs-tour up">+5.3 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">Ace %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 9%;"></div>
+          <div class="stat-bench-line" style="left: 9%;"></div>
+        </div>
+        <div class="stat-val">8.9%</div>
+        <div class="stat-vs-tour flat">tour avg</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">Double fault %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 27%;"></div>
+          <div class="stat-bench-line" style="left: 35%;"></div>
+        </div>
+        <div class="stat-val">2.7%</div>
+        <div class="stat-vs-tour up">−0.8 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">BP saved %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 67%;"></div>
+          <div class="stat-bench-line" style="left: 62%;"></div>
+        </div>
+        <div class="stat-val">66.5%</div>
+        <div class="stat-vs-tour up">+4.5 vs tour</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="section-h">Return · Career averages</div>
+
+      <div class="stat-row">
+        <div class="stat-name">Return pts won %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 41%;"></div>
+          <div class="stat-bench-line" style="left: 36%;"></div>
+        </div>
+        <div class="stat-val">41.4%</div>
+        <div class="stat-vs-tour up">+5.4 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">BP conversion %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 44%;"></div>
+          <div class="stat-bench-line" style="left: 38%;"></div>
+        </div>
+        <div class="stat-val">44.2%</div>
+        <div class="stat-vs-tour up">+6.2 vs tour</div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-name">Return games won %</div>
+        <div class="stat-bench-wrap">
+          <div class="stat-bench-bar" style="width: 31%;"></div>
+          <div class="stat-bench-line" style="left: 23%;"></div>
+        </div>
+        <div class="stat-val">31.4%</div>
+        <div class="stat-vs-tour up">+8.4 vs tour</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="background: var(--bg-sunken); border-style: dashed;">
+      <div class="section-h">Serve placement zones</div>
+      <div style="font-size: 12px; color: var(--text-3); padding: 24px 0; text-align: center;">
+        🎾 &nbsp;Coming soon · Wide / Body / T placement % by side and surface, sourced from Match Charting Project data
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 5 — SCHEDULE
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="schedule" hidden>
+
+    <div class="chart-card">
+      <div class="section-h">Upcoming matches</div>
+      <div class="match-list">
+        <div class="sched-row">
+          <span class="sched-time">Tue 14:00</span>
+          <span><span class="sched-vs">vs Carlos Alcaraz</span>
+                <span class="sched-pick">Rome QF · clay · Pick: <b>Sinner 64%</b></span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="edge-pill">Edge +5%</span>
+        </div>
+        <div class="sched-row">
+          <span class="sched-time">Sat 16:00</span>
+          <span><span class="sched-vs">vs winner of bracket</span>
+                <span class="sched-pick">Rome SF · clay · awaiting opponent</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">—</span>
+        </div>
+        <div class="sched-row">
+          <span class="sched-time">Sun 16:00</span>
+          <span><span class="sched-vs">Rome final (if reached)</span>
+                <span class="sched-pick">tournament final · clay</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-h">Last 30 days · Our predictions</div>
+      <div class="match-list">
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Tsitsipas</span><span class="opp-rank">#11</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Predicted Sinner 71%</span>
+          <span class="score">6-3 6-2</span>
+          <span style="color: var(--green); font-weight: 700;">✓</span>
+        </div>
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Rune</span><span class="opp-rank">#15</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Predicted Sinner 68%</span>
+          <span class="score">7-5 6-3</span>
+          <span style="color: var(--green); font-weight: 700;">✓</span>
+        </div>
+        <div class="match-item">
+          <span class="res L">L</span>
+          <span><span class="opp-name">Djokovic</span><span class="opp-rank">#5</span></span>
+          <span class="surf-pill clay">Clay</span>
+          <span class="meta-tag">Predicted Sinner 54%</span>
+          <span class="score">6-7 4-6</span>
+          <span style="color: var(--red); font-weight: 700;">✗</span>
+        </div>
+        <div class="match-item">
+          <span class="res W">W</span>
+          <span><span class="opp-name">Ruud</span><span class="opp-rank">#7</span></span>
+          <span class="surf-pill hard">Hard</span>
+          <span class="meta-tag">Predicted Sinner 78%</span>
+          <span class="score">6-1 6-2</span>
+          <span style="color: var(--green); font-weight: 700;">✓</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       TAB 6 — H2H
+  ══════════════════════════════════════════════════ -->
+  <div class="tab-panel" data-panel="h2h" hidden>
+
+    <div class="h2h-search">
+      <input type="text" placeholder="Search any player to see head-to-head…" value="" />
+      <button class="pill active">Search</button>
+    </div>
+
+    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+                color: var(--text-3); margin-bottom: 12px; font-weight: 700;">
+      Top 5 most-played opponents
+    </div>
+
+    <div class="h2h-card">
+      <div class="h2h-name">Sinner</div>
+      <div class="h2h-bar-wrap">
+        <div class="h2h-bar-l" style="flex: 6;">6</div>
+        <div class="h2h-bar-r" style="flex: 8;">8</div>
+      </div>
+      <div class="h2h-name right">Alcaraz</div>
+    </div>
+    <div class="h2h-card">
+      <div class="h2h-name">Sinner</div>
+      <div class="h2h-bar-wrap">
+        <div class="h2h-bar-l" style="flex: 5;">5</div>
+        <div class="h2h-bar-r" style="flex: 6;">6</div>
+      </div>
+      <div class="h2h-name right">Djokovic</div>
+    </div>
+    <div class="h2h-card">
+      <div class="h2h-name">Sinner</div>
+      <div class="h2h-bar-wrap">
+        <div class="h2h-bar-l" style="flex: 7;">7</div>
+        <div class="h2h-bar-r" style="flex: 2;">2</div>
+      </div>
+      <div class="h2h-name right">Medvedev</div>
+    </div>
+    <div class="h2h-card">
+      <div class="h2h-name">Sinner</div>
+      <div class="h2h-bar-wrap">
+        <div class="h2h-bar-l" style="flex: 5;">5</div>
+        <div class="h2h-bar-r" style="flex: 1;">1</div>
+      </div>
+      <div class="h2h-name right">Tsitsipas</div>
+    </div>
+    <div class="h2h-card">
+      <div class="h2h-name">Sinner</div>
+      <div class="h2h-bar-wrap">
+        <div class="h2h-bar-l" style="flex: 4;">4</div>
+        <div class="h2h-bar-r" style="flex: 2;">2</div>
+      </div>
+      <div class="h2h-name right">Ruud</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Tab switcher
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      const target = t.dataset.tab;
+      document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+      document.querySelectorAll('.tab-panel').forEach(p => {
+        p.hidden = p.dataset.panel !== target;
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  // Filter pill toggling within their group
+  document.querySelectorAll('.filter-row').forEach(row => {
+    row.querySelectorAll('.pill').forEach(p => {
+      p.addEventListener('click', () => {
+        row.querySelectorAll('.pill').forEach(x => x.classList.toggle('active', x === p));
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

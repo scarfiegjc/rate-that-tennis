@@ -93,27 +93,14 @@ def _ratings_for(player_id: int) -> dict:
 
 
 def _latest_odds(match_id: int) -> dict:
-    """
-    Return the BEST AVAILABLE market price per side (highest decimal_odds)
-    from the most recent fetch per bookmaker. This matches what the
-    OddsComparison component shows on the match page so the legacy
-    'market' / 'edge' fields stay in sync with the headline view.
-    """
+    """Returns {'p1': {...}, 'p2': {...}} with latest bookmaker odds."""
     rows = query(
         """
-        WITH latest_per_bm AS (
-            SELECT DISTINCT ON (bookmaker, player_ref)
-                bookmaker, player_ref, decimal_odds, implied_prob, fetched_at
-            FROM bookmaker_odds
-            WHERE match_id = %s
-              AND decimal_odds IS NOT NULL
-              AND decimal_odds > 1.0
-            ORDER BY bookmaker, player_ref, fetched_at DESC
-        )
         SELECT DISTINCT ON (player_ref)
-            player_ref, bookmaker, decimal_odds, implied_prob
-        FROM latest_per_bm
-        ORDER BY player_ref, decimal_odds DESC
+            player_ref, bookmaker, decimal_odds, implied_prob, fetched_at
+        FROM bookmaker_odds
+        WHERE match_id = %s
+        ORDER BY player_ref, fetched_at DESC
         """,
         (match_id,),
     )
@@ -410,6 +397,8 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             p2.country_code AS p2_country,
             pr1.rtt_score AS p1_rtt,
             pr2.rtt_score AS p2_rtt,
+            pr1.momentum AS p1_momentum,
+            pr2.momentum AS p2_momentum,
             mp.prob_first_player,
             mp.prob_second_player,
             mp.confidence,
@@ -435,32 +424,16 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             WHERE ms_inner.match_id = m.id
         ) ms ON TRUE
         LEFT JOIN LATERAL (
-            -- Best available price for first player across all bookmakers
             SELECT decimal_odds, implied_prob
-            FROM (
-                SELECT DISTINCT ON (bookmaker)
-                    decimal_odds, implied_prob
-                FROM bookmaker_odds
-                WHERE match_id = m.id AND player_ref = 'first_player'
-                  AND decimal_odds IS NOT NULL AND decimal_odds > 1.0
-                ORDER BY bookmaker, fetched_at DESC
-            ) latest
-            ORDER BY decimal_odds DESC
-            LIMIT 1
+            FROM bookmaker_odds
+            WHERE match_id = m.id AND player_ref = 'first_player'
+            ORDER BY fetched_at DESC LIMIT 1
         ) bo1 ON TRUE
         LEFT JOIN LATERAL (
-            -- Best available price for second player across all bookmakers
             SELECT decimal_odds, implied_prob
-            FROM (
-                SELECT DISTINCT ON (bookmaker)
-                    decimal_odds, implied_prob
-                FROM bookmaker_odds
-                WHERE match_id = m.id AND player_ref = 'second_player'
-                  AND decimal_odds IS NOT NULL AND decimal_odds > 1.0
-                ORDER BY bookmaker, fetched_at DESC
-            ) latest
-            ORDER BY decimal_odds DESC
-            LIMIT 1
+            FROM bookmaker_odds
+            WHERE match_id = m.id AND player_ref = 'second_player'
+            ORDER BY fetched_at DESC LIMIT 1
         ) bo2 ON TRUE
         WHERE m.event_date >= %s AND m.event_date <= %s
           AND m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover')
@@ -508,6 +481,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
                 "name": m["p1_name"],
                 "country_code": m["p1_country"],
                 "rtt_score": float(m["p1_rtt"]) if m.get("p1_rtt") else None,
+                "momentum": m.get("p1_momentum"),
                 "form_dots": form_dots_map.get(m["first_player_id"], []),
             },
             "second_player": {
@@ -515,6 +489,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
                 "name": m["p2_name"],
                 "country_code": m["p2_country"],
                 "rtt_score": float(m["p2_rtt"]) if m.get("p2_rtt") else None,
+                "momentum": m.get("p2_momentum"),
                 "form_dots": form_dots_map.get(m["second_player_id"], []),
             },
             "prediction": {

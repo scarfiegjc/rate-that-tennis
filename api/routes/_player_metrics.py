@@ -63,9 +63,9 @@ def _rest_tier(days: Optional[int]) -> str:
 
 def vs_hand_rating(player_id: int, opponent_hand: Optional[str]) -> Optional[float]:
     """
-    Win% vs the opponent's hand (Right or Left), pulled from player_hand_splits.
-    Mapped to a 0-100 scale where 50% wins = 50.
-    Returns None if not enough data.
+    Win% vs the opponent's hand (Right or Left). First tries player_hand_splits
+    (production-derived). If that's thin/missing, falls back to a derived
+    sa_matches lookup by player name.
     """
     if not opponent_hand:
         return None
@@ -80,47 +80,107 @@ def vs_hand_rating(player_id: int, opponent_hand: Optional[str]) -> Optional[flo
         """,
         (player_id, norm),
     )
-    if not row or not row.get("win_pct") or (row.get("matches") or 0) < 4:
+    if row and row.get("win_pct") is not None and (row.get("matches") or 0) >= 3:
+        return round(max(5.0, min(95.0, float(row["win_pct"]))), 1)
+
+    # Fallback: derive from sa_matches by player name (scalar derived stat — allowed)
+    p = query_one("SELECT name, full_name FROM players WHERE id = %s", (player_id,))
+    if not p:
         return None
-    win_pct = float(row["win_pct"])
-    # Direct linear scaling: 0% → 0, 50% → 50, 100% → 100. Clamped 5..95.
-    return round(max(5.0, min(95.0, win_pct)), 1)
+    name = (p.get("full_name") or p.get("name") or "").strip()
+    last = (name.split() or [""])[-1].strip()
+    if not last or len(last) < 3:
+        return None
+    sa_hand_letter = "R" if norm == "Right" else "L"
+    try:
+        sa = query_one(
+            """
+            WITH me AS (
+                SELECT player_id FROM sa_players
+                WHERE name_last ILIKE %s
+                LIMIT 5
+            )
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN sm.winner_id IN (SELECT player_id FROM me) THEN 1 ELSE 0 END) AS wins
+            FROM sa_matches sm
+            WHERE sm.tourney_date >= CURRENT_DATE - INTERVAL '5 years'
+              AND (
+                (sm.winner_id IN (SELECT player_id FROM me) AND sm.loser_hand  = %s)
+             OR (sm.loser_id  IN (SELECT player_id FROM me) AND sm.winner_hand = %s)
+              )
+            """,
+            (last, sa_hand_letter, sa_hand_letter),
+        )
+        if sa and (sa.get("n") or 0) >= 5:
+            pct = 100.0 * (sa["wins"] or 0) / sa["n"]
+            return round(max(5.0, min(95.0, pct)), 1)
+    except Exception:
+        pass
+    return None
 
 
 def endurance_rating(player_id: int) -> Optional[float]:
     """
-    Win% in long matches (where the score has 3 sets in best-of-3 or 4+ sets in best-of-5).
-    Production matches table only. Returns None if fewer than 6 such matches in last 24 months.
+    Win% in long matches (3 or more sets). First tries production matches.
+    If thin, supplements with a sa_matches lookup by player name (long matches:
+    minutes >= 150 OR sets played >= 3). Returns 0-100, or None if no signal.
     """
     row = query_one(
         """
-        WITH long_matches AS (
-            SELECT
-                m.winner,
-                m.first_player_id,
-                m.second_player_id,
-                m.final_result
-            FROM matches m
-            WHERE (m.first_player_id = %s OR m.second_player_id = %s)
-              AND m.event_status = 'Finished'
-              AND m.winner IS NOT NULL
-              AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
-              -- Long match heuristic: final_result like '2 - 1' or '3 - 1' or '3 - 2'
-              AND m.final_result IN ('2 - 1', '1 - 2', '3 - 1', '3 - 2', '1 - 3', '2 - 3')
-        )
         SELECT
             COUNT(*) AS n,
             SUM(CASE
                   WHEN (winner = 'First Player'  AND first_player_id  = %s)
                     OR (winner = 'Second Player' AND second_player_id = %s)
                   THEN 1 ELSE 0 END) AS wins
-        FROM long_matches
+        FROM matches
+        WHERE (first_player_id = %s OR second_player_id = %s)
+          AND event_status = 'Finished'
+          AND winner IS NOT NULL
+          AND event_date >= CURRENT_DATE - INTERVAL '24 months'
+          AND final_result IN ('2 - 1', '1 - 2', '3 - 1', '3 - 2', '1 - 3', '2 - 3')
         """,
         (player_id, player_id, player_id, player_id),
     )
-    if not row or (row.get("n") or 0) < 3:
+    n = (row or {}).get("n") or 0
+    wins = (row or {}).get("wins") or 0
+
+    # Supplement with sa_matches if production data is thin (< 4)
+    if n < 4:
+        p = query_one("SELECT name, full_name FROM players WHERE id = %s", (player_id,))
+        if p:
+            name = (p.get("full_name") or p.get("name") or "").strip()
+            last = (name.split() or [""])[-1].strip()
+            if last and len(last) >= 3:
+                try:
+                    sa = query_one(
+                        """
+                        WITH me AS (
+                            SELECT player_id FROM sa_players WHERE name_last ILIKE %s LIMIT 5
+                        )
+                        SELECT
+                            COUNT(*) AS n,
+                            SUM(CASE WHEN sm.winner_id IN (SELECT player_id FROM me) THEN 1 ELSE 0 END) AS wins
+                        FROM sa_matches sm
+                        WHERE sm.tourney_date >= CURRENT_DATE - INTERVAL '5 years'
+                          AND (sm.winner_id IN (SELECT player_id FROM me)
+                            OR sm.loser_id  IN (SELECT player_id FROM me))
+                          AND (sm.minutes >= 150
+                               OR sm.score ~ '\\d+-\\d+ \\d+-\\d+ \\d+-\\d+'
+                              OR sm.score ~ '\\d+-\\d+ \\d+-\\d+ \\d+-\\d+ \\d+-\\d+')
+                        """,
+                        (last,),
+                    )
+                    if sa and (sa.get("n") or 0) >= 4:
+                        n += int(sa["n"])
+                        wins += int(sa["wins"] or 0)
+                except Exception:
+                    pass
+
+    if n < 3:
         return None
-    pct = 100.0 * (row["wins"] or 0) / row["n"]
+    pct = 100.0 * wins / n
     return round(max(5.0, min(95.0, pct)), 1)
 
 
@@ -179,9 +239,42 @@ def tournament_level_rating(player_id: int, level_code: str) -> Optional[float]:
         """,
         (player_id, player_id, player_id, player_id),
     )
-    if not row or (row.get("n") or 0) < 2:
+    n = (row or {}).get("n") or 0
+    wins = (row or {}).get("wins") or 0
+
+    # Supplement from sa_matches when production data is thin
+    if n < 3:
+        p = query_one("SELECT name, full_name FROM players WHERE id = %s", (player_id,))
+        if p:
+            name = (p.get("full_name") or p.get("name") or "").strip()
+            last = (name.split() or [""])[-1].strip()
+            if last and len(last) >= 3:
+                try:
+                    sa = query_one(
+                        """
+                        WITH me AS (
+                            SELECT player_id FROM sa_players WHERE name_last ILIKE %s LIMIT 5
+                        )
+                        SELECT
+                            COUNT(*) AS n,
+                            SUM(CASE WHEN sm.winner_id IN (SELECT player_id FROM me) THEN 1 ELSE 0 END) AS wins
+                        FROM sa_matches sm
+                        WHERE sm.tourney_date >= CURRENT_DATE - INTERVAL '5 years'
+                          AND (sm.winner_id IN (SELECT player_id FROM me)
+                            OR sm.loser_id  IN (SELECT player_id FROM me))
+                          AND sm.tourney_level = %s
+                        """,
+                        (last, level_code),
+                    )
+                    if sa and (sa.get("n") or 0) >= 3:
+                        n += int(sa["n"])
+                        wins += int(sa["wins"] or 0)
+                except Exception:
+                    pass
+
+    if n < 2:
         return None
-    pct = 100.0 * (row["wins"] or 0) / row["n"]
+    pct = 100.0 * wins / n
     return round(max(5.0, min(95.0, pct)), 1)
 
 

@@ -43,10 +43,8 @@ logging.basicConfig(
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
-# Tennis sport keys to query — fetched dynamically from /sports endpoint at runtime
-# so we always pick up whatever tournament is currently in season.
-# Fallback list (used only if the /sports query fails for some reason):
-SPORT_KEYS_FALLBACK = [
+# Tennis sport keys to query — expand as needed
+SPORT_KEYS = [
     "tennis_atp",
     "tennis_wta",
     "tennis_atp_french_open",
@@ -57,52 +55,13 @@ SPORT_KEYS_FALLBACK = [
     "tennis_wta_us_open",
     "tennis_atp_aus_open_singles",
     "tennis_wta_aus_open_singles",
-    "tennis_atp_italian_open",
-    "tennis_wta_italian_open",
-    "tennis_atp_madrid_open",
-    "tennis_wta_madrid_open",
 ]
 
-
-def discover_active_tennis_sports() -> list[str]:
-    """Query The Odds API /sports endpoint for currently-active tennis sports."""
-    try:
-        url = f"{ODDS_API_BASE}/sports/"
-        resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
-        if resp.status_code != 200:
-            log.warning(f"Could not discover sports (HTTP {resp.status_code}); using fallback list")
-            return SPORT_KEYS_FALLBACK
-        sports = resp.json()
-        active_tennis = [s["key"] for s in sports if s.get("group") == "Tennis" and s.get("active")]
-        if not active_tennis:
-            log.info("No active tennis sports right now")
-            return []
-        log.info(f"Discovered {len(active_tennis)} active tennis sport(s): {', '.join(active_tennis)}")
-        return active_tennis
-    except Exception as e:
-        log.warning(f"Sports discovery failed ({e}); using fallback list")
-        return SPORT_KEYS_FALLBACK
-
-
-# Lazy-resolved at run() time so we don't hit the API on import
-SPORT_KEYS: list[str] = []
-
-# Regions to fetch — each region multiplies API credit cost.
-# Free tier (500 credits/month): start with "uk,eu" only (2 credits per call).
-# Drop us to save ~33% of credits until US affiliate phase begins.
-ODDS_REGIONS = os.environ.get("ODDS_API_REGIONS", "uk,eu")
-
-# Which bookmaker to prefer when picking a single "headline" odds row for the
-# match list / today endpoint. The match-detail comparison view uses ALL
-# bookmakers regardless. Sharpest first.
+# Which bookmaker to prefer for implied odds (first available wins)
 PREFERRED_BOOKMAKERS = [
-    "pinnacle",      # sharpest lines, useful as fair-price reference
-    "leovegas",      # primary affiliate target
-    "unibet",        # primary affiliate target
-    "888sport",      # primary affiliate target
-    "betvictor",
-    "betway",
+    "pinnacle",      # sharpest lines
     "bet365",
+    "unibet",
     "williamhill",
     "betmgm",
     "fanduel",
@@ -246,7 +205,7 @@ def fetch_odds_for_sport(sport_key: str) -> list[dict]:
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
-        "regions": ODDS_REGIONS,        # configurable; default uk,eu for free tier
+        "regions": "uk,eu,us",          # covers most major bookmakers
         "markets": "h2h",
         "oddsFormat": "decimal",
         "dateFormat": "iso",
@@ -309,11 +268,10 @@ def write_odds(
 
 # ─── Main pipeline ────────────────────────────────────────────────────────────
 
-def run(dry_run: bool = False, sport_keys: list[str] | None = None) -> dict:
+def run(dry_run: bool = False) -> dict:
     """
     Full odds sync: fetch → match → write.
     Returns summary dict {fetched, matched, written, skipped}.
-    If sport_keys is provided, uses them instead of auto-discovering active sports.
     """
     if not ODDS_API_KEY:
         log.error(
@@ -331,14 +289,9 @@ def run(dry_run: bool = False, sport_keys: list[str] | None = None) -> dict:
         player_index = build_player_index(conn)
         log.info(f"Player index loaded: {len(player_index):,} players")
 
-        # Resolve which tennis sport keys to query — use override if given,
-        # else auto-detect active ones so we always pick up the current
-        # Slam/Masters tournament.
-        active_sports = sport_keys if sport_keys else discover_active_tennis_sports()
-
         stats = {"fetched": 0, "matched": 0, "written": 0, "skipped": 0}
 
-        for sport_key in active_sports:
+        for sport_key in SPORT_KEYS:
             events = fetch_odds_for_sport(sport_key)
             if not events:
                 continue
@@ -371,73 +324,71 @@ def run(dry_run: bool = False, sport_keys: list[str] | None = None) -> dict:
 
                 stats["matched"] += 1
 
-                # Write odds from EVERY bookmaker that quoted this event so the
-                # match-detail comparison view has the full price spread to
-                # show. The unique constraint (match_id, bookmaker, player_ref)
-                # ensures one row per bookmaker per side per match.
+                # Choose best bookmaker (by preference order)
                 bookmakers = event.get("bookmakers", [])
-                if not bookmakers:
+                bm_map = {bm["key"]: bm for bm in bookmakers}
+
+                chosen_bm = None
+                for pref in PREFERRED_BOOKMAKERS:
+                    if pref in bm_map:
+                        chosen_bm = bm_map[pref]
+                        break
+                if not chosen_bm and bookmakers:
+                    chosen_bm = bookmakers[0]   # fall back to first available
+                if not chosen_bm:
                     stats["skipped"] += 1
                     continue
 
-                wrote_any = False
-                for bm in bookmakers:
-                    bm_key = bm.get("key")
-                    if not bm_key:
-                        continue
-
-                    h2h_markets = [m for m in bm.get("markets", []) if m["key"] == "h2h"]
-                    if not h2h_markets:
-                        continue
-
-                    outcomes = h2h_markets[0].get("outcomes", [])
-                    odds_by_name: dict[str, float] = {o["name"]: o["price"] for o in outcomes}
-
-                    # Map odds API player names → first/second player role
-                    # (home_team = first_player in The Odds API convention)
-                    p1_odds = odds_by_name.get(home_name)
-                    p2_odds = odds_by_name.get(away_name)
-
-                    # Fallback: check similarity if exact name not found
-                    if p1_odds is None:
-                        for oname, oprice in odds_by_name.items():
-                            if _similarity(home_name, oname) > 0.85:
-                                p1_odds = oprice
-                                break
-                    if p2_odds is None:
-                        for oname, oprice in odds_by_name.items():
-                            if _similarity(away_name, oname) > 0.85:
-                                p2_odds = oprice
-                                break
-
-                    if not dry_run:
-                        if p1_odds:
-                            write_odds(match_id, bm_key, "first_player", p1_odds, conn)
-                            stats["written"] += 1
-                            wrote_any = True
-                        if p2_odds:
-                            write_odds(match_id, bm_key, "second_player", p2_odds, conn)
-                            stats["written"] += 1
-                            wrote_any = True
-                    else:
-                        if p1_odds:
-                            log.info(
-                                f"    DRY-RUN: match_id={match_id} "
-                                f"{home_name} odds={p1_odds} [{bm_key}]"
-                            )
-                        if p2_odds:
-                            log.info(
-                                f"    DRY-RUN: match_id={match_id} "
-                                f"{away_name} odds={p2_odds} [{bm_key}]"
-                            )
-
-                if not wrote_any and not dry_run:
+                # Extract H2H market
+                h2h_markets = [m for m in chosen_bm.get("markets", []) if m["key"] == "h2h"]
+                if not h2h_markets:
                     stats["skipped"] += 1
                     continue
+
+                outcomes = h2h_markets[0].get("outcomes", [])
+                odds_by_name: dict[str, float] = {o["name"]: o["price"] for o in outcomes}
+
+                # Map odds API player names → first/second player role
+                # (home_team = first_player in The Odds API convention)
+                p1_odds = odds_by_name.get(home_name)
+                p2_odds = odds_by_name.get(away_name)
+
+                # Fallback: check similarity if exact name not found
+                if p1_odds is None:
+                    for oname, oprice in odds_by_name.items():
+                        if _similarity(home_name, oname) > 0.85:
+                            p1_odds = oprice
+                            break
+                if p2_odds is None:
+                    for oname, oprice in odds_by_name.items():
+                        if _similarity(away_name, oname) > 0.85:
+                            p2_odds = oprice
+                            break
+
+                bm_key = chosen_bm["key"]
+
+                if not dry_run:
+                    if p1_odds:
+                        write_odds(match_id, bm_key, "first_player", p1_odds, conn)
+                        stats["written"] += 1
+                    if p2_odds:
+                        write_odds(match_id, bm_key, "second_player", p2_odds, conn)
+                        stats["written"] += 1
+                else:
+                    if p1_odds:
+                        log.info(
+                            f"    DRY-RUN: match_id={match_id} "
+                            f"{home_name} odds={p1_odds} [{bm_key}]"
+                        )
+                    if p2_odds:
+                        log.info(
+                            f"    DRY-RUN: match_id={match_id} "
+                            f"{away_name} odds={p2_odds} [{bm_key}]"
+                        )
 
                 log.debug(
-                    f"    Matched: {home_name} vs {away_name} → match_id={match_id} "
-                    f"({len(bookmakers)} bookmaker(s))"
+                    f"    Matched: {home_name} ({p1_odds}) vs {away_name} ({p2_odds})"
+                    f" → match_id={match_id} via {bm_key}"
                 )
 
         if not dry_run:
@@ -473,6 +424,7 @@ if __name__ == "__main__":
                         help="Only fetch one sport key (e.g. tennis_atp)")
     args = parser.parse_args()
 
-    sport_keys = [args.sport] if args.sport else None
+    if args.sport:
+        SPORT_KEYS[:] = [args.sport]
 
-    run(dry_run=args.dry_run, sport_keys=sport_keys)
+    run(dry_run=args.dry_run)

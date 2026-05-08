@@ -96,6 +96,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button onclick="run('migrate')">Migrate schema</button>
   <button onclick="run('surface-backfill')">Surface backfill</button>
   <button onclick="run('hand-backfill')">Hand backfill</button>
+  <button onclick="run('point-analysis')">Point analysis</button>
+  <button onclick="run('point-backfill')">Point backfill (runs + deuce)</button>
+  <button onclick="run('point-diag')">Point data diag</button>
   <button onclick="run('player-sync')">Player sync</button>
   <button onclick="run('player-sync?tournaments=true')">Player sync + discover</button>
   <button onclick="showAccuracy()" style="background: #166534; color: white; border-color: #166534;">Show accuracy</button>

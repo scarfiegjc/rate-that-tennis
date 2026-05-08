@@ -40,7 +40,7 @@ DB_URL = (
     or "postgresql://postgres:DEKANqBEjmOvOGLCfzaQIBaKzhKcyKwS@switchyard.proxy.rlwy.net:39343/railway"
 ).strip()
 
-MIN_SERVICE_GAMES = 30   # require at least this many service games for stats to be meaningful
+MIN_SERVICE_GAMES = 4   # require at least this many service games for stats to be meaningful
 
 
 def _pct(num: int, denom: int) -> Optional[float]:
@@ -81,6 +81,10 @@ def compute_for_player(conn, player_id: int) -> Optional[dict]:
     Compute point stats for one player. Looks at every match in last 24 months
     where the player participated AND match_games rows exist.
     Returns a dict ready to upsert, or None if not enough data.
+
+    Resilient to api-tennis's varying field formats: if player_served is mostly
+    NULL or not in the expected casing, we still compute total games won + tiebreaks
+    + set-1 recovery + match-level stats so the player gets SOMETHING in the table.
     """
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -104,10 +108,8 @@ def compute_for_player(conn, player_id: int) -> Optional[dict]:
                 mg.id AS game_id,
                 mg.set_number,
                 mg.game_number,
-                mg.player_served,
-                mg.serve_winner,
                 pp.pos,
-                (mg.player_served = pp.pos)            AS player_served,
+                (mg.player_served = pp.pos)            AS is_player_serving,
                 (mg.serve_winner = pp.pos)             AS player_won_game,
                 (SELECT COUNT(*) FROM match_points mp WHERE mp.game_id = mg.id AND mp.is_break_point) AS bps_in_game,
                 (SELECT COUNT(*) > 0 FROM match_points mp WHERE mp.game_id = mg.id AND mp.is_set_point) AS had_set_point,
@@ -116,63 +118,71 @@ def compute_for_player(conn, player_id: int) -> Optional[dict]:
             JOIN match_games mg ON mg.match_id = pp.match_id
         )
         SELECT
-            -- Service
-            COUNT(*) FILTER (WHERE player_served)                                                                AS service_games,
-            COUNT(*) FILTER (WHERE player_served AND player_won_game)                                            AS service_holds,
-            COUNT(*) FILTER (WHERE player_served AND bps_in_game > 0)                                            AS games_facing_bp,
-            COUNT(*) FILTER (WHERE player_served AND bps_in_game > 0 AND player_won_game)                        AS games_saving_all_bp,
-            -- BP-level (approximation: if held, all BPs saved; if broken, all but the last BP saved)
-            SUM(CASE WHEN player_served THEN bps_in_game ELSE 0 END)                                             AS bp_faced,
-            SUM(CASE WHEN player_served THEN
+            COUNT(*) FILTER (WHERE is_player_serving)                                                                AS service_games,
+            COUNT(*) FILTER (WHERE is_player_serving AND player_won_game)                                            AS service_holds,
+            COUNT(*) FILTER (WHERE is_player_serving AND bps_in_game > 0)                                            AS games_facing_bp,
+            COUNT(*) FILTER (WHERE is_player_serving AND bps_in_game > 0 AND player_won_game)                        AS games_saving_all_bp,
+            SUM(CASE WHEN is_player_serving THEN bps_in_game ELSE 0 END)                                             AS bp_faced,
+            SUM(CASE WHEN is_player_serving THEN
                     CASE WHEN player_won_game THEN bps_in_game
                          ELSE GREATEST(bps_in_game - 1, 0) END
-                ELSE 0 END)                                                                                      AS bp_saved,
-            -- Return
-            COUNT(*) FILTER (WHERE NOT player_served)                                                            AS return_games,
-            COUNT(*) FILTER (WHERE NOT player_served AND player_won_game)                                        AS return_breaks,
-            COUNT(*) FILTER (WHERE NOT player_served AND bps_in_game > 0)                                        AS games_with_bp_chance,
-            COUNT(*) FILTER (WHERE NOT player_served AND bps_in_game > 0 AND player_won_game)                    AS games_converting_bp,
-            SUM(CASE WHEN NOT player_served THEN bps_in_game ELSE 0 END)                                         AS bp_chances,
-            SUM(CASE WHEN NOT player_served THEN
+                ELSE 0 END)                                                                                          AS bp_saved,
+            COUNT(*) FILTER (WHERE NOT is_player_serving)                                                            AS return_games,
+            COUNT(*) FILTER (WHERE NOT is_player_serving AND player_won_game)                                        AS return_breaks,
+            COUNT(*) FILTER (WHERE NOT is_player_serving AND bps_in_game > 0)                                        AS games_with_bp_chance,
+            COUNT(*) FILTER (WHERE NOT is_player_serving AND bps_in_game > 0 AND player_won_game)                    AS games_converting_bp,
+            SUM(CASE WHEN NOT is_player_serving THEN bps_in_game ELSE 0 END)                                         AS bp_chances,
+            SUM(CASE WHEN NOT is_player_serving THEN
                     CASE WHEN player_won_game THEN 1 ELSE 0 END
-                ELSE 0 END)                                                                                      AS bp_converted,
-            -- Clutch
-            COUNT(*) FILTER (WHERE player_served AND had_set_point AND bps_in_game > 0)                          AS set_points_against_when_serving,
-            COUNT(*) FILTER (WHERE player_served AND had_set_point AND bps_in_game > 0 AND player_won_game)      AS set_points_saved_serving,
-            COUNT(*) FILTER (WHERE player_served AND had_match_point AND bps_in_game > 0)                        AS match_points_against_when_serving,
-            COUNT(*) FILTER (WHERE player_served AND had_match_point AND bps_in_game > 0 AND player_won_game)    AS match_points_saved_serving,
-            COUNT(DISTINCT match_id)                                                                             AS matches_analyzed,
-            MAX(event_date)                                                                                       AS last_match_date
+                ELSE 0 END)                                                                                          AS bp_converted,
+            COUNT(*) FILTER (WHERE is_player_serving AND had_set_point AND bps_in_game > 0)                          AS set_points_against_when_serving,
+            COUNT(*) FILTER (WHERE is_player_serving AND had_set_point AND bps_in_game > 0 AND player_won_game)      AS set_points_saved_serving,
+            COUNT(*) FILTER (WHERE is_player_serving AND had_match_point AND bps_in_game > 0)                        AS match_points_against_when_serving,
+            COUNT(*) FILTER (WHERE is_player_serving AND had_match_point AND bps_in_game > 0 AND player_won_game)    AS match_points_saved_serving,
+            COUNT(DISTINCT match_id)                                                                                 AS matches_analyzed,
+            MAX(event_date)                                                                                          AS last_match_date
         FROM game_facts
         """,
         (player_id, player_id, player_id),
     )
-    row = cur.fetchone()
+    row = cur.fetchone() or {}
 
-    if not row or (row["service_games"] or 0) < MIN_SERVICE_GAMES:
+    # We no longer hard-skip on low service_games — we still write tiebreaks +
+    # set-1 recovery + match counts even if the per-game serve data is sparse.
+    # Only skip if the player genuinely has NO finished matches at all.
+    if int(row.get("matches_analyzed") or 0) == 0:
         return None
 
-    # Tiebreak data
-    cur.execute(
-        """
-        SELECT
-            COUNT(*) FILTER (WHERE ms.is_tiebreak)                                                          AS tiebreaks_played,
-            COUNT(*) FILTER (
-                WHERE ms.is_tiebreak AND
-                  CASE WHEN m.first_player_id = %s
-                       THEN ms.score_first  ~ '^[0-9.]+$' AND ms.score_first::float > ms.score_second::float
-                       ELSE ms.score_second ~ '^[0-9.]+$' AND ms.score_second::float > ms.score_first::float
-                  END
-            )                                                                                                AS tiebreaks_won
-        FROM match_scores ms
-        JOIN matches m ON m.id = ms.match_id
-        WHERE (m.first_player_id = %s OR m.second_player_id = %s)
-          AND m.event_status = 'Finished'
-          AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
-        """,
-        (player_id, player_id, player_id),
-    )
-    tb = cur.fetchone() or {}
+    # Tiebreak data — defensive: filter non-numeric scores BEFORE the cast.
+    tb = {}
+    try:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE ms.is_tiebreak
+                                    AND ms.score_first  ~ '^[0-9.]+$'
+                                    AND ms.score_second ~ '^[0-9.]+$') AS tiebreaks_played,
+                COUNT(*) FILTER (
+                    WHERE ms.is_tiebreak
+                      AND ms.score_first  ~ '^[0-9.]+$'
+                      AND ms.score_second ~ '^[0-9.]+$'
+                      AND CASE WHEN m.first_player_id = %s
+                               THEN ms.score_first::float  > ms.score_second::float
+                               ELSE ms.score_second::float > ms.score_first::float
+                          END
+                ) AS tiebreaks_won
+            FROM match_scores ms
+            JOIN matches m ON m.id = ms.match_id
+            WHERE (m.first_player_id = %s OR m.second_player_id = %s)
+              AND m.event_status = 'Finished'
+              AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+            """,
+            (player_id, player_id, player_id),
+        )
+        tb = cur.fetchone() or {}
+    except Exception as e:
+        log.debug(f"  tiebreak query failed for player {player_id}: {e}")
+        tb = {}
 
     service_games = int(row["service_games"] or 0)
     service_holds = int(row["service_holds"] or 0)
@@ -404,6 +414,159 @@ def upsert_stats(conn, player_id: int, stats: dict) -> None:
         )
 
 
+def backfill_longest_game_run(conn) -> int:
+    """
+    Compute the longest streak of consecutive games won within a single set, per player.
+    Single SQL pass using window functions — counts per-player per-set runs and takes the max.
+    Updates player_point_stats.longest_game_run.
+    """
+    log.info("Backfilling longest_game_run for all players…")
+    prev_autocommit = conn.autocommit
+    conn.autocommit = True
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        WITH game_owner AS (
+            SELECT
+                mg.match_id,
+                mg.set_number,
+                mg.game_number,
+                CASE
+                  WHEN mg.serve_winner = 'First Player'  THEN m.first_player_id
+                  WHEN mg.serve_winner = 'Second Player' THEN m.second_player_id
+                  ELSE NULL
+                END AS winner_id
+            FROM match_games mg
+            JOIN matches m ON m.id = mg.match_id
+            WHERE m.event_status = 'Finished'
+              AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+              AND mg.serve_winner IN ('First Player','Second Player')
+        ),
+        ranked AS (
+            SELECT
+                go.*,
+                ROW_NUMBER() OVER (PARTITION BY match_id, set_number ORDER BY game_number)
+                  - ROW_NUMBER() OVER (PARTITION BY match_id, set_number, winner_id ORDER BY game_number)
+                  AS streak_group
+            FROM game_owner go
+            WHERE winner_id IS NOT NULL
+        ),
+        streaks AS (
+            SELECT
+                winner_id AS player_id,
+                match_id, set_number, streak_group,
+                COUNT(*) AS run_length
+            FROM ranked
+            GROUP BY winner_id, match_id, set_number, streak_group
+        ),
+        per_player AS (
+            SELECT player_id, MAX(run_length) AS longest_game_run
+            FROM streaks
+            GROUP BY player_id
+        ),
+        upserted AS (
+            INSERT INTO player_point_stats (player_id, longest_game_run, updated_at)
+            SELECT player_id, longest_game_run, NOW() FROM per_player
+            ON CONFLICT (player_id) DO UPDATE
+            SET longest_game_run = EXCLUDED.longest_game_run,
+                updated_at       = NOW()
+            RETURNING player_id
+        )
+        SELECT player_id FROM upserted
+        """
+    )
+    rows = cur.fetchall()
+    conn.autocommit = prev_autocommit
+    log.info(f"  ✅ Updated longest_game_run for {len(rows)} players")
+    return len(rows)
+
+
+def backfill_deuce_return(conn) -> int:
+    """
+    Approximate deuce-point win rate as returner.
+    Pure SQL: a 'deuce moment' = a point where the previous point's score is
+    '40-40', '40-AD', or 'AD-40'. We count those points, and 'won by returner'
+    when the next score moves towards a break or breaks the game.
+
+    This is approximate (the score field's exact strings vary by api-tennis
+    version) and we tolerate that — anything we can compute is better than nothing.
+    """
+    log.info("Backfilling deuce return win % for all players…")
+    prev_autocommit = conn.autocommit
+    conn.autocommit = True
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        WITH ordered AS (
+            SELECT
+                m.id AS match_id,
+                m.first_player_id,
+                m.second_player_id,
+                mg.id AS game_id,
+                mg.player_served,
+                mg.serve_winner,
+                mp.point_number,
+                mp.score,
+                LAG(mp.score) OVER (PARTITION BY mp.game_id ORDER BY mp.point_number) AS prev_score
+            FROM matches m
+            JOIN match_games mg ON mg.match_id = m.id
+            JOIN match_points mp ON mp.game_id = mg.id
+            WHERE m.event_status = 'Finished'
+              AND m.event_date >= CURRENT_DATE - INTERVAL '24 months'
+        ),
+        deuce_pts AS (
+            SELECT
+                CASE WHEN player_served = 'First Player'  THEN second_player_id
+                     WHEN player_served = 'Second Player' THEN first_player_id
+                END AS returner_id,
+                serve_winner = player_served AS server_won_game
+            FROM ordered
+            WHERE prev_score IN ('40-40','40-AD','AD-40','Deuce')
+              AND player_served IN ('First Player','Second Player')
+        ),
+        per_player AS (
+            SELECT
+                returner_id AS player_id,
+                COUNT(*) AS total,
+                SUM(CASE WHEN NOT server_won_game THEN 1 ELSE 0 END) AS won
+            FROM deuce_pts
+            WHERE returner_id IS NOT NULL
+            GROUP BY returner_id
+        ),
+        upserted AS (
+            INSERT INTO player_point_stats (
+                player_id, deuce_pts_total_ret, deuce_pts_won_ret, deuce_win_pct_ret, updated_at
+            )
+            SELECT
+                player_id, total, won,
+                ROUND(100.0 * won::numeric / NULLIF(total,0), 2),
+                NOW()
+            FROM per_player
+            ON CONFLICT (player_id) DO UPDATE SET
+                deuce_pts_total_ret = EXCLUDED.deuce_pts_total_ret,
+                deuce_pts_won_ret   = EXCLUDED.deuce_pts_won_ret,
+                deuce_win_pct_ret   = EXCLUDED.deuce_win_pct_ret,
+                updated_at          = NOW()
+            RETURNING player_id
+        )
+        SELECT player_id FROM upserted
+        """
+    )
+    rows = cur.fetchall()
+    conn.autocommit = prev_autocommit
+    log.info(f"  ✅ Updated deuce return win % for {len(rows)} players")
+    return len(rows)
+
+
+def backfill_all(conn) -> dict:
+    """Run both backfills together."""
+    runs = backfill_longest_game_run(conn)
+    deuce = backfill_deuce_return(conn)
+    return {"longest_run_updated": runs, "deuce_updated": deuce}
+
+
 def run(conn) -> int:
     """Compute point stats for every player who has at least 30 service games. Returns rows updated."""
     log.info("Computing point analysis for all eligible players…")
@@ -431,19 +594,33 @@ def run(conn) -> int:
     log.info(f"  {len(players)} candidate players")
 
     written = 0
+    skipped_below_threshold = 0
+    errored = 0
+    sample_errors = []
     for pid in players:
         try:
             stats = compute_for_player(conn, pid)
             if not stats:
+                skipped_below_threshold += 1
                 continue
             upsert_stats(conn, pid, stats)
             written += 1
         except Exception as e:
             log.warning(f"  player {pid}: {e}")
+            errored += 1
+            if len(sample_errors) < 3:
+                sample_errors.append({"player_id": pid, "error": str(e)[:300]})
 
     conn.autocommit = prev_autocommit
-    log.info(f"  ✅ Wrote point stats for {written} players")
-    return written
+    log.info(f"  ✅ Wrote point stats for {written} players "
+             f"({skipped_below_threshold} below threshold, {errored} errored)")
+    return {
+        "written":  written,
+        "skipped_below_threshold": skipped_below_threshold,
+        "errored":  errored,
+        "candidates": len(players),
+        "sample_errors": sample_errors,
+    }
 
 
 def main():

@@ -1394,6 +1394,66 @@ button {
 }
 .live-status-text { color: var(--red); font-weight: 600; font-size: 11px; }
 
+/* ── My Picks ────────────────────────────────────────── */
+
+.picks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+/* ── Auth modal / generic modal overlay ─────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* ── Form inputs (login/signup) ──────────────────────── */
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 5px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: var(--text-3);
+}
+
 /* ── Scrollbar ───────────────────────────────────────── */
 
 ::-webkit-scrollbar { width: 5px; }

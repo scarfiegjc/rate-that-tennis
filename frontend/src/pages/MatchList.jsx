@@ -1,24 +1,50 @@
 /**
- * MatchList — Command centre. Matches grouped by date → tournament.
- * Each match is a compact horizontal row: time · players · probability · edge.
+ * MatchList — Command centre. 2/3 match list + 1/3 sidebar.
+ * Singles only. Doubles excluded everywhere.
  *
- * Filters: surface · gender (Men/Women) · tournament
- * Sort:    by time (default, grouped view) · by win chance (flat ranked list)
+ * Filters: surface · gender (Men/Women/All) · tournament
+ * Sort:    by time (grouped) · by win chance (flat ranked)
+ * Sidebar: prediction win rate · RTT system selections · top 5 win chances
  */
 
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
-import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
+import StarPick from '../components/StarPick.jsx'
 
 // ── Surface dot ───────────────────────────────────────────────────────────────
 
 function SurfaceDot({ surface }) {
-  const cls = (surface || '').toLowerCase().replace(' ', '-')
+  const cls = (surface || '').toLowerCase().replace(/\s+/g, '-')
   return <span className={`surface-dot ${cls}`} title={surface} />
+}
+
+// ── Live lozenge (flashing) ────────────────────────────────────────────────────
+
+function LiveLozenge({ small = false }) {
+  return (
+    <span className={small ? 'live-lozenge live-lozenge--sm' : 'live-lozenge'}>
+      <span className="live-lozenge-dot" />
+      LIVE
+    </span>
+  )
+}
+
+// ── Momentum lozenge ──────────────────────────────────────────────────────────
+
+function MomentumLozenge({ momentum }) {
+  if (!momentum) return null
+  const config = {
+    rising:  { label: '↑ Rising',  cls: 'momentum-rising' },
+    stable:  { label: '→ Stable',  cls: 'momentum-stable' },
+    falling: { label: '↓ Falling', cls: 'momentum-falling' },
+  }
+  const c = config[(momentum || '').toLowerCase()]
+  if (!c) return null
+  return <span className={`momentum-lozenge ${c.cls}`}>{c.label}</span>
 }
 
 // ── Match row ─────────────────────────────────────────────────────────────────
@@ -29,13 +55,13 @@ function MatchRow({ match, showTournament }) {
   const p2   = match.second_player || {}
   const pred = match.prediction    || {}
 
-  const isLive    = /in play|live|set \d|game/i.test(match.event_status || '')
+  const isLive     = /in play|live|set \d|game/i.test(match.event_status || '')
   const isFinished = /finished/i.test(match.event_status || '')
-  const edgeVal   = Math.max(pred.edge_first || 0, pred.edge_second || 0)
-  const edgeName  = (pred.edge_first || 0) >= (pred.edge_second || 0)
+  const edgeVal    = Math.max(pred.edge_first || 0, pred.edge_second || 0)
+  const edgeName   = (pred.edge_first || 0) >= (pred.edge_second || 0)
     ? (p1.name || 'P1')
     : (p2.name || 'P2')
-  const hasEdge   = edgeVal > 0.02
+  const hasEdge    = edgeVal > 0.02
 
   const p1prob = pred.prob_first_player  != null ? Math.round(pred.prob_first_player  * 100) : null
   const p2prob = pred.prob_second_player != null ? Math.round(pred.prob_second_player * 100) : null
@@ -58,13 +84,11 @@ function MatchRow({ match, showTournament }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  const liveScore = match.final_result || match.game_result || ''
+  const liveScore = match.game_result || match.final_result || ''
 
   return (
-    <button
-      className={rowCls}
-      onClick={() => navigate(`/match/${match.match_id}`)}
-    >
+    <button className={rowCls} onClick={() => navigate(`/match/${match.match_id}`)}>
+
       {/* Time / status */}
       <div className={`match-row-time ${isLive ? 'live' : ''}`}>
         {isLive
@@ -79,25 +103,38 @@ function MatchRow({ match, showTournament }) {
 
       {/* Player 1 */}
       <div className="match-player-cell">
-        <div className={`match-player-name ${winner1 ? 'winner' : ''}`}
-             style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}>
+        <div
+          className={`match-player-name ${winner1 ? 'winner' : ''}`}
+          style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
+        >
           {p1.name || '—'}
+          {!isFinished && p1.id && (
+            <StarPick
+              matchId={match.match_id}
+              playerId={p1.id}
+              playerName={p1.name}
+              ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
+              bestOdds={pred.best_odds_first_player || null}
+              size="sm"
+            />
+          )}
         </div>
         <div className="match-player-sub">
           <span className="match-player-country">{p1.country_code || ''}</span>
           <RttLozenge score={p1.rtt_score} hideIfMissing />
-          <FormDots dots={p1.form_dots || []} max={10} />
+          <MomentumLozenge momentum={p1.momentum} />
         </div>
       </div>
 
-      {/* Centre */}
+      {/* Centre — live lozenge / score / probabilities / vs */}
       <div className="match-centre">
-        {isFinished && (match.set_scores || match.final_result) ? (
-          <span className="match-final-score">
-            {match.set_scores || match.final_result}
-          </span>
-        ) : isLive && liveScore ? (
-          <span className="match-live-score">{liveScore}</span>
+        {isLive ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <LiveLozenge />
+            {liveScore && <span className="match-live-score">{liveScore}</span>}
+          </div>
+        ) : isFinished && (match.set_scores || match.final_result) ? (
+          <span className="match-final-score">{match.set_scores || match.final_result}</span>
         ) : p1prob != null ? (
           <>
             <div className="match-probs">
@@ -119,12 +156,24 @@ function MatchRow({ match, showTournament }) {
 
       {/* Player 2 */}
       <div className="match-player-cell right">
-        <div className={`match-player-name ${winner2 ? 'winner' : ''}`}
-             style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}>
+        <div
+          className={`match-player-name ${winner2 ? 'winner' : ''}`}
+          style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
+        >
+          {!isFinished && p2.id && (
+            <StarPick
+              matchId={match.match_id}
+              playerId={p2.id}
+              playerName={p2.name}
+              ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
+              bestOdds={pred.best_odds_second_player || null}
+              size="sm"
+            />
+          )}
           {p2.name || '—'}
         </div>
         <div className="match-player-sub">
-          <FormDots dots={p2.form_dots || []} max={10} />
+          <MomentumLozenge momentum={p2.momentum} />
           <RttLozenge score={p2.rtt_score} hideIfMissing />
           <span className="match-player-country">{p2.country_code || ''}</span>
         </div>
@@ -141,19 +190,17 @@ function MatchRow({ match, showTournament }) {
             {match.tournament}
           </span>
         )}
-        {isLive
-          ? <span className="live-badge amber"><span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE</span>
-          : hasEdge
-            ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
-            : isFinished
-              ? predictionCorrect === true
-                ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
-                : predictionCorrect === false
-                  ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
-                  : null
-              : p1prob != null
-                ? <span className="edge-badge neutral">—</span>
+        {hasEdge
+          ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
+          : isFinished
+            ? predictionCorrect === true
+              ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
+              : predictionCorrect === false
+                ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
                 : null
+            : p1prob != null
+              ? <span className="edge-badge neutral">—</span>
+              : null
         }
       </div>
     </button>
@@ -219,7 +266,7 @@ function TournamentBlock({ name, surface, matches }) {
   )
 }
 
-// ── Date group (grouped / by-time view) ──────────────────────────────────────
+// ── Date group ────────────────────────────────────────────────────────────────
 
 function DateGroup({ date, matches }) {
   const byTournament = {}
@@ -244,12 +291,7 @@ function DateGroup({ date, matches }) {
       <div className="date-sep">{formatDate(date)}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {sorted.map(([name, { surface, matches: tMatches }]) => (
-          <TournamentBlock
-            key={name}
-            name={name}
-            surface={surface}
-            matches={tMatches}
-          />
+          <TournamentBlock key={name} name={name} surface={surface} matches={tMatches} />
         ))}
       </div>
     </div>
@@ -260,11 +302,9 @@ function DateGroup({ date, matches }) {
 
 function WinChanceList({ matches }) {
   const sorted = [...matches].sort((a, b) => {
-    // Live matches always at top
     const aLive = /in play|live/i.test(a.event_status || '') ? 1 : 0
     const bLive = /in play|live/i.test(b.event_status || '') ? 1 : 0
     if (aLive !== bLive) return bLive - aLive
-    // Sort by most decisive prediction (furthest from 50/50)
     const aProb = Math.max(
       a.prediction?.prob_first_player  ?? 0.5,
       a.prediction?.prob_second_player ?? 0.5,
@@ -289,6 +329,234 @@ function WinChanceList({ matches }) {
         <MatchRow key={m.match_id} match={m} showTournament />
       ))}
     </div>
+  )
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
+function StatMini({ label, value }) {
+  return (
+    <div className="sidebar-stat-mini">
+      <div className="sidebar-stat-value">{value ?? '—'}</div>
+      <div className="sidebar-stat-label">{label}</div>
+    </div>
+  )
+}
+
+function Sidebar({ allMatches }) {
+  const navigate = useNavigate()
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Singles only, today only
+  const todaySingles = useMemo(() =>
+    allMatches.filter(m => !m.is_doubles && (m.event_date || '').slice(0, 10) === today),
+    [allMatches, today]
+  )
+
+  // ── Box 1: Prediction win rate ────────────────────────────────────────────
+  const liveNow   = todaySingles.filter(m => /in play|live|set \d|game/i.test(m.event_status || ''))
+  const finished  = todaySingles.filter(m => /finished/i.test(m.event_status || ''))
+  const withPred  = finished.filter(m => m.prediction?.prob_first_player != null && m.winner)
+  const correct   = withPred.filter(m => {
+    const p = m.prediction
+    const pick = p.prob_first_player >= 0.5 ? 'First Player' : 'Second Player'
+    return pick === m.winner
+  })
+  const winRate   = withPred.length > 0 ? Math.round(correct.length / withPred.length * 100) : null
+  const rateColor = winRate == null
+    ? 'var(--text-3)'
+    : winRate >= 60 ? 'var(--green)'
+    : winRate >= 45 ? 'var(--amber)'
+    : 'var(--red)'
+
+  // ── Box 2: System selections (edge > 2%) ──────────────────────────────────
+  const selections   = todaySingles.filter(m => Math.max(m.edge?.p1 || 0, m.edge?.p2 || 0) > 0.02)
+  const selFinished  = selections.filter(m => /finished/i.test(m.event_status || '') && m.winner)
+  const selWins      = selFinished.filter(m => {
+    const backFirst = (m.edge?.p1 || 0) >= (m.edge?.p2 || 0)
+    return (backFirst && m.winner === 'First Player') || (!backFirst && m.winner === 'Second Player')
+  })
+  const selWinRate   = selFinished.length > 0 ? Math.round(selWins.length / selFinished.length * 100) : null
+
+  // ── Box 3: Top 5 win chances ──────────────────────────────────────────────
+  const topChances = [...todaySingles]
+    .filter(m => m.prediction?.prob_first_player != null)
+    .sort((a, b) =>
+      Math.max(b.prediction.prob_first_player, b.prediction.prob_second_player) -
+      Math.max(a.prediction.prob_first_player, a.prediction.prob_second_player)
+    )
+    .slice(0, 5)
+
+  return (
+    <aside className="match-sidebar">
+
+      {/* ── Box 1: Prediction win rate ── */}
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>📊</span>
+          <span>Today's prediction rate</span>
+        </div>
+
+        <div style={{ textAlign: 'center', padding: '14px 0 10px' }}>
+          {winRate != null ? (
+            <>
+              <div style={{ fontSize: 44, fontWeight: 700, color: rateColor, lineHeight: 1, letterSpacing: -2 }}>
+                {winRate}%
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>
+                {correct.length} correct · {withPred.length} rated
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '6px 0' }}>
+              {finished.length > 0 ? 'No predictions to score yet' : 'No completed matches yet'}
+            </div>
+          )}
+        </div>
+
+        <div className="sidebar-stats-row" style={{ borderTop: '1px solid var(--border-faint)', paddingTop: 10, marginTop: 4 }}>
+          <StatMini label="Live" value={liveNow.length || '0'} />
+          <StatMini label="Total" value={todaySingles.length} />
+          <StatMini label="Done"  value={finished.length} />
+        </div>
+      </div>
+
+      {/* ── Box 2: RTT System Selections ── */}
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>🎯</span>
+          <span>RTT System Selections</span>
+        </div>
+
+        <div className="sidebar-stats-row">
+          <StatMini label="Selections" value={selections.length} />
+          <StatMini label="Wins"       value={selFinished.length > 0 ? selWins.length : '—'} />
+          <StatMini label="Win rate"   value={selWinRate != null ? `${selWinRate}%` : '—'} />
+        </div>
+
+        {selections.length === 0 ? (
+          <div className="sidebar-empty">No value selections today</div>
+        ) : (
+          <div className="sidebar-selection-list">
+            {selections.slice(0, 6).map(m => {
+              const p1 = m.first_player || {}
+              const p2 = m.second_player || {}
+              const ep1 = m.edge?.p1 || 0
+              const ep2 = m.edge?.p2 || 0
+              const backFirst  = ep1 >= ep2
+              const pickedName = backFirst ? p1.name : p2.name
+              const prob = backFirst
+                ? m.prediction?.prob_first_player
+                : m.prediction?.prob_second_player
+              const edge = Math.max(ep1, ep2)
+              const isLive  = /in play|live|set \d|game/i.test(m.event_status || '')
+              const isDone  = /finished/i.test(m.event_status || '')
+              const won  = isDone && m.winner && (
+                (backFirst && m.winner === 'First Player') || (!backFirst && m.winner === 'Second Player')
+              )
+              const lost = isDone && m.winner && !won
+
+              return (
+                <button
+                  key={m.match_id}
+                  className="sidebar-selection-row"
+                  onClick={() => navigate(`/match/${m.match_id}`)}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontWeight: 600, fontSize: 13,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {pickedName || '—'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      {m.tournament || ''}
+                      {edge > 0 ? ` · +${Math.round(edge * 100)}% edge` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                    {prob != null && (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
+                        {Math.round(prob * 100)}%
+                      </span>
+                    )}
+                    {isLive && <LiveLozenge small />}
+                    {won  && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 700 }}>✓</span>}
+                    {lost && <span style={{ fontSize: 13, color: 'var(--red)',   fontWeight: 700 }}>✗</span>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div style={{
+          fontSize: 10, color: 'var(--text-3)', textAlign: 'center',
+          padding: '6px 12px 2px', borderTop: '1px solid var(--border-faint)', marginTop: 4,
+        }}>
+          Matches where RTT model edge &gt; 2%
+        </div>
+      </div>
+
+      {/* ── Box 3: Top win chances ── */}
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>🏆</span>
+          <span>Top win chances today</span>
+        </div>
+
+        {topChances.length === 0 ? (
+          <div className="sidebar-empty">No predictions available</div>
+        ) : (
+          <div className="sidebar-selection-list">
+            {topChances.map((m, i) => {
+              const p1 = m.first_player || {}
+              const p2 = m.second_player || {}
+              const prob1 = m.prediction?.prob_first_player ?? 0
+              const prob2 = m.prediction?.prob_second_player ?? 0
+              const favourite = prob1 >= prob2 ? p1 : p2
+              const underdog  = prob1 >= prob2 ? p2 : p1
+              const favProb   = Math.max(prob1, prob2)
+              const isLive    = /in play|live|set \d|game/i.test(m.event_status || '')
+
+              return (
+                <button
+                  key={m.match_id}
+                  className="sidebar-selection-row"
+                  onClick={() => navigate(`/match/${m.match_id}`)}
+                >
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--text-3)',
+                    width: 20, flexShrink: 0, textAlign: 'left',
+                  }}>#{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 600,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {favourite.name || '—'}
+                    </div>
+                    <div style={{
+                      fontSize: 11, color: 'var(--text-3)',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      vs {underdog.name || '—'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>
+                      {Math.round(favProb * 100)}%
+                    </span>
+                    {isLive && <LiveLozenge small />}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+    </aside>
   )
 }
 
@@ -321,55 +589,20 @@ function groupByDate(matches) {
 
 function todayLabel() {
   return new Date().toLocaleDateString('en-GB', {
-    weekday: 'long', day: 'numeric', month: 'long'
+    weekday: 'long', day: 'numeric', month: 'long',
   })
 }
 
-// Tour-level classifier — drives the Slam/Masters / Challenger / ITF tickboxes
-function detectLevel(match) {
-  const t = (match.tournament || '').trim()
-  const lc = t.toLowerCase()
-  if (/\b(m15|m25|w15|w25|w35|w50|w60|w75|w80|w100)\b/i.test(t)) return 'ITF'
-  if (/\bchallenger\b/i.test(lc))                                return 'Challenger'
-  if (/^utr\s+ptt/i.test(t))                                     return 'Challenger'
-  if (/\b(masters|1000|grand\s*slam|australian open|roland.?garros|wimbledon|us open)\b/i.test(lc))
-    return 'Slam / Masters'
-  return 'Tour'
-}
-
-// Tickbox component
-function Tickbox({ label, checked, onChange, accent }) {
-  const colour = accent || 'var(--green)'
-  return (
-    <label style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      cursor: 'pointer', fontSize: 12, color: 'var(--text-2)',
-      padding: '3px 8px', borderRadius: 6,
-      border: `1px solid ${checked ? colour : 'var(--border)'}`,
-      background: checked ? `color-mix(in srgb, ${colour} 12%, transparent)` : 'transparent',
-      transition: 'all 0.12s',
-      whiteSpace: 'nowrap', userSelect: 'none',
-    }}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        style={{ accentColor: colour, cursor: 'pointer', width: 13, height: 13, margin: 0 }}
-      />
-      {label}
-    </label>
-  )
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
 const GENDERS  = ['All', 'Men', 'Women']
-const LEVELS   = ['Slam / Masters', 'Challenger', 'ITF']
 const SORTS    = [
   { id: 'time',      label: 'By time' },
   { id: 'winchance', label: 'By win chance' },
 ]
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function MatchList() {
   const [matches,    setMatches]    = useState([])
@@ -377,22 +610,9 @@ export default function MatchList() {
   const [error,      setError]      = useState(null)
   const [surface,    setSurface]    = useState('All')
   const [gender,     setGender]     = useState('All')
-  const [levels,     setLevels]     = useState(() => new Set(LEVELS)) // all on by default
-  const [upcomingOnly,     setUpcomingOnly]     = useState(false)
-  const [ratedOnly,        setRatedOnly]        = useState(false)
-  const [hideUnidentified, setHideUnidentified] = useState(false)
   const [tournament, setTournament] = useState('')
   const [sortBy,     setSortBy]     = useState('time')
   const [lastFetch,  setLastFetch]  = useState(null)
-
-  function toggleLevel(level) {
-    setLevels(prev => {
-      const next = new Set(prev)
-      if (next.has(level)) next.delete(level)
-      else next.add(level)
-      return next
-    })
-  }
 
   function load() {
     setLoading(true)
@@ -407,40 +627,28 @@ export default function MatchList() {
 
   useEffect(() => { load() }, [])
 
-  // Build tournament list from all matches (before filtering)
+  // Tournament list from non-doubles matches only
   const tournamentOptions = useMemo(() => {
     const names = new Set()
     for (const m of matches) {
-      if (m.tournament) names.add(m.tournament)
+      if (!m.is_doubles && m.tournament) names.add(m.tournament)
     }
     return Array.from(names).sort()
   }, [matches])
 
-  // Apply all active filters
+  // Filter — doubles always excluded
   const filtered = useMemo(() => {
     return matches.filter(m => {
+      if (m.is_doubles) return false
       if (surface !== 'All' && (m.surface || '').toLowerCase() !== surface.toLowerCase()) return false
       if (gender === 'Men'   && m.gender !== 'Men')   return false
       if (gender === 'Women' && m.gender !== 'Women') return false
       if (tournament && m.tournament !== tournament)   return false
-      // Tour level tickboxes — only Slam/Masters, Challenger and ITF are gated.
-      // Regular Tour 250/500 matches always show.
-      const lvl = detectLevel(m)
-      if (lvl !== 'Tour' && !levels.has(lvl)) return false
-      if (upcomingOnly) {
-        const st = (m.event_status || '').toLowerCase()
-        if (/finished/i.test(st)) return false
-      }
-      if (ratedOnly || hideUnidentified) {
-        const r1 = m.first_player?.rtt_score
-        const r2 = m.second_player?.rtt_score
-        if (r1 == null || r2 == null) return false
-      }
       return true
     })
-  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified])
+  }, [matches, surface, gender, tournament])
 
-  // Clear tournament selection if it disappears from the filtered set
+  // Clear tournament if filtered away
   useEffect(() => {
     if (tournament && filtered.length > 0 && !filtered.some(m => m.tournament === tournament)) {
       setTournament('')
@@ -455,7 +663,8 @@ export default function MatchList() {
   const groups = groupByDate(filtered)
 
   return (
-    <div className="page">
+    <div className="page" style={{ maxWidth: 1280 }}>
+
       {/* Header */}
       <div className="cc-header">
         <div>
@@ -480,9 +689,7 @@ export default function MatchList() {
             style={{ fontSize: 13, color: 'var(--text-3)', padding: '4px 6px',
                      borderRadius: 'var(--r-sm)', transition: 'color 0.12s' }}
             title="Refresh"
-          >
-            ↻
-          </button>
+          >↻</button>
           {lastFetch && (
             <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
               Updated {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -494,75 +701,31 @@ export default function MatchList() {
       {/* Filter + sort bar */}
       <div style={{
         display: 'flex', flexWrap: 'wrap', gap: 12,
-        alignItems: 'center', marginBottom: 16,
-        paddingBottom: 12,
-        borderBottom: '1px solid var(--border-faint)',
+        alignItems: 'center', marginBottom: 20,
+        paddingBottom: 14, borderBottom: '1px solid var(--border-faint)',
       }}>
 
         {/* Surface */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Surface</span>
           {SURFACES.map(s => (
-            <button
-              key={s}
-              className={`surface-pill ${surface === s ? 'active' : ''}`}
-              onClick={() => setSurface(s)}
-            >
+            <button key={s} className={`surface-pill ${surface === s ? 'active' : ''}`} onClick={() => setSurface(s)}>
               {s}
             </button>
           ))}
         </div>
 
-        {/* Gender / Tour */}
+        {/* Tour */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Tour</span>
           {GENDERS.map(g => (
-            <button
-              key={g}
-              className={`surface-pill ${gender === g ? 'active' : ''}`}
-              onClick={() => setGender(g)}
-            >
+            <button key={g} className={`surface-pill ${gender === g ? 'active' : ''}`} onClick={() => setGender(g)}>
               {g}
             </button>
           ))}
         </div>
 
-        {/* Level tickboxes */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Level</span>
-          {LEVELS.map(lvl => (
-            <Tickbox
-              key={lvl}
-              label={lvl}
-              checked={levels.has(lvl)}
-              onChange={() => toggleLevel(lvl)}
-            />
-          ))}
-        </div>
-
-        {/* Show / hide tickboxes */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Tickbox
-            label="Upcoming only"
-            checked={upcomingOnly}
-            onChange={() => setUpcomingOnly(v => !v)}
-            accent="var(--amber, #f59e0b)"
-          />
-          <Tickbox
-            label="Rated players only"
-            checked={ratedOnly}
-            onChange={() => setRatedOnly(v => !v)}
-            accent="var(--green, #4ade80)"
-          />
-          <Tickbox
-            label="Hide unidentified players"
-            checked={hideUnidentified}
-            onChange={() => setHideUnidentified(v => !v)}
-            accent="var(--accent, #3b82f6)"
-          />
-        </div>
-
-        {/* Tournament dropdown */}
+        {/* Tournament */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Tournament</span>
           <select
@@ -571,30 +734,22 @@ export default function MatchList() {
             style={{
               padding: '4px 8px', borderRadius: 6,
               border: `1px solid ${tournament ? 'var(--accent, #3b82f6)' : 'var(--border)'}`,
-              fontSize: 12,
-              background: 'var(--bg-card)',
+              fontSize: 12, background: 'var(--bg-card)',
               color: tournament ? 'var(--accent, #3b82f6)' : 'var(--text-2)',
               fontFamily: 'inherit', cursor: 'pointer',
-              fontWeight: tournament ? 600 : 400,
-              maxWidth: 220,
+              fontWeight: tournament ? 600 : 400, maxWidth: 220,
             }}
           >
             <option value="">All tournaments</option>
-            {tournamentOptions.map(t => (
-              <option key={t} value={t}>{t}</option>
-            ))}
+            {tournamentOptions.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
 
-        {/* Sort — pushed to the right */}
+        {/* Sort */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Sort</span>
           {SORTS.map(s => (
-            <button
-              key={s.id}
-              className={`surface-pill ${sortBy === s.id ? 'active' : ''}`}
-              onClick={() => setSortBy(s.id)}
-            >
+            <button key={s.id} className={`surface-pill ${sortBy === s.id ? 'active' : ''}`} onClick={() => setSortBy(s.id)}>
               {s.label}
             </button>
           ))}
@@ -602,20 +757,32 @@ export default function MatchList() {
 
       </div>
 
-      {/* Content */}
-      {loading ? (
-        <div className="loading">Loading matches…</div>
-      ) : error ? (
-        <div className="error">{error}</div>
-      ) : filtered.length === 0 ? (
-        <div className="loading">No matches found for these filters.</div>
-      ) : sortBy === 'winchance' ? (
-        <WinChanceList matches={filtered} />
-      ) : (
-        Object.entries(groups).map(([date, dayMatches]) => (
-          <DateGroup key={date} date={date} matches={dayMatches} />
-        ))
-      )}
+      {/* 2-column layout: match list + sidebar */}
+      <div className="matchcenter-layout">
+
+        {/* Match list column */}
+        <div className="matchcenter-main">
+          {loading ? (
+            <div className="loading">Loading matches…</div>
+          ) : error ? (
+            <div className="error">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="loading">No singles matches found for these filters.</div>
+          ) : sortBy === 'winchance' ? (
+            <WinChanceList matches={filtered} />
+          ) : (
+            Object.entries(groups).map(([date, dayMatches]) => (
+              <DateGroup key={date} date={date} matches={dayMatches} />
+            ))
+          )}
+        </div>
+
+        {/* Sidebar column */}
+        {!loading && !error && (
+          <Sidebar allMatches={matches} />
+        )}
+
+      </div>
     </div>
   )
 }
