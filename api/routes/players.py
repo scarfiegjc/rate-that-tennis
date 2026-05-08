@@ -706,7 +706,9 @@ def get_player_stats(player_id: int):
         )
         career_serve = dict(serve_row) if serve_row else {}
 
-        # Year-by-year best ranking
+        # Year-by-year best ranking. Postgres can't always GROUP BY a SELECT
+        # alias when the underlying expression references the column directly,
+        # so repeat the EXTRACT() inside GROUP BY.
         rankings_history = query(
             """
             SELECT
@@ -716,7 +718,7 @@ def get_player_stats(player_id: int):
             FROM sa_matches sm
             WHERE (sm.winner_id = ANY(%s) OR sm.loser_id = ANY(%s))
               AND sm.tourney_date IS NOT NULL
-            GROUP BY season
+            GROUP BY EXTRACT(YEAR FROM sm.tourney_date)
             ORDER BY season DESC
             LIMIT 15
             """,
