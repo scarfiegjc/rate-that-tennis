@@ -181,16 +181,10 @@ CREATE INDEX IF NOT EXISTS ms_match_stats_player_idx ON ms_match_stats (ms_playe
 -- enforced in the very first version of this schema. They blocked any
 -- backfill where an opponent hadn't been ingested yet. Idempotent —
 -- silently no-ops once the constraints are gone.
-DO $$
-BEGIN
-    BEGIN
-        ALTER TABLE ms_matches      DROP CONSTRAINT IF EXISTS ms_matches_p1_ms_id_fkey;
-        ALTER TABLE ms_matches      DROP CONSTRAINT IF EXISTS ms_matches_p2_ms_id_fkey;
-        ALTER TABLE ms_match_stats  DROP CONSTRAINT IF EXISTS ms_match_stats_ms_player_id_fkey;
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
-END$$;
+ALTER TABLE ms_matches            DROP CONSTRAINT IF EXISTS ms_matches_p1_ms_id_fkey;
+ALTER TABLE ms_matches            DROP CONSTRAINT IF EXISTS ms_matches_p2_ms_id_fkey;
+ALTER TABLE ms_match_stats        DROP CONSTRAINT IF EXISTS ms_match_stats_ms_player_id_fkey;
+ALTER TABLE ms_player_career_stats DROP CONSTRAINT IF EXISTS ms_player_career_stats_ms_player_id_fkey;
 
 
 -- ═════════════════════════════════════════════════════════════════════════
@@ -201,7 +195,9 @@ END$$;
 -- Used directly as features in the predictor — saves recomputing at predict time.
 
 CREATE TABLE IF NOT EXISTS ms_player_career_stats (
-    ms_player_id             INTEGER PRIMARY KEY REFERENCES ms_players(ms_id) ON DELETE CASCADE,
+    -- No FK to ms_players: aggregator pulls in opponents we haven't ingested
+    -- as full profiles. Soft reference only.
+    ms_player_id             INTEGER PRIMARY KEY,
 
     -- Slam-only career averages (the predictively-valuable features)
     slam_matches             INTEGER,            -- Grand Slam matches with stat block

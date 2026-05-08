@@ -106,12 +106,18 @@ function HeroSparkline({ history }) {
   )
 }
 
-function Hero({ player, ratings, history }) {
+function Hero({ player, ratings, history, msProfile }) {
   const flag = flagEmoji(player.country_code)
   const age = ageFromBirthday(player.birthday)
   const hand = handLabel(player.hand)
   const rtt = ratings.rtt_score != null ? Math.round(ratings.rtt_score) : null
   const tier = rttTier(rtt)
+
+  // Prefer Matchstat values when present (more authoritative than our table).
+  const heightCm  = msProfile?.ms_height_cm ?? player.height_cm
+  const turnedPro = msProfile?.ms_turned_pro ?? player.turned_pro
+  const liveRank  = msProfile?.current_rank
+  const bestRank  = msProfile?.best_rank
 
   // Best surface from the four surface ratings
   const surfaces = [
@@ -148,12 +154,33 @@ function Hero({ player, ratings, history }) {
             {player.country && <span>{player.country}</span>}
             {age && <><span>·</span><span>{age} yrs</span></>}
             {hand && <><span>·</span><span>{hand}</span></>}
-            {player.height_cm && <><span>·</span><span>{player.height_cm} cm</span></>}
-            {player.turned_pro && <><span>·</span><span>Pro since {player.turned_pro}</span></>}
+            {heightCm && <><span>·</span><span>{heightCm} cm</span></>}
+            {msProfile?.weight_kg && <><span>·</span><span>{Math.round(msProfile.weight_kg)} kg</span></>}
+            {turnedPro && <><span>·</span><span>Pro since {turnedPro}</span></>}
           </div>
+
+          {/* Second meta row: live rank, career-high, best surface, momentum */}
           <div style={{
             display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10,
           }}>
+            {liveRank && (
+              <span style={{
+                background: 'var(--bg-raised)', color: 'var(--text-2)',
+                padding: '3px 10px', borderRadius: 99,
+                fontSize: 11, fontWeight: 700,
+              }}>
+                ATP #{liveRank}
+              </span>
+            )}
+            {bestRank && (
+              <span style={{
+                background: 'var(--bg-raised)', color: 'var(--text-3)',
+                padding: '3px 10px', borderRadius: 99,
+                fontSize: 11, fontWeight: 600,
+              }}>
+                Career-high · #{bestRank}
+              </span>
+            )}
             {bestSurface && (
               <span style={{
                 background: 'var(--bg-raised)', color: 'var(--text-2)',
@@ -183,6 +210,53 @@ function Hero({ player, ratings, history }) {
               </span>
             )}
           </div>
+
+          {/* Third row — coach + residence (only when ms_profile is present) */}
+          {msProfile && (msProfile.coach || msProfile.residence || msProfile.birthplace || msProfile.plays) && (
+            <div style={{
+              fontSize: 12, color: 'var(--text-3)', marginTop: 12,
+              display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center',
+            }}>
+              {msProfile.coach && (
+                <span><span style={{ color: 'var(--text-2)' }}>Coach</span> · {msProfile.coach}</span>
+              )}
+              {msProfile.residence && (
+                <span><span style={{ color: 'var(--text-2)' }}>Residence</span> · {msProfile.residence}</span>
+              )}
+              {msProfile.birthplace && msProfile.birthplace !== msProfile.residence && (
+                <span><span style={{ color: 'var(--text-2)' }}>Born</span> · {msProfile.birthplace}</span>
+              )}
+              {msProfile.plays && (
+                <span><span style={{ color: 'var(--text-2)' }}>Plays</span> · {msProfile.plays}</span>
+              )}
+            </div>
+          )}
+
+          {/* Fourth row — social handles + ATP profile link */}
+          {msProfile && (msProfile.atp_page || msProfile.twitter || msProfile.instagram) && (
+            <div style={{
+              display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'center',
+            }}>
+              {msProfile.atp_page && (
+                <a href={msProfile.atp_page} target="_blank" rel="noopener noreferrer"
+                   style={{ fontSize: 11, color: 'var(--green-text)', fontWeight: 600 }}>
+                  ATP profile ↗
+                </a>
+              )}
+              {msProfile.twitter && (
+                <a href={`https://twitter.com/${msProfile.twitter}`} target="_blank" rel="noopener noreferrer"
+                   style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  @{msProfile.twitter}
+                </a>
+              )}
+              {msProfile.instagram && (
+                <a href={`https://instagram.com/${msProfile.instagram}`} target="_blank" rel="noopener noreferrer"
+                   style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  IG · {msProfile.instagram}
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RTT score column */}
@@ -1011,7 +1085,7 @@ export default function PlayerPage() {
         </Link>
       </div>
 
-      <Hero player={player} ratings={ratings} history={history} />
+      <Hero player={player} ratings={ratings} history={history} msProfile={data.ms_profile} />
 
       <TabBar
         tabs={['Overview', 'Form', 'Match history', 'Stats']}

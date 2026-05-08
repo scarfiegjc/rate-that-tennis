@@ -302,6 +302,51 @@ def get_player(player_id: int):
     losses = len(recent) - wins
     last_10 = " ".join("W" if _match_won(r) else "L" for r in recent)
 
+    # Layer in Matchstat profile + career-stats data when we have it linked.
+    # Falls back to None silently when the player hasn't been ingested.
+    ms_profile = None
+    ms_career = None
+    try:
+        ms_row = query_one(
+            """
+            SELECT
+                msp.ms_id, msp.coach, msp.birthplace, msp.residence,
+                msp.height_cm AS ms_height_cm, msp.weight_kg, msp.plays,
+                msp.turned_pro AS ms_turned_pro, msp.player_status,
+                msp.twitter, msp.instagram, msp.facebook, msp.site,
+                msp.atp_page, msp.wikidata_id,
+                msp.current_rank, msp.best_rank, msp.points,
+                msp.hard_points, msp.ihard_points, msp.clay_points, msp.grass_points,
+                msp.prize_usd, msp.form_string,
+                pl.resolution_strategy, pl.confidence
+            FROM ms_player_links pl
+            JOIN ms_players msp ON msp.ms_id = pl.ms_id
+            WHERE pl.player_id = %s
+            """,
+            (player_id,),
+        )
+        if ms_row:
+            ms_profile = dict(ms_row)
+            cs = query_one(
+                """
+                SELECT
+                    slam_matches, slam_winners_per_match, slam_ue_per_match,
+                    slam_winner_ue_ratio, slam_net_won_pct,
+                    slam_avg_first_serve_kmh, slam_avg_second_serve_kmh, slam_fastest_serve_kmh,
+                    all_matches, all_first_serve_pct, all_first_serve_won_pct,
+                    all_second_serve_won_pct, all_aces_per_match, all_df_per_match,
+                    all_bp_conv_pct, all_total_pts_won_per_match
+                FROM ms_player_career_stats
+                WHERE ms_player_id = %s
+                """,
+                (ms_row["ms_id"],),
+            )
+            if cs:
+                ms_career = dict(cs)
+    except Exception:
+        # ms_* tables may not exist yet on every environment — keep failing soft.
+        pass
+
     return {
         "player": player,
         "ratings": ratings,
@@ -310,6 +355,8 @@ def get_player(player_id: int):
             "losses": losses,
             "last_10": last_10,
         },
+        "ms_profile": ms_profile,
+        "ms_career":  ms_career,
     }
 
 
