@@ -38,12 +38,60 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
+from decimal import Decimal
 
 log = logging.getLogger("rtt-predictor")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 PREDICTOR_VERSION = "rtt-v2"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Type-safety helpers: psycopg2 returns NUMERIC columns as decimal.Decimal,
+# which can't be multiplied by Python floats and isn't JSON serializable.
+# Every value coming back from a Decimal-producing query gets normalised to
+# a plain float (or int for whole-number counts) before it enters the
+# arithmetic / JSON pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _to_float(v):
+    """Convert any numeric (int/Decimal/float/str) to float, or None."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, Decimal):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(v):
+    """Convert any numeric to int, or 0."""
+    if v is None:
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, (Decimal, float)):
+        return int(v)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _scrub_decimals(obj):
+    """Recursively walk a dict/list and replace any Decimal with float."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _scrub_decimals(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_decimals(v) for v in obj]
+    return obj
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -352,7 +400,9 @@ class RttPredictor:
             )
             row = cur.fetchone()
         if row and row["matches"] and row["matches"] >= 8:
-            return dict(row)
+            # Coerce Decimal → float so downstream multiplication doesn't
+            # explode with `Decimal * float` TypeError.
+            return {k: _to_float(v) if k != "matches" else _to_int(v) for k, v in dict(row).items()}
         return None
 
     def _h2h(self, p1_id: int, p2_id: int, surface: Optional[str]) -> dict:
@@ -385,8 +435,10 @@ class RttPredictor:
         total = {"p1_wins": 0, "p2_wins": 0}
         on_surface = {"p1_wins": 0, "p2_wins": 0}
         for r in rows:
-            p1w = r["p1_wins"] or 0
-            p2w = r["p2_wins"] or 0
+            # SUM(CASE …) can come back as Decimal in some Postgres builds,
+            # so normalise to int before arithmetic.
+            p1w = _to_int(r["p1_wins"])
+            p2w = _to_int(r["p2_wins"])
             total["p1_wins"] += p1w
             total["p2_wins"] += p2w
             if surface and r["surface"] and surface.lower() in r["surface"].lower():
@@ -422,7 +474,8 @@ class RttPredictor:
             row = cur.fetchone()
         if not row or not row[0] or row[0] < 4:
             return None
-        n, wins = row[0], (row[1] or 0)
+        # Cast to int so 100.0 * wins doesn't hit the Decimal*float TypeError.
+        n, wins = _to_int(row[0]), _to_int(row[1])
         return round(100.0 * wins / n, 2)
 
     def _days_rest(self, player_id: int, match_date: Optional[date]) -> Optional[int]:
@@ -501,7 +554,8 @@ class RttPredictor:
             row = cur.fetchone()
         if not row or not row[0] or row[0] < 5:
             return None
-        return float(row[1] or 0) / float(row[0])
+        # Force int conversion so the division returns a clean float.
+        return _to_int(row[1]) / _to_int(row[0])
 
     # ── feature computation ──────────────────────────────────────────────────
 
@@ -852,8 +906,10 @@ class RttPredictor:
 
     def write_prediction(self, pred: PredictionResult) -> None:
         conn = self._get_conn()
-        key_factors = [f.as_dict() for f in pred.factors]
-        snap = pred.snapshot or {}
+        # Scrub Decimals out of the factor dicts so json.dumps doesn't choke
+        # on values that slipped through coming from numeric columns.
+        key_factors = [_scrub_decimals(f.as_dict()) for f in pred.factors]
+        snap = _scrub_decimals(pred.snapshot or {})
         with conn.cursor() as cur:
             cur.execute(
                 """
