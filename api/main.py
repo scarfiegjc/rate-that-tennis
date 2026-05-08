@@ -302,6 +302,43 @@ def admin_predict(days_ahead: int = 7):
     from api.bootstrap import run_rtt_predictions
     return _safe_admin(run_rtt_predictions, days_ahead=days_ahead)
 
+@app.get("/admin/matchstat-backfill")
+def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
+                              max_match_pages: int = 3,
+                              skip_already_linked: bool = True):
+    """
+    Run the Matchstat ingestion backfill across active rated players.
+    `limit=0` means no limit (whole pool). `skip_already_linked=true` skips
+    players we've already ingested — set false to refresh in-place.
+    """
+    def _run():
+        from matchstat_ingest import backfill_active
+        from api.db import get_engine
+        engine = get_engine()
+        with engine.connect() as sa_conn:
+            raw = sa_conn.connection.dbapi_connection
+            return backfill_active(
+                raw, tour=tour,
+                limit=(limit or None),
+                max_match_pages=max_match_pages,
+                skip_already_linked=skip_already_linked,
+            )
+    return _safe_admin(_run)
+
+
+@app.get("/admin/matchstat-aggregate")
+def admin_matchstat_aggregate():
+    """Recompute ms_player_career_stats from ms_match_stats."""
+    def _run():
+        from matchstat_ingest import compute_career_stats
+        from api.db import get_engine
+        engine = get_engine()
+        with engine.connect() as sa_conn:
+            raw = sa_conn.connection.dbapi_connection
+            return compute_career_stats(raw)
+    return _safe_admin(_run)
+
+
 @app.get("/admin/matchstat-spike")
 def admin_matchstat_spike(n: int = 10, tour: str = "atp", names: str = ""):
     """

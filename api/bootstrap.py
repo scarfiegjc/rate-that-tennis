@@ -106,7 +106,7 @@ def apply_schema_migrations() -> dict:
         return {"error": "no database url"}
 
     migrations_dir = APP_DIR / "api" / "_migrations"
-    files = ["schema_additions.sql", "predictions_schema.sql"]
+    files = ["schema_additions.sql", "predictions_schema.sql", "matchstat_schema.sql"]
     summary: dict = {}
 
     conn = psycopg2.connect(db_url)
@@ -235,7 +235,7 @@ def run_point_analysis() -> dict:
     if not db_url:
         return {"error": "no database url"}
     try:
-        from point_analysis import run as _run  # noqa
+        from point_analysis import run as _run, backfill_all  # noqa
     except Exception as e:
         return {"error": f"import: {e}", "traceback": traceback.format_exc().splitlines()[-8:]}
     try:
@@ -243,8 +243,42 @@ def run_point_analysis() -> dict:
     except Exception as e:
         return {"error": f"connect: {e}"}
     try:
-        n = _run(conn)
-        return {"updated": n}
+        result = _run(conn)
+        # _run now returns a dict with breakdown; older code returned an int
+        if isinstance(result, dict):
+            run_summary = result
+        else:
+            run_summary = {"written": result}
+        # After computing aggregates, backfill the sequential metrics
+        # (longest game run + deuce-as-returner) — both done in pure SQL.
+        backfill_summary = backfill_all(conn)
+        return {"run": run_summary, "backfill": backfill_summary}
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__,
+                "traceback": traceback.format_exc().splitlines()[-12:]}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def run_point_backfill_only() -> dict:
+    """Just run the sequential-metrics backfill (longest run + deuce return %)."""
+    import traceback
+    db_url = _db_url()
+    if not db_url:
+        return {"error": "no database url"}
+    try:
+        from point_analysis import backfill_all  # noqa
+    except Exception as e:
+        return {"error": f"import: {e}", "traceback": traceback.format_exc().splitlines()[-8:]}
+    try:
+        conn = psycopg2.connect(db_url)
+    except Exception as e:
+        return {"error": f"connect: {e}"}
+    try:
+        return backfill_all(conn)
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__,
                 "traceback": traceback.format_exc().splitlines()[-12:]}

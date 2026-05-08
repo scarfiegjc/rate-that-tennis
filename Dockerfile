@@ -24,6 +24,7 @@ COPY api/ ./api/
 # Pipeline modules the bootstrap path needs (psycopg2 + stdlib only, no pandas/scipy).
 COPY pipeline/predictions_schema.sql ./api/_migrations/predictions_schema.sql
 COPY pipeline/schema_additions.sql   ./api/_migrations/schema_additions.sql
+COPY pipeline/matchstat_schema.sql   ./api/_migrations/matchstat_schema.sql
 COPY pipeline/surface_backfill.py    ./surface_backfill.py
 COPY pipeline/hand_backfill.py       ./hand_backfill.py
 COPY pipeline/player_sync.py         ./player_sync.py
@@ -32,8 +33,7 @@ COPY pipeline/form_score.py          ./form_score.py
 COPY pipeline/point_analysis.py      ./point_analysis.py
 COPY pipeline/player_splits.py       ./player_splits.py
 COPY pipeline/settle_predictions.py  ./settle_predictions.py
-COPY pipeline/affiliate_config.py    ./affiliate_config.py
-COPY pipeline/odds.py                ./odds.py
+COPY pipeline/matchstat_ingest.py    ./matchstat_ingest.py
 
 # ML package (rtt_predictor + systems engine — both lightweight)
 COPY ml/__init__.py                  ./ml/__init__.py
