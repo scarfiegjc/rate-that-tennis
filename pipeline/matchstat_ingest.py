@@ -629,15 +629,25 @@ def backfill_active(conn, tour: str = "atp", limit: Optional[int] = None,
             already = {r[0] for r in cur.fetchall()}
         sample = [p for p in sample if p["id"] not in already]
 
-    summary = {"resolved": 0, "unresolved": 0, "errored": 0,
-               "matches_ingested": 0, "matches_with_premium": 0,
-               "tour": tour, "candidates": len(sample)}
+    summary: dict = {"resolved": 0, "unresolved": 0, "errored": 0,
+                     "matches_ingested": 0, "matches_with_premium": 0,
+                     "tour": tour, "candidates": len(sample), "details": []}
     t0 = time.time()
     for i, p in enumerate(sample, 1):
         try:
             res = backfill_one(conn, p["id"], tour=tour,
                                max_match_pages=max_match_pages,
                                page_size=page_size)
+            # Include a compact per-player line so we can diagnose 0-match runs
+            summary["details"].append({
+                "player_id": p["id"],
+                "name": p.get("full_name") or p.get("name"),
+                "status": res.get("status"),
+                "ms_id": res.get("ms_id"),
+                "matches_ingested": res.get("matches_ingested", 0),
+                "matches_with_premium": res.get("matches_with_premium", 0),
+                "error": res.get("error"),
+            })
             if res.get("status") == "ok":
                 summary["resolved"] += 1
                 summary["matches_ingested"] += res.get("matches_ingested", 0) or 0
@@ -648,6 +658,12 @@ def backfill_active(conn, tour: str = "atp", limit: Optional[int] = None,
                 summary["errored"] += 1
         except Exception as e:
             summary["errored"] += 1
+            summary["details"].append({
+                "player_id": p["id"],
+                "name": p.get("full_name") or p.get("name"),
+                "status": "exception",
+                "error": f"{type(e).__name__}: {e}",
+            })
             log.warning(f"backfill_one failed for player {p['id']}: {e}")
         if i % 25 == 0:
             log.info(f"  progress {i}/{len(sample)} resolved={summary['resolved']} "

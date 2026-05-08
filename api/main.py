@@ -305,6 +305,7 @@ def admin_predict(days_ahead: int = 7):
 @app.get("/admin/matchstat-backfill")
 def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
                               max_match_pages: int = 3,
+                              page_size: int = 50,
                               skip_already_linked: bool = True):
     """
     Run the Matchstat ingestion backfill across active rated players.
@@ -324,6 +325,7 @@ def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
                 conn, tour=tour,
                 limit=(limit or None),
                 max_match_pages=max_match_pages,
+                page_size=page_size,
                 skip_already_linked=skip_already_linked,
             )
         finally:
