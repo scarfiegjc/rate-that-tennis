@@ -105,21 +105,39 @@ button {
   position: sticky;
   top: 0;
   z-index: 100;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 28px;
   height: 52px;
   background: rgba(247, 245, 242, 0.92);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
 
+/* Inner wrapper aligns header content with the main page body
+   (.page is max-width 1080px, padding 0 20px) so the logo sits
+   flush left with the page content and the nav sits flush right. */
+.app-header-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .app-logo {
+  display: inline-flex;
+  align-items: center;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.3px;
   color: var(--text);
+  flex-shrink: 0;
+}
+
+.app-logo-img {
+  height: 22px;
+  width: auto;
+  display: block;
 }
 
 .app-logo-dot {
