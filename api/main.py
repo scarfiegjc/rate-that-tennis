@@ -303,15 +303,18 @@ def admin_predict(days_ahead: int = 7):
     return _safe_admin(run_rtt_predictions, days_ahead=days_ahead)
 
 @app.get("/admin/matchstat-spike")
-def admin_matchstat_spike(n: int = 10, tour: str = "atp"):
+def admin_matchstat_spike(n: int = 10, tour: str = "atp", names: str = ""):
     """
     Diagnostic: probe the Matchstat API on N active players, report on
     name-resolution success, per-match stat coverage, and field population.
     Writes nothing to the database — purely a data-quality check before
     any backfill commitment.
+
+    Pass ?names=Aryna Sabalenka,Iga Swiatek to override the auto-picked
+    sample with literal player names (useful for cross-tour probing).
     """
     from api.routes._matchstat_spike import run_spike
-    return _safe_admin(run_spike, n_players=n, tour=tour)
+    return _safe_admin(run_spike, n_players=n, tour=tour, names=names)
 
 
 

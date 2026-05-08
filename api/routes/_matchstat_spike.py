@@ -513,12 +513,30 @@ def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] 
     return out
 
 
-def run_spike(n_players: int = 10, tour: str = "atp") -> dict:
-    """Run the spike across N players and aggregate findings."""
+def run_spike(n_players: int = 10, tour: str = "atp", names: str = "") -> dict:
+    """
+    Run the spike across N players and aggregate findings.
+
+    If `names` is given (comma-separated), use those literal names as the
+    player sample instead of pulling from the production players table.
+    Useful for probing specific WTA players or career-spanning ATP names.
+    """
     if not os.environ.get("MATCHSTAT_API_KEY"):
         return {"error": "MATCHSTAT_API_KEY env var is not set on this service"}
 
-    sample = _pick_sample_players(n_players)
+    if names.strip():
+        sample = [
+            {
+                "id": -1,
+                "name": n.strip(),
+                "full_name": n.strip(),
+                "country_code": None,
+                "rtt_score": None,
+            }
+            for n in names.split(",") if n.strip()
+        ]
+    else:
+        sample = _pick_sample_players(n_players)
     if not sample:
         return {"error": "No active rated players available in player_ratings — fix that first"}
 
