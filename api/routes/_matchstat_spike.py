@@ -133,7 +133,67 @@ def _pick_sample_players(n: int = 10) -> list[dict]:
     )
 
 
-def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
+# Cached rankings name → ms_id index, populated lazily on first lookup
+# within a single spike invocation.
+_RANK_INDEX_CACHE: dict[str, dict] = {}  # tour -> {full_lower_name: {id, name, currentRank, countryAcr}}
+
+
+def _build_rankings_index(tour: str = "atp", max_pages: int = 20, page_size: int = 200) -> dict:
+    """
+    Fetch the full singles-ranking list for the given tour and build a
+    lookup index keyed by lowercased full name. Each ranking page is one
+    API call. ATP/WTA both top out around ~2000 ranked singles players.
+
+    The /ranking/singles endpoint is the only place we get a stable
+    {id, name} pairing — search returns name+birthday but no id, and the
+    /player list is sorted alphabetically (so we'd need to walk the
+    entire list to find anyone past the A's).
+    """
+    if tour in _RANK_INDEX_CACHE:
+        return _RANK_INDEX_CACHE[tour]
+
+    index: dict[str, dict] = {}
+    surnames: dict[str, list[dict]] = {}
+    pages_fetched = 0
+    last_count = 0
+    for page_no in range(1, max_pages + 1):
+        page = _get(
+            f"/tennis/v2/{tour}/ranking/singles",
+            params={"pageSize": page_size, "pageNo": page_no},
+        )
+        if not page.get("ok"):
+            break
+        body = page.get("data")
+        rows: list = body if isinstance(body, list) else (
+            body.get("data") if isinstance(body, dict) else None
+        ) or []
+        if not rows:
+            break
+        last_count = len(rows)
+        pages_fetched += 1
+        for r in rows:
+            name = (r.get("name") or "").strip()
+            if not name:
+                continue
+            entry = {
+                "id": r.get("id"),
+                "name": name,
+                "currentRank": r.get("currentRank"),
+                "countryAcr": r.get("countryAcr"),
+            }
+            index[name.lower()] = entry
+            tokens = name.replace(".", "").split()
+            if tokens:
+                surnames.setdefault(tokens[-1].lower(), []).append(entry)
+        if len(rows) < page_size:
+            break
+
+    cache = {"by_name": index, "by_surname": surnames, "pages": pages_fetched, "rows_last_page": last_count}
+    _RANK_INDEX_CACHE[tour] = cache
+    return cache
+
+
+def _resolve_matchstat_id(player: dict, tour: str = "atp", rank_idx: Optional[dict] = None) -> dict:
     """
     Try to find this player in Matchstat's player list by name.
     Returns {ms_id, ms_name, strategy, candidates}.
@@ -143,16 +203,41 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
     if not full and not short:
         return {"ms_id": None, "strategy": "no-name"}
 
-    # The Matchstat /player endpoint doesn't have a search param — it's a paginated
-    # list with optional country/group filters. For the spike we'll fetch a single
-    # page (the top of the rankings) to demonstrate ID lookup mechanics. A real
-    # backfill would either use full-text search (/misc/search) or paginate
-    # through the whole list once and cache locally.
-    # Strategy 0: try the global search endpoint with the surname.
-    # Docs say it returns name+country+birthday only, but worth testing the
-    # actual response — some endpoints return more than the docs claim.
     last_token = full.replace(".", "").split()[-1] if full else (
         short.replace(".", "").split()[-1] if short else "")
+    first_initial = ((short or full)[:1] or "").lower()
+
+    # Strategy 1 (primary): rankings index lookup. Rankings are the only
+    # endpoint that returns {id, name} pairs sorted by relevance (top
+    # players first). Pre-built once per spike run by _build_rankings_index.
+    if rank_idx is not None and last_token:
+        # 1a: exact match on lowered full name
+        hit = rank_idx["by_name"].get(full.lower())
+        if hit and hit.get("id"):
+            return {"ms_id": hit["id"], "ms_name": hit["name"],
+                    "strategy": "rankings-exact", "rank": hit.get("currentRank")}
+        # 1b: surname bucket — disambiguate by first initial
+        bucket = rank_idx["by_surname"].get(last_token.lower(), [])
+        if len(bucket) == 1:
+            r = bucket[0]
+            return {"ms_id": r["id"], "ms_name": r["name"],
+                    "strategy": "rankings-surname", "rank": r.get("currentRank")}
+        if len(bucket) > 1 and first_initial:
+            initials = [b for b in bucket
+                        if (b["name"][:1] or "").lower() == first_initial]
+            if len(initials) == 1:
+                r = initials[0]
+                return {"ms_id": r["id"], "ms_name": r["name"],
+                        "strategy": "rankings-initial", "rank": r.get("currentRank")}
+            if len(initials) > 1:
+                return {"ms_id": None, "strategy": "ambiguous-initial",
+                        "candidates": initials[:5]}
+        if len(bucket) > 1:
+            return {"ms_id": None, "strategy": "ambiguous-surname",
+                    "candidates": bucket[:5]}
+
+    # Strategy 2: search endpoint — returns name+birthday but no id.
+    # Useful only as a sanity probe to confirm a player exists somewhere.
     if last_token:
         search = _get("/tennis/v2/search", params={"search": last_token})
         if search.get("ok"):
@@ -262,7 +347,7 @@ def _resolve_matchstat_id(player: dict, tour: str = "atp") -> dict:
     return {"ms_id": None, "strategy": "no-country-code"}
 
 
-def _spike_one_player(player: dict, tour: str = "atp") -> dict:
+def _spike_one_player(player: dict, tour: str = "atp", rank_idx: Optional[dict] = None) -> dict:
     """Run the full lookup → past-matches probe for a single player."""
     out = {
         "rtt_player": {
@@ -275,7 +360,7 @@ def _spike_one_player(player: dict, tour: str = "atp") -> dict:
     }
 
     # 1) Resolve the Matchstat ID
-    resolved = _resolve_matchstat_id(player, tour=tour)
+    resolved = _resolve_matchstat_id(player, tour=tour, rank_idx=rank_idx)
     out["resolution"] = resolved
     ms_id = resolved.get("ms_id")
     if not ms_id:
@@ -367,11 +452,22 @@ def run_spike(n_players: int = 10, tour: str = "atp") -> dict:
     if not sample:
         return {"error": "No active rated players available in player_ratings — fix that first"}
 
-    results: list[dict] = []
+    # Build the rankings name→id index ONCE for the whole spike run. This is
+    # the path a real backfill would use too: cache name→id locally, then
+    # only call player-specific endpoints for the ones we resolved.
     t0 = time.time()
+    rank_idx = _build_rankings_index(tour=tour)
+    rankings_meta = {
+        "pages_fetched": rank_idx.get("pages", 0),
+        "names_indexed": len(rank_idx.get("by_name", {})),
+        "surnames_indexed": len(rank_idx.get("by_surname", {})),
+        "rows_last_page": rank_idx.get("rows_last_page", 0),
+    }
+
+    results: list[dict] = []
     for p in sample:
         try:
-            results.append(_spike_one_player(p, tour=tour))
+            results.append(_spike_one_player(p, tour=tour, rank_idx=rank_idx))
         except Exception as e:
             results.append({
                 "rtt_player": {"id": p["id"], "name": p.get("name")},
@@ -395,6 +491,7 @@ def run_spike(n_players: int = 10, tour: str = "atp") -> dict:
     return {
         "elapsed_sec": round(time.time() - t0, 2),
         "tour": tour,
+        "rankings_index": rankings_meta,
         "players_probed": len(results),
         "players_resolved": resolved,
         "resolution_rate": round(100 * resolved / len(results), 1) if results else 0,
