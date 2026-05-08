@@ -198,7 +198,11 @@ def _build_rankings_index(tour: str = "atp", max_pages: int = 20, page_size: int
             index[name.lower()] = entry
             tokens = name.replace(".", "").split()
             if tokens:
-                surnames.setdefault(tokens[-1].lower(), []).append(entry)
+                bucket = surnames.setdefault(tokens[-1].lower(), [])
+                # Dedup by ms_id — the rankings endpoint can return the same
+                # player across multiple snapshot rows.
+                if not any(b.get("id") == entry["id"] for b in bucket):
+                    bucket.append(entry)
         if len(rows) < page_size:
             break
 

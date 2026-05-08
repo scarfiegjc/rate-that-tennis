@@ -134,7 +134,11 @@ def _build_rankings_index(tour: str = "atp", page_size: int = 200,
             by_name[name.lower()] = entry
             tokens = name.replace(".", "").split()
             if tokens:
-                by_surname.setdefault(tokens[-1].lower(), []).append(entry)
+                bucket = by_surname.setdefault(tokens[-1].lower(), [])
+                # Dedup by ms_id — the rankings endpoint can return the same
+                # player across multiple snapshot rows.
+                if not any(b.get("id") == entry["id"] for b in bucket):
+                    bucket.append(entry)
         if len(rows) < page_size:
             break
 
@@ -152,6 +156,9 @@ def resolve_ms_id(rank_idx: dict, full_name: str, short_name: str = "") -> Optio
     full = (full_name or "").strip()
     short = (short_name or full).strip()
     if not full and not short:
+        return None
+    # Skip obvious doubles-pair entries — they have "/" in the name.
+    if "/" in full or "/" in short:
         return None
     last_token = full.replace(".", "").split()[-1].lower() if full else (
         short.replace(".", "").split()[-1].lower() if short else "")
