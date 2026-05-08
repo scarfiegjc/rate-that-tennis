@@ -6,6 +6,9 @@ import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import FormChart from '../components/FormChart.jsx'
 import OddsComparison from '../components/OddsComparison.jsx'
+import courtClayImg  from '../assets/court-clay.jpg'
+import courtGrassImg from '../assets/court-grass.jpg'
+import courtHardImg  from '../assets/court-hard.jpg'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers
@@ -119,43 +122,124 @@ function MomentumSquares({ momentum, form_dots }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Non-sticky header (tournament info)
+// Non-sticky header (tournament info) — full-bleed court photo background
 // ─────────────────────────────────────────────────────────────────────────────
 
+function courtImage(surface) {
+  const s = (surface || '').toLowerCase()
+  if (s.includes('clay'))  return courtClayImg
+  if (s.includes('grass')) return courtGrassImg
+  if (s.includes('hard') || s.includes('indoor') || s.includes('carpet')) return courtHardImg
+  return courtHardImg
+}
+
 function MatchMeta({ match }) {
-  const pred = match.prediction || {}
+  const pred   = match.prediction || {}
+  const imgSrc = courtImage(match.surface)
+
+  const confidenceColor = pred.confidence === 'high'   ? '#4ade80'
+                        : pred.confidence === 'medium' ? '#fbbf24'
+                        : 'rgba(255,255,255,0.5)'
+
   return (
     <div style={{
+      position: 'relative',
+      minHeight: 170,
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
       textAlign: 'center',
-      padding: '18px 24px 0',
+      overflow: 'hidden',
+      padding: '28px 32px 24px',
+      background: imgSrc ? undefined : 'var(--bg-sunken)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
-        <Link to="/" style={{ color: 'var(--text-3)', fontSize: 12 }}>← Today</Link>
-        <span style={{ color: 'var(--text-3)' }}>·</span>
-        <SurfaceBadge surface={match.surface} />
-      </div>
-      <div style={{
-        fontSize: 17, fontWeight: 700, color: 'var(--text)',
-        letterSpacing: '-0.3px', marginBottom: 2,
+
+      {/* Court photo background */}
+      {imgSrc && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: `url(${imgSrc})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center 40%',
+        }} />
+      )}
+
+      {/* Dark gradient overlay for readability */}
+      {imgSrc && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.68) 100%)',
+        }} />
+      )}
+
+      {/* ← Today — top left */}
+      <Link to="/" style={{
+        position: 'absolute', top: 14, left: 18,
+        color: 'rgba(255,255,255,0.85)',
+        fontSize: 12, fontWeight: 500,
+        zIndex: 2,
+        textDecoration: 'none',
+        letterSpacing: 0.1,
       }}>
-        {match.tournament}
+        ← Today
+      </Link>
+
+      {/* Content — centred over image */}
+      <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
+
+        {/* Surface lozenge — centred */}
+        <div style={{ marginBottom: 12 }}>
+          <SurfaceBadge surface={match.surface} light />
+        </div>
+
+        {/* Tournament name */}
+        <div style={{
+          fontSize: 22, fontWeight: 800,
+          color: '#ffffff',
+          letterSpacing: '-0.4px',
+          marginBottom: 4,
+          textShadow: '0 1px 4px rgba(0,0,0,0.4)',
+          lineHeight: 1.2,
+        }}>
+          {match.tournament}
+        </div>
+
+        {/* Round */}
+        {match.round && (
+          <div style={{
+            fontSize: 14, fontWeight: 600,
+            color: 'rgba(255,255,255,0.85)',
+            marginBottom: 8,
+            letterSpacing: 0.1,
+            textShadow: '0 1px 3px rgba(0,0,0,0.4)',
+          }}>
+            {match.round}
+          </div>
+        )}
+
+        {/* Confidence pill */}
+        {pred.confidence && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'rgba(0,0,0,0.35)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            borderRadius: 999,
+            padding: '4px 10px',
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.95)',
+            fontWeight: 600,
+            letterSpacing: 0.2,
+          }}>
+            <span style={{
+              display: 'inline-block',
+              width: 6, height: 6, borderRadius: '50%',
+              background: confidenceColor,
+            }} />
+            {pred.confidence} confidence
+          </div>
+        )}
       </div>
-      {match.round && (
-        <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>
-          {match.round}
-        </div>
-      )}
-      {pred.confidence && (
-        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>
-          <span style={{
-            display: 'inline-block',
-            width: 6, height: 6, borderRadius: '50%',
-            background: pred.confidence === 'high' ? '#166534' : pred.confidence === 'medium' ? '#92400e' : '#a8a29e',
-            marginRight: 4, verticalAlign: 'middle',
-          }} />
-          {pred.confidence} confidence
-        </div>
-      )}
     </div>
   )
 }
