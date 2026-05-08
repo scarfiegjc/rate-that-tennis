@@ -336,90 +336,26 @@ def get_player_form(
         (player_id, limit),
     )
 
-    # ── 1. Recent production matches (newest, most relevant for form) ───────
-    # Sackmann data only goes up to late 2024 — production has live 2025/2026
-    # matches. Always query production first and merge.
-    surface_map = {
-        "clay": "Clay", "hard": "Hard",
-        "grass": "Grass", "indoor": "Indoor Hard",
-    }
-    surface_filter = (
-        surface_map.get(surface.lower())
-        if surface and surface.lower() != "all"
-        else None
-    )
-
-    surf_clause_live  = "AND s.name ILIKE %s" if surface_filter else ""
-    surf_params_live  = [f"%{surface_filter}%"] if surface_filter else []
-
-    live_match_rows = query(
-        f"""
-        SELECT
-            m.id                           AS match_id,
-            m.event_date                   AS date,
-            t.name                         AS tournament,
-            s.name                         AS surface,
-            CASE WHEN m.first_player_id = %s THEN p2.name ELSE p1.name END AS opponent_name,
-            NULL::integer                  AS opponent_rank,
-            CASE WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
-                   OR (m.winner = 'Second Player' AND m.second_player_id = %s)
-                 THEN TRUE ELSE FALSE END  AS won,
-            -- Simpler perf index for production matches: 50 base, ±15 for win/loss,
-            -- ±score-gap modifier (we don't have opponent rank in production).
-            CASE
-                WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
-                  OR (m.winner = 'Second Player' AND m.second_player_id = %s)
-                THEN 65 + CASE
-                    WHEN ms.score ~ '6-0 6-0|6-0 6-1|6-1 6-0' THEN 15
-                    WHEN ms.score ~ '6-1 6-1|6-2 6-1|6-1 6-2|6-0 6-2|6-2 6-0' THEN 8
-                    WHEN ms.score ~ '7-6.*7-6|7-5.*7-6|7-6.*7-5|7-5.*7-5' THEN -8
-                    WHEN ms.score ~ '7-6|7-5' THEN -3
-                    ELSE 0
-                END
-                ELSE 35 + CASE
-                    WHEN ms.score ~ '6-0 6-0|6-0 6-1|6-1 6-0' THEN -15
-                    WHEN ms.score ~ '7-6.*7-6|7-5.*7-6|7-6.*7-5|7-5.*7-5' THEN 8
-                    WHEN ms.score ~ '7-6|7-5' THEN 4
-                    ELSE 0
-                END
-            END                            AS performance_index
-        FROM matches m
-        JOIN players p1 ON p1.id = m.first_player_id
-        JOIN players p2 ON p2.id = m.second_player_id
-        LEFT JOIN tournaments t ON t.id = m.tournament_id
-        LEFT JOIN surfaces s    ON s.id = t.surface_id
-        LEFT JOIN LATERAL (
-            SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number) AS score
-            FROM match_scores ms_inner
-            WHERE ms_inner.match_id = m.id
-        ) ms ON TRUE
-        WHERE (m.first_player_id = %s OR m.second_player_id = %s)
-          AND m.event_status = 'Finished'
-          AND m.event_date IS NOT NULL
-          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
-          {surf_clause_live}
-        ORDER BY m.event_date DESC, m.id DESC
-        LIMIT %s
-        """,
-        [player_id, player_id, player_id, player_id, player_id,
-         player_id, player_id, *surf_params_live, limit],
-    )
-
-    # ── 2. Historical Sackmann data (rich rank-aware perf index for older matches) ──
+    # Per-match form from Sackmann data (richer individual match context)
     sa_ids = _sa_ids_for(player_id)
-    hist_match_rows: list[dict] = []
+    match_rows: list[dict] = []
 
     if sa_ids:
         surface_clause = ""
         extra_params: list = []
-        if surface_filter:
+        if surface and surface.lower() != "all":
+            surface_map = {
+                "clay": "Clay", "hard": "Hard",
+                "grass": "Grass", "indoor": "Indoor Hard",
+            }
+            surface_name = surface_map.get(surface.lower(), surface)
             surface_clause = "AND sm.surface ILIKE %s"
-            extra_params.append(f"%{surface_filter}%")
+            extra_params.append(f"%{surface_name}%")
 
         # Build param list: first 4× sa_ids for CASE WHEN, then 2× for WHERE
         q_params = [sa_ids, sa_ids, sa_ids, sa_ids, sa_ids, sa_ids, *extra_params, limit]
 
-        hist_match_rows = query(
+        match_rows = query(
             f"""
             SELECT
                 sm.id AS match_id,
@@ -479,24 +415,6 @@ def get_player_form(
             """,
             q_params,
         )
-
-    # ── 3. Merge live + historical, dedup by (date, opponent), newest first ──
-    seen: set[tuple] = set()
-    merged: list[dict] = []
-
-    for m in live_match_rows:
-        key = (str(m.get("date") or ""), str(m.get("opponent_name") or "").lower()[:8])
-        seen.add(key)
-        merged.append(dict(m))
-
-    for m in hist_match_rows:
-        key = (str(m.get("date") or ""), str(m.get("opponent_name") or "").lower()[:8])
-        if key in seen:
-            continue
-        merged.append(dict(m))
-
-    merged.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
-    match_rows = merged[:limit]
 
     return {
         "player_id": player_id,
@@ -688,15 +606,17 @@ def get_player_stats(player_id: int):
         )
 
         # Career serve averages (where player was the winner — most complete stats)
+        # Postgres' two-arg ROUND() only accepts (numeric, int), not (double, int) —
+        # so every AVG of a float ratio is cast back to numeric before rounding.
         serve_row = query_one(
             """
             SELECT
-                ROUND(AVG(sm.w_ace::float / NULLIF(sm.w_svpt,0)) * 100, 1) AS avg_ace_pct,
-                ROUND(AVG(sm.w_df::float  / NULLIF(sm.w_svpt,0)) * 100, 1) AS avg_df_pct,
-                ROUND(AVG(sm.w_1st_serve_pct) * 100, 1)                     AS avg_1st_serve_pct,
-                ROUND(AVG(sm.w_1st_won_pct)   * 100, 1)                     AS avg_1st_won_pct,
-                ROUND(AVG(sm.w_2nd_won_pct)   * 100, 1)                     AS avg_2nd_won_pct,
-                ROUND(AVG(sm.w_bp_save_pct)   * 100, 1)                     AS avg_bp_save_pct,
+                ROUND((AVG(sm.w_ace::float / NULLIF(sm.w_svpt,0)) * 100)::numeric, 1) AS avg_ace_pct,
+                ROUND((AVG(sm.w_df::float  / NULLIF(sm.w_svpt,0)) * 100)::numeric, 1) AS avg_df_pct,
+                ROUND((AVG(sm.w_1st_serve_pct) * 100)::numeric, 1)                     AS avg_1st_serve_pct,
+                ROUND((AVG(sm.w_1st_won_pct)   * 100)::numeric, 1)                     AS avg_1st_won_pct,
+                ROUND((AVG(sm.w_2nd_won_pct)   * 100)::numeric, 1)                     AS avg_2nd_won_pct,
+                ROUND((AVG(sm.w_bp_save_pct)   * 100)::numeric, 1)                     AS avg_bp_save_pct,
                 COUNT(*) AS sample_size
             FROM sa_matches sm
             WHERE sm.winner_id = ANY(%s)
