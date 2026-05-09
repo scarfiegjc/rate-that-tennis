@@ -239,6 +239,38 @@ function MatchMeta({ match }) {
             {pred.confidence} confidence
           </div>
         )}
+
+        {/* Live score banner */}
+        {match.is_live && (match.set_scores || match.game_result) && (
+          <div style={{ marginTop: 14 }}>
+            {match.set_scores && (
+              <div style={{
+                display: 'inline-block',
+                background: 'rgba(0,0,0,0.5)',
+                border: '1px solid rgba(255,255,255,0.25)',
+                borderRadius: 8,
+                padding: '6px 16px',
+                marginBottom: 4,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                  Live score
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#ffffff', fontVariantNumeric: 'tabular-nums', letterSpacing: 1 }}>
+                  {match.set_scores}
+                </div>
+                {match.game_result && (
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                    {match.game_result}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#FCD34D', animation: 'pulse 1.5s infinite' }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#FCD34D', letterSpacing: 0.5 }}>IN PLAY</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

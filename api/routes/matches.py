@@ -338,6 +338,11 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
             "event_date": str(m["event_date"]) if m.get("event_date") else None,
             "event_time": str(m["event_time"]) if m.get("event_time") else None,
             "status": m.get("event_status"),
+            "is_live": bool(m.get("is_live")),
+            "set_scores": m.get("set_scores"),
+            "game_result": m.get("game_result"),
+            "final_result": m.get("final_result"),
+            "winner": m.get("winner"),
         },
         "players": {
             "first": {
@@ -528,8 +533,16 @@ def get_match(match_id: int):
             m.tournament_round,
             m.event_status,
             m.winner,
+            m.final_result,
+            m.game_result,
+            m.is_live,
             t.name AS tournament_name,
-            s.name AS surface_name
+            s.name AS surface_name,
+            COALESCE(
+                (SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number)
+                 FROM match_scores ms WHERE ms.match_id = m.id),
+                NULL
+            ) AS set_scores
         FROM matches m
         LEFT JOIN tournaments t ON t.id = m.tournament_id
         LEFT JOIN surfaces s ON s.id = t.surface_id

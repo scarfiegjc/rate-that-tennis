@@ -52,9 +52,14 @@ def _enrich_pick(pick: dict) -> dict:
         """
         SELECT m.id, m.event_date, m.event_time, m.event_status,
                m.first_player_id, m.second_player_id,
-               m.game_result, m.final_result, m.winner,
+               m.game_result, m.final_result, m.winner, m.is_live,
                t.name AS tournament_name,
-               s.name AS surface
+               s.name AS surface,
+               COALESCE(
+                 (SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number)
+                  FROM match_scores ms WHERE ms.match_id = m.id),
+                 NULL
+               ) AS set_scores
         FROM matches m
         LEFT JOIN tournaments t ON t.id = m.tournament_id
         LEFT JOIN surfaces    s ON s.id = t.surface_id
@@ -196,6 +201,9 @@ def _enrich_pick(pick: dict) -> dict:
             "event_status":    match.get("event_status"),
             "tournament_name": match.get("tournament_name"),
             "surface":         match.get("surface"),
+            "is_live":         bool(match.get("is_live")),
+            "set_scores":      match.get("set_scores"),
+            "game_result":     match.get("game_result"),
             "live_score":      match.get("game_result") or match.get("final_result"),
             "winner":          match.get("winner"),
         },

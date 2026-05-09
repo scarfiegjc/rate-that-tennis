@@ -10,7 +10,7 @@
  * Results tab: summary squares + P&L chart + results table + breakdown tables
  */
 import { useState, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { api } from '../api.js'
 import { seedPickedSet } from '../components/StarPick.jsx'
@@ -136,7 +136,6 @@ function PickCard({ pick, onRemove }) {
   const [side, setSide]       = useState('picked')
   const [useOurs, setUseOurs] = useState(true)
   const [intel, setIntel]     = useState(null)
-
   const matchId = pick.match?.id
   useEffect(() => {
     if (!matchId) return
@@ -211,9 +210,18 @@ function PickCard({ pick, onRemove }) {
       </div>
 
       {/* Live score */}
-      {isLive && pick.match?.live_score && (
-        <div style={{ background: '#FEF9C3', padding: '6px 14px', fontSize: 13, fontWeight: 700, textAlign: 'center', borderBottom: '1px solid #FDE68A' }}>
-          {pick.match.live_score}
+      {isLive && (pick.match?.set_scores || pick.match?.game_result) && (
+        <div style={{ background: '#FEF9C3', padding: '8px 14px', borderBottom: '1px solid #FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          {pick.match?.set_scores && (
+            <span style={{ fontSize: 16, fontWeight: 900, color: '#78350F', fontVariantNumeric: 'tabular-nums', letterSpacing: 1 }}>
+              {pick.match.set_scores}
+            </span>
+          )}
+          {pick.match?.game_result && (
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#92400E', fontVariantNumeric: 'tabular-nums' }}>
+              ({pick.match.game_result})
+            </span>
+          )}
         </div>
       )}
 
@@ -359,7 +367,7 @@ function PickCard({ pick, onRemove }) {
           </div>
         )}
 
-        {/* ── Footer: edge + confidence + odds ── */}
+        {/* ── Footer: edge + confidence + odds + match link ── */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
           paddingTop: 10, borderTop: '1px solid var(--border-faint)',
@@ -368,17 +376,30 @@ function PickCard({ pick, onRemove }) {
             {side === 'picked' && <EdgeBadge edge={edge} />}
             <ConfidenceStars n={pick.confidence_stars} small />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button onClick={() => setUseOurs(v => !v)} style={{
-              fontSize: 10, fontWeight: 600, padding: '3px 7px',
-              borderRadius: 20, border: '1px solid var(--border)',
-              background: 'var(--bg-raised)', color: 'var(--text-3)',
-            }}>
-              {oddsLabel}
-            </button>
-            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-              {oddsToShow ? fmt(oddsToShow, 2) : '—'}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={() => setUseOurs(v => !v)} style={{
+                fontSize: 10, fontWeight: 600, padding: '3px 7px',
+                borderRadius: 20, border: '1px solid var(--border)',
+                background: 'var(--bg-raised)', color: 'var(--text-3)',
+              }}>
+                {oddsLabel}
+              </button>
+              <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                {oddsToShow ? fmt(oddsToShow, 2) : '—'}
+              </span>
+            </div>
+            {matchId && (
+              <Link to={`/match/${matchId}`} style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--text-3)',
+                padding: '3px 8px', borderRadius: 20,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-raised)',
+                whiteSpace: 'nowrap',
+              }}>
+                Match →
+              </Link>
+            )}
           </div>
         </div>
       </div>
