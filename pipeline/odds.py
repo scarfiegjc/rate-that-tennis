@@ -43,19 +43,37 @@ logging.basicConfig(
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
-# Tennis sport keys to query — expand as needed
-SPORT_KEYS = [
+# Base keys — always active
+_BASE_KEYS = [
     "tennis_atp",
     "tennis_wta",
-    "tennis_atp_french_open",
-    "tennis_wta_french_open",
-    "tennis_atp_wimbledon",
-    "tennis_wta_wimbledon",
-    "tennis_atp_us_open",
-    "tennis_wta_us_open",
-    "tennis_atp_aus_open_singles",
-    "tennis_wta_aus_open_singles",
 ]
+
+# Slam keys — only active during the relevant month windows
+_SLAM_KEYS = {
+    "tennis_atp_aus_open_singles": (1, 1),    # January
+    "tennis_wta_aus_open_singles": (1, 1),
+    "tennis_atp_french_open":      (5, 6),    # May–June
+    "tennis_wta_french_open":      (5, 6),
+    "tennis_atp_wimbledon":        (6, 7),    # June–July
+    "tennis_wta_wimbledon":        (6, 7),
+    "tennis_atp_us_open":          (8, 9),    # Aug–Sep
+    "tennis_wta_us_open":          (8, 9),
+}
+
+
+def _active_sport_keys() -> list[str]:
+    """Return only the sport keys likely to be active right now."""
+    month = date.today().month
+    keys = list(_BASE_KEYS)
+    for key, (m_start, m_end) in _SLAM_KEYS.items():
+        if m_start <= month <= m_end:
+            keys.append(key)
+    return keys
+
+
+# SPORT_KEYS computed at import time so it adapts to the current month
+SPORT_KEYS = _active_sport_keys()
 
 # Which bookmaker to prefer for implied odds (first available wins)
 PREFERRED_BOOKMAKERS = [
@@ -291,7 +309,9 @@ def run(dry_run: bool = False) -> dict:
 
         stats = {"fetched": 0, "matched": 0, "written": 0, "skipped": 0}
 
-        for sport_key in SPORT_KEYS:
+        active_keys = _active_sport_keys()
+        log.info(f'Active sport keys: {active_keys}')
+        for sport_key in active_keys:
             events = fetch_odds_for_sport(sport_key)
             if not events:
                 continue

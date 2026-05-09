@@ -793,9 +793,25 @@ def _daily_worker():
         except Exception as e:
             _log(f"bootstrap FAILED: {e}")
 
-        # 5. Force fill ratings (recompute cold-start)
+        # 5. Bookmaker odds
+        _DAILY_STATUS["phase"] = "odds"
+        _log("Step 5/7: bookmaker odds sync")
+        try:
+            if os.environ.get("ODDS_API_KEY"):
+                try:
+                    from pipeline.odds import run as odds_run
+                except ImportError:
+                    from odds import run as odds_run
+                r = odds_run()
+                _log(f"odds: {r}")
+            else:
+                _log("odds: skipped (ODDS_API_KEY not set)")
+        except Exception as e:
+            _log(f"odds FAILED: {e}")
+
+        # 6. Force fill ratings (recompute cold-start)
         _DAILY_STATUS["phase"] = "fill_ratings_force"
-        _log("Step 5/6: force fill_ratings (refresh cold-start values)")
+        _log("Step 6/7: force fill_ratings (refresh cold-start values)")
         try:
             from api.bootstrap import run_fill_ratings
             r = run_fill_ratings(force=True)
@@ -805,7 +821,7 @@ def _daily_worker():
 
         # 6. Healthcheck + auto-repair + email
         _DAILY_STATUS["phase"] = "healthcheck"
-        _log("Step 6/6: healthcheck + auto-repair + email digest")
+        _log("Step 7/7: healthcheck + auto-repair + email digest")
         try:
             try:
                 from pipeline.healthcheck import (_connect, run_checks, log_results,
