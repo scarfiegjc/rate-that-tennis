@@ -8,6 +8,7 @@ GET    /picks/results         settled picks + P&L stats (auth required)
 POST   /picks/{id}/settle     admin/pipeline: mark a pick won/lost/void
 """
 import logging
+import traceback
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -158,8 +159,10 @@ def _enrich_pick(pick: dict) -> dict:
 
     is_first = (pid == p1_id)
     win_prob = pred.get("prob_first_player")  if is_first else pred.get("prob_second_player")
+    # edge_val is already a percentage-point difference (e.g. 5.0 = 5% edge)
     edge_val = (e_p1 * 100) if is_first and e_p1 is not None else (
                (e_p2 * 100) if not is_first and e_p2 is not None else None)
+    # NOTE: edge_val is already in percentage points, do NOT multiply by 100 again below
     opp_prob = pred.get("prob_second_player") if is_first else pred.get("prob_first_player")
 
     # Surface-specific rating for this match
@@ -201,7 +204,7 @@ def _enrich_pick(pick: dict) -> dict:
             "surface_rating": picked_ratings.get(surface_key),
             "form_dots":    _form_dots(pid),
             "win_prob":     round(float(win_prob) * 100, 1) if win_prob is not None else None,
-            "edge":         round(float(edge_val) * 100, 1) if edge_val is not None else None,
+            "edge":         round(float(edge_val), 1) if edge_val is not None else None,
         },
         "opponent": {
             **opp_player,
@@ -261,11 +264,18 @@ def create_pick(req: CreatePickRequest, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"create_pick error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create pick")
+        log.error(f"create_pick INSERT error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to create pick: {str(e)}")
 
-    pick = query_one("SELECT * FROM user_picks WHERE id = %s", (pick_id,))
-    return {"pick": _enrich_pick(dict(pick))}
+    try:
+        pick = query_one("SELECT * FROM user_picks WHERE id = %s", (pick_id,))
+        enriched = _enrich_pick(dict(pick))
+        return {"pick": enriched}
+    except Exception as e:
+        log.error(f"create_pick enrich error (pick_id={pick_id}): {e}\n{traceback.format_exc()}")
+        # Pick was created successfully — return minimal response so the UI still works
+        return {"pick": {"id": pick_id, "match_id": req.match_id, "player_id": req.player_id,
+                         "status": "pending", "confidence_stars": req.confidence_stars}}
 
 
 @router.delete("/{pick_id}")
