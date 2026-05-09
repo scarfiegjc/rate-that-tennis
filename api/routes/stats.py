@@ -207,7 +207,7 @@ def get_stat_conflicts(days_ahead: int = 2, min_conflicts: int = 1):
             m.tournament_round,
             m.event_status,
             t.name  AS tournament_name,
-            et.name AS event_type_name,
+            et.type_name AS event_type_name,
             s.name  AS surface_name,
             p1.name AS p1_name,
             p1.country_code AS p1_country,
