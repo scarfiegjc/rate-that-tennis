@@ -43,37 +43,38 @@ logging.basicConfig(
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
-# Base keys — always active
-_BASE_KEYS = [
-    "tennis_atp",
-    "tennis_wta",
-]
-
-# Slam keys — only active during the relevant month windows
-_SLAM_KEYS = {
-    "tennis_atp_aus_open_singles": (1, 1),    # January
-    "tennis_wta_aus_open_singles": (1, 1),
-    "tennis_atp_french_open":      (5, 6),    # May–June
-    "tennis_wta_french_open":      (5, 6),
-    "tennis_atp_wimbledon":        (6, 7),    # June–July
-    "tennis_wta_wimbledon":        (6, 7),
-    "tennis_atp_us_open":          (8, 9),    # Aug–Sep
-    "tennis_wta_us_open":          (8, 9),
-}
-
-
 def _active_sport_keys() -> list[str]:
-    """Return only the sport keys likely to be active right now."""
-    month = date.today().month
-    keys = list(_BASE_KEYS)
-    for key, (m_start, m_end) in _SLAM_KEYS.items():
-        if m_start <= month <= m_end:
-            keys.append(key)
-    return keys
+    """
+    Ask The Odds API which tennis sport keys are currently in-season,
+    then return them. Falls back to an empty list if the call fails.
+    This is robust against The Odds API adding/renaming tournament keys.
+    """
+    if not ODDS_API_KEY:
+        return []
+    try:
+        resp = requests.get(
+            f"{ODDS_API_BASE}/sports",
+            params={"apiKey": ODDS_API_KEY},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            log.warning(f"sports list returned {resp.status_code}")
+            return []
+        sports = resp.json()
+        # Only in-season tennis events (has_outrights=False means match-level H2H)
+        keys = [
+            s["key"] for s in sports
+            if "tennis" in s.get("key", "").lower()
+            and s.get("active", False)
+        ]
+        log.info(f"Active tennis sport keys from API: {keys}")
+        return keys
+    except Exception as e:
+        log.warning(f"Could not fetch sport keys: {e}")
+        return []
 
 
-# SPORT_KEYS computed at import time so it adapts to the current month
-SPORT_KEYS = _active_sport_keys()
+# SPORT_KEYS fetched dynamically each run via _active_sport_keys() in run()
 
 # Which bookmaker to prefer for implied odds (first available wins)
 PREFERRED_BOOKMAKERS = [
