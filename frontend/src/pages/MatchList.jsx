@@ -15,7 +15,6 @@ import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
-import StarPick from '../components/StarPick.jsx'
 
 // ── SEO URL helpers ───────────────────────────────────────────────────────────
 
@@ -34,6 +33,31 @@ function matchUrl(match) {
   const p2         = toSlug(match.second_player?.name || 'player')
   const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
   return `/match/${match.match_id}/${slug}`
+}
+
+// ── Country flag emoji from ISO code (handles 2-letter alpha-2 and common 3-letter IOC codes) ─
+
+const IOC_TO_ALPHA2 = {
+  USA:'US', GBR:'GB', ESP:'ES', FRA:'FR', ITA:'IT', GER:'DE', RUS:'RU', SRB:'RS',
+  AUT:'AT', ARG:'AR', CAN:'CA', AUS:'AU', JPN:'JP', CHN:'CN', KOR:'KR', BRA:'BR',
+  NED:'NL', BEL:'BE', SUI:'CH', CRO:'HR', GRE:'GR', POL:'PL', NOR:'NO', SWE:'SE',
+  DEN:'DK', FIN:'FI', CZE:'CZ', SVK:'SK', HUN:'HU', ROU:'RO', BUL:'BG', UKR:'UA',
+  BLR:'BY', LAT:'LV', LTU:'LT', EST:'EE', POR:'PT', IRL:'IE', ISL:'IS', IND:'IN',
+  KAZ:'KZ', MEX:'MX', COL:'CO', CHI:'CL', URU:'UY', PER:'PE', VEN:'VE', ECU:'EC',
+  PAR:'PY', RSA:'ZA', EGY:'EG', MAR:'MA', TUN:'TN', ALG:'DZ', ISR:'IL', TUR:'TR',
+  LIB:'LB', JOR:'JO', KSA:'SA', QAT:'QA', UAE:'AE', NZL:'NZ', TPE:'TW', HKG:'HK',
+  SIN:'SG', THA:'TH', INA:'ID', MAS:'MY', PHI:'PH', VIE:'VN', PUR:'PR', DOM:'DO',
+  BAH:'BS', BAR:'BB', JAM:'JM', SLO:'SI', MNE:'ME', MDA:'MD', GEO:'GE', ARM:'AM',
+  AZE:'AZ', UZB:'UZ', LUX:'LU', MON:'MC', LIE:'LI', CYP:'CY', MLT:'MT', BIH:'BA',
+  MKD:'MK', ALB:'AL', KOS:'XK',
+}
+
+function flagEmoji(code) {
+  if (!code) return ''
+  const up = code.toUpperCase()
+  let cc = up.length === 2 ? up : (IOC_TO_ALPHA2[up] || '')
+  if (cc.length !== 2) return ''
+  return String.fromCodePoint(...[...cc].map(c => 0x1f1a5 + c.charCodeAt(0)))
 }
 
 // ── Surface dot ───────────────────────────────────────────────────────────────
@@ -59,13 +83,13 @@ function LiveLozenge({ small = false }) {
 function MomentumLozenge({ momentum }) {
   if (!momentum) return null
   const config = {
-    rising:  { label: '↑ Rising',  cls: 'momentum-rising' },
-    stable:  { label: '→ Stable',  cls: 'momentum-stable' },
-    falling: { label: '↓ Falling', cls: 'momentum-falling' },
+    rising:  { label: '↑ Rising',  cls: 'rising' },
+    stable:  { label: '→ Stable',  cls: 'stable' },
+    falling: { label: '↓ Falling', cls: 'falling' },
   }
   const c = config[(momentum || '').toLowerCase()]
   if (!c) return null
-  return <span className={`momentum-lozenge ${c.cls}`}>{c.label}</span>
+  return <span className={`momentum-badge ${c.cls}`} style={{ fontSize: 10 }}>{c.label}</span>
 }
 
 // ── Tickbox component ─────────────────────────────────────────────────────────
@@ -154,19 +178,11 @@ function MatchRow({ match, showTournament }) {
           style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
           {p1.name || '—'}
-          {!isFinished && p1.id && (
-            <StarPick
-              matchId={match.match_id}
-              playerId={p1.id}
-              playerName={p1.name}
-              ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
-              bestOdds={pred.best_odds_first_player || null}
-              size="sm"
-            />
-          )}
         </div>
         <div className="match-player-sub">
-          <span className="match-player-country">{p1.country_code || ''}</span>
+          <span className="match-player-country" title={p1.country_code || ''}>
+            {flagEmoji(p1.country_code) || p1.country_code || ''}
+          </span>
           <RttLozenge score={p1.rtt_score} hideIfMissing />
           <MomentumLozenge momentum={p1.momentum} />
           <FormDots dots={p1.form_dots || []} max={10} />
@@ -194,6 +210,7 @@ function MatchRow({ match, showTournament }) {
               p2={pred.prob_second_player}
               name1={p1.name?.split(' ').pop() || 'P1'}
               name2={p2.name?.split(' ').pop() || 'P2'}
+              hideLabels
             />
           </>
         ) : (
@@ -207,23 +224,15 @@ function MatchRow({ match, showTournament }) {
           className={`match-player-name ${winner2 ? 'winner' : ''}`}
           style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
-          {!isFinished && p2.id && (
-            <StarPick
-              matchId={match.match_id}
-              playerId={p2.id}
-              playerName={p2.name}
-              ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
-              bestOdds={pred.best_odds_second_player || null}
-              size="sm"
-            />
-          )}
           {p2.name || '—'}
         </div>
         <div className="match-player-sub">
           <FormDots dots={p2.form_dots || []} max={10} />
           <MomentumLozenge momentum={p2.momentum} />
           <RttLozenge score={p2.rtt_score} hideIfMissing />
-          <span className="match-player-country">{p2.country_code || ''}</span>
+          <span className="match-player-country" title={p2.country_code || ''}>
+            {flagEmoji(p2.country_code) || p2.country_code || ''}
+          </span>
         </div>
       </div>
 

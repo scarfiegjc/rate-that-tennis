@@ -7,10 +7,10 @@ export default function EdgeBadge({ edge, playerName }) {
     return <span className="edge-badge neutral">Market aligned</span>
   }
   if (pct >= 5) {
-    return <span className="edge-badge high">+{pct}% on {playerName}</span>
+    return <span className="edge-badge high">RTT Edge: {pct}%</span>
   }
   if (pct > 2) {
-    return <span className="edge-badge medium">+{pct}% on {playerName}</span>
+    return <span className="edge-badge medium">RTT Edge: {pct}%</span>
   }
   return <span className="edge-badge review">Review ({pct}%)</span>
 }
