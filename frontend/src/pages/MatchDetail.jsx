@@ -688,13 +688,13 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {/* Bookmaker odds strip */}
+      {/* Bookmaker odds strip — always visible */}
       {(() => {
         const mkt = match.market || {}
         const p1odds = mkt.odds_first_player
         const p2odds = mkt.odds_second_player
         const bookie = mkt.bookmaker
-        if (!p1odds && !p2odds) return null
+        const hasOdds = p1odds || p2odds
         return (
           <div style={{
             marginTop: 20,
@@ -708,24 +708,30 @@ function SectionIntelligence({ match }) {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)', flexShrink: 0 }}>
               Bookmaker odds{bookie ? ` · ${bookie}` : ''}
             </div>
-            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-              {p1odds && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p1.name?.split(' ').pop() || 'P1'}</span>
-                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                    {p1odds.toFixed(2)}
-                  </span>
-                </div>
-              )}
-              {p2odds && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p2.name?.split(' ').pop() || 'P2'}</span>
-                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                    {p2odds.toFixed(2)}
-                  </span>
-                </div>
-              )}
-            </div>
+            {hasOdds ? (
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                {p1odds && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p1.name?.split(' ').pop() || 'P1'}</span>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {p1odds.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {p2odds && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p2.name?.split(' ').pop() || 'P2'}</span>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {p2odds.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                Odds not yet available for this match
+              </span>
+            )}
             <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
               For reference only · Please gamble responsibly
             </div>
@@ -1917,17 +1923,41 @@ export default function MatchDetail() {
       }}>
         <MatchMeta match={match} />
 
-        {/* Odds */}
-        {(mkt.odds_first_player || mkt.odds_second_player) && (
-          <div style={{
-            display: 'flex', justifyContent: 'center', gap: 24,
-            padding: '6px 24px', fontSize: 12, color: 'var(--text-3)',
-          }}>
-            <span>{match.first_player?.name}: <strong style={{ color: 'var(--text-2)' }}>{mkt.odds_first_player?.toFixed(2) || '—'}</strong></span>
-            <span>{match.second_player?.name}: <strong style={{ color: 'var(--text-2)' }}>{mkt.odds_second_player?.toFixed(2) || '—'}</strong></span>
-            {mkt.bookmaker && <span style={{ color: 'var(--text-3)' }}>{mkt.bookmaker}</span>}
-          </div>
-        )}
+        {/* Odds strip — always visible */}
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 28,
+          padding: '8px 24px 10px', fontSize: 12, color: 'var(--text-3)',
+          borderTop: '1px solid var(--border-faint)',
+          background: 'var(--bg-sunken)',
+          flexWrap: 'wrap',
+        }}>
+          {(mkt.odds_first_player || mkt.odds_second_player) ? (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.first_player?.name?.split(' ').pop() || 'P1'}</span>
+                <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                  {mkt.odds_first_player?.toFixed(2) ?? '—'}
+                </strong>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--border)', fontWeight: 500 }}>vs</div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.second_player?.name?.split(' ').pop() || 'P2'}</span>
+                <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                  {mkt.odds_second_player?.toFixed(2) ?? '—'}
+                </strong>
+              </div>
+              {mkt.bookmaker && (
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: 2 }}>
+                  via {mkt.bookmaker}
+                </span>
+              )}
+            </>
+          ) : (
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
+              Bookmaker odds not yet available
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Sticky player + tabs bar */}
