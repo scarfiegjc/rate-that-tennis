@@ -72,7 +72,7 @@ def _enrich_pick(pick: dict) -> dict:
         if not player_id:
             return {}
         return query_one(
-            "SELECT id, name, country, ranking FROM players WHERE id = %s",
+            "SELECT id, name, country FROM players WHERE id = %s",
             (player_id,),
         ) or {}
 

@@ -655,6 +655,51 @@ function SectionIntelligence({ match }) {
           Couldn't load intelligence: {error}
         </div>
       )}
+
+      {/* Bookmaker odds strip */}
+      {(() => {
+        const mkt = match.market || {}
+        const p1odds = mkt.odds_first_player
+        const p2odds = mkt.odds_second_player
+        const bookie = mkt.bookmaker
+        if (!p1odds && !p2odds) return null
+        return (
+          <div style={{
+            marginTop: 20,
+            padding: '12px 18px',
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r-lg)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)', flexShrink: 0 }}>
+              Bookmaker odds{bookie ? ` · ${bookie}` : ''}
+            </div>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              {p1odds && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p1.name?.split(' ').pop() || 'P1'}</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                    {p1odds.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {p2odds && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p2.name?.split(' ').pop() || 'P2'}</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                    {p2odds.toFixed(2)}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
+              For reference only · Please gamble responsibly
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

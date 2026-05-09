@@ -124,6 +124,7 @@ function AppRoutes() {
         <Route path="/"                       element={<MatchList />} />
         <Route path="/in-play"                element={<InPlayPage />} />
         <Route path="/match/:id"              element={<MatchDetail />} />
+        <Route path="/match/:id/:slug"        element={<MatchDetail />} />
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
         <Route path="/predictions"            element={<PredictionsToday />} />

@@ -17,6 +17,25 @@ import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
 import StarPick from '../components/StarPick.jsx'
 
+// ── SEO URL helpers ───────────────────────────────────────────────────────────
+
+function toSlug(str) {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // strip diacritics
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function matchUrl(match) {
+  const date       = (match.event_date || '').slice(0, 10)
+  const tournament = toSlug(match.tournament || '')
+  const p1         = toSlug(match.first_player?.name  || 'player')
+  const p2         = toSlug(match.second_player?.name || 'player')
+  const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
+  return `/match/${match.match_id}/${slug}`
+}
+
 // ── Surface dot ───────────────────────────────────────────────────────────────
 
 function SurfaceDot({ surface }) {
@@ -114,7 +133,7 @@ function MatchRow({ match, showTournament }) {
   const liveScore = match.game_result || match.final_result || ''
 
   return (
-    <button className={rowCls} onClick={() => navigate(`/match/${match.match_id}`)}>
+    <button className={rowCls} onClick={() => navigate(matchUrl(match))}>
 
       {/* Time / status */}
       <div className={`match-row-time ${isLive ? 'live' : ''}`}>
@@ -478,7 +497,7 @@ function Sidebar({ allMatches }) {
                 <button
                   key={m.match_id}
                   className="sidebar-selection-row"
-                  onClick={() => navigate(`/match/${m.match_id}`)}
+                  onClick={() => navigate(matchUrl(m))}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -533,7 +552,7 @@ function Sidebar({ allMatches }) {
                 <button
                   key={m.match_id}
                   className="sidebar-selection-row"
-                  onClick={() => navigate(`/match/${m.match_id}`)}
+                  onClick={() => navigate(matchUrl(m))}
                 >
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', width: 20, flexShrink: 0, textAlign: 'left' }}>
                     #{i + 1}
