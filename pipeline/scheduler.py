@@ -7,7 +7,7 @@ Runs continuously on Railway, keeping the database up-to-date automatically:
   - predictions     : 06:30 and 18:30 UTC (ML win probabilities, runs after fixtures)
   - livescore       : every 5 minutes (live match updates during play)
   - odds            : 07:00 and 19:00 UTC (bookmaker odds via The Odds API)
-  - ratings         : Sundays at 02:00 UTC (RTT player ratings — all active players)
+  - ratings         : daily at 01:00 UTC (RTT player ratings — all active players)
   - sync_events     : once on startup (event types + tournaments)
 
 No manual intervention needed once deployed.
@@ -196,7 +196,7 @@ def run_ratings():
     Compute player ratings (Elo-based, 0-100) for all players.
     Uses auto_data (psycopg2-only, no ml/ dependencies).
     Writes to player_ratings and player_ratings_history tables.
-    Runs on startup and weekly (Sundays 02:00 UTC).
+    Runs on startup and daily at 01:00 UTC.
     """
     log.info("Running: player ratings computation...")
     try:
@@ -420,7 +420,7 @@ if __name__ == "__main__":
     schedule.every(15).minutes.do(_settle_only)
     schedule.every().day.at("07:00").do(run_odds)             # odds after fixtures
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
-    schedule.every().sunday.at("02:00").do(run_ratings)       # weekly ratings refresh
+    schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh
     # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
     def _player_sync_weekly():
         try:
@@ -445,7 +445,7 @@ if __name__ == "__main__":
         "Fixtures at 06:00 and 18:00 UTC. "
         "Predictions at 06:30 and 18:30 UTC. "
         "Odds at 07:00 and 19:00 UTC. "
-        "Ratings every Sunday 02:00 UTC. "
+        "Ratings every day 01:00 UTC. "
         "Livescore every 5 minutes."
     )
 

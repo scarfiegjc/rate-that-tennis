@@ -688,52 +688,82 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {/* Bookmaker odds strip — always visible */}
+      {/* Bookmaker odds table */}
       {(() => {
-        const mkt = match.market || {}
-        const p1odds = mkt.odds_first_player
-        const p2odds = mkt.odds_second_player
-        const bookie = mkt.bookmaker
-        const hasOdds = p1odds || p2odds
+        const mkt         = match.market || {}
+        const edgeData    = match.edge   || {}
+        const allBk       = mkt.all_bookmakers || []
+        const hasOdds     = allBk.length > 0
+        const p1name      = p1.name?.split(' ').pop() || 'P1'
+        const p2name      = p2.name?.split(' ').pop() || 'P2'
+        const p1prob      = pred.prob_first_player
+        const p2prob      = pred.prob_second_player
+
+        // Edge helpers
+        const edgeColor = (e) => e == null ? 'var(--text-3)' : e >= 0.05 ? 'var(--green)' : e <= -0.05 ? '#ef4444' : 'var(--amber)'
+        const fmtEdge   = (e) => e == null ? '—' : (e >= 0 ? '+' : '') + (e * 100).toFixed(1) + '%'
+        const calcEdge  = (odds, prob) => {
+          if (!odds || !prob) return null
+          return Math.round((prob - (1 / odds)) * 1000) / 1000
+        }
+
         return (
-          <div style={{
-            marginTop: 20,
-            padding: '12px 18px',
-            background: 'var(--bg-raised)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--r-lg)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-            flexWrap: 'wrap',
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)', flexShrink: 0 }}>
-              Bookmaker odds{bookie ? ` · ${bookie}` : ''}
+          <div style={{ marginTop: 20, border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+              padding: '8px 14px',
+              background: 'var(--bg-raised)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)',
+            }}>
+              <span>Bookmaker</span>
+              <span style={{ textAlign: 'right' }}>{p1name}</span>
+              <span style={{ textAlign: 'right' }}>{p2name}</span>
+              <span style={{ textAlign: 'right' }}>RTT Edge</span>
             </div>
-            {hasOdds ? (
-              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                {p1odds && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p1.name?.split(' ').pop() || 'P1'}</span>
-                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                      {p1odds.toFixed(2)}
-                    </span>
-                  </div>
-                )}
-                {p2odds && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p2.name?.split(' ').pop() || 'P2'}</span>
-                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                      {p2odds.toFixed(2)}
-                    </span>
-                  </div>
-                )}
+
+            {hasOdds ? allBk.map((bk, idx) => {
+              const e1 = calcEdge(bk.p1_odds, p1prob)
+              const e2 = calcEdge(bk.p2_odds, p2prob)
+              // Best edge is the one with highest positive value
+              const bestEdge = (e1 != null && e2 != null) ? (e1 >= e2 ? { side: 'p1', val: e1 } : { side: 'p2', val: e2 })
+                             : e1 != null ? { side: 'p1', val: e1 }
+                             : e2 != null ? { side: 'p2', val: e2 } : null
+              const isBest = idx === 0  // first row = best p1 odds (sorted by API)
+              return (
+                <div key={bk.bookmaker} style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                  padding: '9px 14px',
+                  borderBottom: idx < allBk.length - 1 ? '1px solid var(--border-faint)' : 'none',
+                  background: isBest ? 'rgba(99,153,34,0.06)' : 'transparent',
+                  alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: isBest ? 700 : 500, color: isBest ? 'var(--text)' : 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {isBest && <span style={{ fontSize: 9, background: 'var(--green)', color: '#fff', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>BEST</span>}
+                    {bk.bookmaker}
+                  </span>
+                  <span style={{ textAlign: 'right', fontSize: 13, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                    {bk.p1_odds?.toFixed(2) ?? '—'}
+                  </span>
+                  <span style={{ textAlign: 'right', fontSize: 13, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                    {bk.p2_odds?.toFixed(2) ?? '—'}
+                  </span>
+                  <span style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, color: bestEdge ? edgeColor(bestEdge.val) : 'var(--text-3)' }}>
+                    {bestEdge
+                      ? `${bestEdge.side === 'p1' ? p1name : p2name} ${fmtEdge(bestEdge.val)}`
+                      : '—'}
+                  </span>
+                </div>
+              )
+            }) : (
+              <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic', textAlign: 'center' }}>
+                Odds not yet available for this match. They are fetched at 07:00 and 19:00 UTC.
               </div>
-            ) : (
-              <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                Odds not yet available for this match
-              </span>
             )}
-            <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
-              For reference only · Please gamble responsibly
+
+            <div style={{ padding: '7px 14px', background: 'var(--bg-sunken)', fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
+              RTT Edge = our model probability minus implied bookmaker probability · For reference only · Please gamble responsibly
             </div>
           </div>
         )
@@ -1887,6 +1917,7 @@ export default function MatchDetail() {
             odds_first_player:  mkt.p1?.decimal_odds,
             odds_second_player: mkt.p2?.decimal_odds,
             bookmaker:          mkt.p1?.bookmaker || mkt.p2?.bookmaker,
+            all_bookmakers:     mkt.all_bookmakers || [],
           },
           edge,
         })
@@ -1923,41 +1954,66 @@ export default function MatchDetail() {
       }}>
         <MatchMeta match={match} />
 
-        {/* Odds strip — always visible */}
-        <div style={{
-          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 28,
-          padding: '8px 24px 10px', fontSize: 12, color: 'var(--text-3)',
-          borderTop: '1px solid var(--border-faint)',
-          background: 'var(--bg-sunken)',
-          flexWrap: 'wrap',
-        }}>
-          {(mkt.odds_first_player || mkt.odds_second_player) ? (
-            <>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.first_player?.name?.split(' ').pop() || 'P1'}</span>
-                <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                  {mkt.odds_first_player?.toFixed(2) ?? '—'}
-                </strong>
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--border)', fontWeight: 500 }}>vs</div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.second_player?.name?.split(' ').pop() || 'P2'}</span>
-                <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                  {mkt.odds_second_player?.toFixed(2) ?? '—'}
-                </strong>
-              </div>
-              {mkt.bookmaker && (
-                <span style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: 2 }}>
-                  via {mkt.bookmaker}
+        {/* Odds strip — best available odds + RTT edge */}
+        {(() => {
+          const edgeData  = match.edge || {}
+          const p1edge    = edgeData.p1   // e.g. 0.12 = +12%
+          const p2edge    = edgeData.p2
+          const hasOdds   = mkt.odds_first_player || mkt.odds_second_player
+          const edgeColor = (e) => e == null ? 'var(--text-3)' : e >= 0.05 ? 'var(--green)' : e <= -0.05 ? '#ef4444' : 'var(--amber)'
+          const fmtEdge   = (e) => e == null ? null : (e >= 0 ? '+' : '') + (e * 100).toFixed(1) + '%'
+          return (
+            <div style={{
+              display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 24,
+              padding: '8px 24px 10px', fontSize: 12, color: 'var(--text-3)',
+              borderTop: '1px solid var(--border-faint)',
+              background: 'var(--bg-sunken)',
+              flexWrap: 'wrap',
+            }}>
+              {hasOdds ? (
+                <>
+                  {/* P1 odds + edge */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.first_player?.name?.split(' ').pop() || 'P1'}</span>
+                    <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {mkt.odds_first_player?.toFixed(2) ?? '—'}
+                    </strong>
+                    {fmtEdge(p1edge) && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: edgeColor(p1edge) }}>
+                        RTT {fmtEdge(p1edge)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: 10, color: 'var(--border)', fontWeight: 500 }}>vs</div>
+
+                  {/* P2 odds + edge */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{match.second_player?.name?.split(' ').pop() || 'P2'}</span>
+                    <strong style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {mkt.odds_second_player?.toFixed(2) ?? '—'}
+                    </strong>
+                    {fmtEdge(p2edge) && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: edgeColor(p2edge) }}>
+                        RTT {fmtEdge(p2edge)}
+                      </span>
+                    )}
+                  </div>
+
+                  {mkt.bookmaker && (
+                    <span style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: 2 }}>
+                      best odds · {mkt.all_bookmakers?.length > 1 ? `${mkt.all_bookmakers.length} bookmakers` : mkt.bookmaker}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                  Bookmaker odds not yet available
                 </span>
               )}
-            </>
-          ) : (
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
-              Bookmaker odds not yet available
-            </span>
-          )}
-        </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Sticky player + tabs bar */}

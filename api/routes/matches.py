@@ -93,26 +93,56 @@ def _ratings_for(player_id: int) -> dict:
 
 
 def _latest_odds(match_id: int) -> dict:
-    """Returns {'p1': {...}, 'p2': {...}} with latest bookmaker odds."""
+    """
+    Returns best (highest decimal) odds per player + full bookmaker table.
+    Shape: {
+      'p1': {bookmaker, decimal_odds, implied_prob},
+      'p2': {bookmaker, decimal_odds, implied_prob},
+      'all_bookmakers': [{bookmaker, p1_odds, p2_odds}, ...]   # sorted best p1 first
+    }
+    """
     rows = query(
         """
-        SELECT DISTINCT ON (player_ref)
-            player_ref, bookmaker, decimal_odds, implied_prob, fetched_at
+        SELECT player_ref, bookmaker, decimal_odds, implied_prob
         FROM bookmaker_odds
         WHERE match_id = %s
-        ORDER BY player_ref, fetched_at DESC
+        ORDER BY player_ref, decimal_odds DESC
         """,
         (match_id,),
     )
-    result: dict = {}
+    best: dict = {}          # p1/p2 → best row
+    bk_map: dict = {}        # bookmaker → {p1_odds, p2_odds}
+
     for r in rows:
         key = "p1" if r["player_ref"] == "first_player" else "p2"
-        result[key] = {
-            "bookmaker": r["bookmaker"],
-            "decimal_odds": float(r["decimal_odds"]) if r["decimal_odds"] else None,
-            "implied_prob": float(r["implied_prob"]) if r["implied_prob"] else None,
-        }
-    return result
+        odds_val = float(r["decimal_odds"]) if r["decimal_odds"] else None
+        impl_val = float(r["implied_prob"])  if r["implied_prob"]  else None
+        bk = r["bookmaker"] or "unknown"
+
+        # Best odds per side (first row wins because ordered DESC)
+        if key not in best:
+            best[key] = {
+                "bookmaker":    bk,
+                "decimal_odds": odds_val,
+                "implied_prob": impl_val,
+            }
+
+        # Aggregate per bookmaker
+        if bk not in bk_map:
+            bk_map[bk] = {"bookmaker": bk, "p1_odds": None, "p2_odds": None}
+        if key == "p1" and (bk_map[bk]["p1_odds"] is None or (odds_val or 0) > bk_map[bk]["p1_odds"]):
+            bk_map[bk]["p1_odds"] = odds_val
+        if key == "p2" and (bk_map[bk]["p2_odds"] is None or (odds_val or 0) > bk_map[bk]["p2_odds"]):
+            bk_map[bk]["p2_odds"] = odds_val
+
+    # Sort bookmakers: highest p1 odds first (best value for p1 backer at top)
+    all_bk = sorted(
+        bk_map.values(),
+        key=lambda x: (x.get("p1_odds") or 0),
+        reverse=True,
+    )
+
+    return {**best, "all_bookmakers": all_bk}
 
 
 def _edge(model_prob: float | None, implied_prob: float | None) -> float | None:
