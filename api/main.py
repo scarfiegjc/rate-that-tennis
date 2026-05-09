@@ -553,9 +553,46 @@ def admin_hand_splits():
 
 @app.get("/admin/settle")
 def admin_settle():
-    """Settle finished predictions."""
+    """Settle finished predictions AND user picks."""
     from api.bootstrap import run_settle
     return _safe_admin(run_settle)
+
+
+@app.get("/admin/settle-picks")
+def admin_settle_picks():
+    """
+    Force-settle all stuck user_picks whose match has finished.
+    Run this to immediately fix picks that are showing as pending/live
+    after their match has completed.
+    """
+    def _run():
+        from api.db import query, get_conn
+        rows = query(
+            """
+            SELECT up.id, up.player_id, up.confidence_stars, up.our_odds, up.status,
+                   m.first_player_id, m.second_player_id, m.winner
+            FROM user_picks up
+            JOIN matches m ON m.id = up.match_id
+            WHERE up.status IN ('pending','live')
+              AND m.event_status = 'Finished'
+              AND m.winner IN ('First Player','Second Player')
+            """
+        )
+        settled = 0
+        for r in rows:
+            winner_pid = r["first_player_id"] if r["winner"] == "First Player" else r["second_player_id"]
+            status = "won" if r["player_id"] == winner_pid else "lost"
+            stake  = float(r["confidence_stars"] or 1)
+            pl     = round((float(r["our_odds"] or 2.0) - 1) * stake, 2) if status == "won" else round(-stake, 2)
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE user_picks SET status=%s, settled_at=NOW(), profit_loss=%s WHERE id=%s AND status IN ('pending','live')",
+                        (status, pl, r["id"]),
+                    )
+            settled += 1
+        return {"settled_user_picks": settled}
+    return _safe_admin(_run)
 
 
 @app.get("/admin/run-odds")

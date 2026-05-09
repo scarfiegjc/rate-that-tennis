@@ -189,33 +189,33 @@ def _enrich_pick(pick: dict) -> dict:
     winner = match.get("winner")
     if status in ("pending", "live"):
         if "finished" in ms and winner:
-            # Settle immediately on read so results show without waiting for scheduler
+            # Settle immediately — write to DB first, only update status if write succeeds
             winner_pid = (
                 match.get("first_player_id")  if winner == "First Player"  else
                 match.get("second_player_id") if winner == "Second Player" else
                 None
             )
             if winner_pid is not None:
-                status = "won" if pid == winner_pid else "lost"
-                # Write the settlement to DB so Results tab picks it up
+                new_status = "won" if pid == winner_pid else "lost"
                 stake = float(pick.get("confidence_stars") or 1)
-                if status == "won":
+                if new_status == "won":
                     odds = float(pick.get("our_odds") or 2.0)
                     pl = round((odds - 1) * stake, 2)
                 else:
                     pl = round(-stake, 2)
                 try:
-                    from api.db import get_conn as _gc
-                    with _gc() as _conn:
+                    with get_conn() as _conn:
                         with _conn.cursor() as _cur:
                             _cur.execute(
                                 """UPDATE user_picks
                                    SET status = %s, settled_at = NOW(), profit_loss = %s
                                    WHERE id = %s AND status IN ('pending','live')""",
-                                (status, pl, pick["id"]),
+                                (new_status, pl, pick["id"]),
                             )
-                except Exception:
-                    pass  # best-effort; scheduler will catch it next run
+                    status = new_status  # only update in-memory status if DB write succeeded
+                except Exception as _e:
+                    log.warning(f"inline settle failed for pick {pick['id']}: {_e}")
+                    # Leave status as-is so pick stays visible in active tab
         elif any(k in ms for k in ("in play", "live", "set ", "game", "1st", "2nd", "3rd")):
             status = "live"
 
