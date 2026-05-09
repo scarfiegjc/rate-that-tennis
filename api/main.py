@@ -614,6 +614,47 @@ def admin_run_odds():
     return _safe_admin(_run)
 
 
+@app.get("/admin/odds-debug")
+def admin_odds_debug():
+    """
+    Diagnose the odds pipeline: check API key, list available tennis sport keys,
+    and show a sample of raw events returned for the active keys.
+    """
+    import requests as _requests
+    key = os.environ.get("ODDS_API_KEY", "")
+    if not key:
+        return {"error": "ODDS_API_KEY is not set on this service's Railway env vars"}
+
+    base = "https://api.the-odds-api.com/v4"
+
+    # 1. List all available tennis sports
+    try:
+        r = _requests.get(f"{base}/sports", params={"apiKey": key}, timeout=10)
+        all_sports = r.json() if r.status_code == 200 else {"http_error": r.status_code, "body": r.text[:200]}
+        tennis_sports = [s for s in (all_sports if isinstance(all_sports, list) else []) if "tennis" in s.get("key","")]
+    except Exception as e:
+        return {"error": f"sports list failed: {e}"}
+
+    # 2. Try fetching odds for the base keys and report counts
+    results = {}
+    for key_name in ["tennis_atp", "tennis_wta", "tennis_atp_french_open", "tennis_wta_french_open"]:
+        try:
+            r2 = _requests.get(f"{base}/sports/{key_name}/odds",
+                               params={"apiKey": key, "regions": "uk,eu", "markets": "h2h",
+                                       "oddsFormat": "decimal"},
+                               timeout=10)
+            if r2.status_code == 200:
+                events = r2.json()
+                results[key_name] = {"status": 200, "events": len(events),
+                                     "sample": [e.get("home_team","?") + " v " + e.get("away_team","?") for e in events[:3]]}
+            else:
+                results[key_name] = {"status": r2.status_code, "body": r2.text[:200]}
+        except Exception as e:
+            results[key_name] = {"error": str(e)}
+
+    return {"key_set": bool(key), "key_prefix": key[:6] + "…", "tennis_sport_keys": [s["key"] for s in tennis_sports], "odds_fetch": results}
+
+
 _BZZOIRO_BIOS_STATUS = {"running": False, "started_at": None, "finished_at": None,
                         "updated": None, "error": None}
 
