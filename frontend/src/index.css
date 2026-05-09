@@ -112,10 +112,10 @@ button {
 }
 
 /* Inner wrapper aligns header content with the main page body
-   (.page is max-width 1080px, padding 0 20px) so the logo sits
+   (.page is max-width 1280px, padding 0 20px) so the logo sits
    flush left with the page content and the nav sits flush right. */
 .app-header-inner {
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 0 20px;
   height: 100%;
@@ -174,7 +174,7 @@ button {
 }
 
 .page {
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 28px 20px;
 }
