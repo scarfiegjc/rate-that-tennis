@@ -1177,6 +1177,23 @@ def _startup_bootstrap():
     except Exception as e:
         log.error(f"[startup] bootstrap failed: {e}")
 
+    # Fetch bookmaker odds on startup so the strip is populated immediately.
+    # Runs silently if ODDS_API_KEY is not set.
+    try:
+        if os.environ.get("ODDS_API_KEY"):
+            log.info("[startup] fetching bookmaker odds…")
+            try:
+                from pipeline.odds import run as odds_run
+            except ImportError:
+                from odds import run as odds_run
+            result = odds_run()
+            log.info(f"[startup] odds complete: {result}")
+        else:
+            log.info("[startup] ODDS_API_KEY not set — skipping odds fetch. "
+                     "Add it to Railway Variables to enable bookmaker odds.")
+    except Exception as e:
+        log.error(f"[startup] odds fetch failed: {e}")
+
 
 @app.on_event("startup")
 def _kick_off_bootstrap():

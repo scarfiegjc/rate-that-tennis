@@ -392,8 +392,8 @@ def run_settle() -> dict:
         return {"error": f"import: {e}"}
     conn = psycopg2.connect(db_url)
     try:
-        upd_pred, upd_sys = settle_predictions(conn)
-        return {"settled_predictions": upd_pred, "settled_system_picks": upd_sys}
+        upd_pred, upd_sys, upd_user = settle_predictions(conn)
+        return {"settled_predictions": upd_pred, "settled_system_picks": upd_sys, "settled_user_picks": upd_user}
     finally:
         conn.close()
 

@@ -183,11 +183,40 @@ def _enrich_pick(pick: dict) -> dict:
     picked_player  = _player(pid)
     opp_player     = _player(opp_id)
 
-    # Status: override pick status if match is now live or finished
+    # Status: override pick status based on live match state
     status = pick["status"]
     ms = (match.get("event_status") or "").lower()
-    if status == "pending":
-        if any(k in ms for k in ("in play", "live", "set ", "game", "1st", "2nd", "3rd")):
+    winner = match.get("winner")
+    if status in ("pending", "live"):
+        if "finished" in ms and winner:
+            # Settle immediately on read so results show without waiting for scheduler
+            winner_pid = (
+                match.get("first_player_id")  if winner == "First Player"  else
+                match.get("second_player_id") if winner == "Second Player" else
+                None
+            )
+            if winner_pid is not None:
+                status = "won" if pid == winner_pid else "lost"
+                # Write the settlement to DB so Results tab picks it up
+                stake = float(pick.get("confidence_stars") or 1)
+                if status == "won":
+                    odds = float(pick.get("our_odds") or 2.0)
+                    pl = round((odds - 1) * stake, 2)
+                else:
+                    pl = round(-stake, 2)
+                try:
+                    from api.db import get_conn as _gc
+                    with _gc() as _conn:
+                        with _conn.cursor() as _cur:
+                            _cur.execute(
+                                """UPDATE user_picks
+                                   SET status = %s, settled_at = NOW(), profit_loss = %s
+                                   WHERE id = %s AND status IN ('pending','live')""",
+                                (status, pl, pick["id"]),
+                            )
+                except Exception:
+                    pass  # best-effort; scheduler will catch it next run
+        elif any(k in ms for k in ("in play", "live", "set ", "game", "1st", "2nd", "3rd")):
             status = "live"
 
     return {

@@ -43,7 +43,7 @@ def _winner_to_player_ref(winner_text: Optional[str]) -> Optional[str]:
     return None
 
 
-def settle_predictions(conn, since: Optional[date] = None) -> tuple[int, int]:
+def settle_predictions(conn, since: Optional[date] = None) -> tuple[int, int, int]:
     """
     Update model_predictions for finished matches.
     Returns (updated_predictions, updated_systems).
@@ -150,7 +150,68 @@ def settle_predictions(conn, since: Optional[date] = None) -> tuple[int, int]:
 
     conn.commit()
     log.info(f"  ✅ Settled {updated_sys} system picks")
-    return updated_pred, updated_sys
+
+    # ── User picks
+    updated_user = _settle_user_picks(conn, cutoff)
+
+    return updated_pred, updated_sys, updated_user
+
+
+def _settle_user_picks(conn, cutoff) -> int:
+    """
+    Settle user_picks for finished matches.
+    Marks each pick won/lost/void, computes profit_loss, sets settled_at.
+    """
+    log.info("Settling user picks...")
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT up.id, up.player_id, up.confidence_stars, up.our_odds,
+                   m.id AS match_id,
+                   m.first_player_id, m.second_player_id, m.winner
+            FROM user_picks up
+            JOIN matches m ON m.id = up.match_id
+            WHERE up.status IN ('pending', 'live')
+              AND m.event_status = 'Finished'
+              AND m.winner IN ('First Player', 'Second Player')
+              AND m.event_date >= %s
+            """,
+            (cutoff,),
+        )
+        rows = cur.fetchall()
+
+    log.info(f"  Found {len(rows)} user picks to settle")
+    updated = 0
+    for r in rows:
+        winner_pid = (
+            r["first_player_id"]  if r["winner"] == "First Player"  else
+            r["second_player_id"] if r["winner"] == "Second Player" else
+            None
+        )
+        if winner_pid is None:
+            status = "void"
+            pl = 0.0
+        else:
+            status = "won" if r["player_id"] == winner_pid else "lost"
+            stake = float(r["confidence_stars"] or 1)
+            if status == "won":
+                odds = float(r["our_odds"] or 2.0)
+                pl = round((odds - 1) * stake, 2)
+            else:
+                pl = round(-stake, 2)
+
+        with conn.cursor() as cur2:
+            cur2.execute(
+                """UPDATE user_picks
+                   SET status = %s, settled_at = NOW(), profit_loss = %s
+                   WHERE id = %s AND status IN ('pending', 'live')""",
+                (status, pl, r["id"]),
+            )
+        updated += 1
+
+    conn.commit()
+    log.info(f"  ✅ Settled {updated} user picks")
+    return updated
 
 
 def main():
