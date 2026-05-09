@@ -391,6 +391,38 @@ class FeatureBuilder:
         self.df = df
         return self
 
+    def _load_rtt_history(self, engine) -> dict:
+        """
+        Load player_ratings_history into a dict: player_id → sorted list of
+        (rated_at_date, ratings_dict) for point-in-time RTT feature lookups.
+        Returns empty dict if the table is empty or unavailable.
+        """
+        try:
+            from sqlalchemy import text as sa_text
+            with engine.connect() as conn:
+                df_rtt = pd.read_sql(sa_text("""
+                    SELECT player_id, rated_at,
+                           rtt_score, clay_rating, hard_rating, grass_rating, indoor_rating,
+                           serve_rating, return_rating, pressure_rating,
+                           consistency_score, form_score, big_match_rating, vs_top10_rating
+                    FROM player_ratings_history
+                    ORDER BY player_id, rated_at
+                """), conn)
+            if df_rtt.empty:
+                return {}
+            df_rtt['rated_at'] = pd.to_datetime(df_rtt['rated_at']).dt.date
+            history: dict = {}
+            for pid, grp in df_rtt.groupby('player_id'):
+                records = []
+                for _, r in grp.iterrows():
+                    records.append((r['rated_at'], r.drop('player_id').to_dict()))
+                history[int(pid)] = records
+            log.info(f"  RTT history loaded for {len(history):,} players")
+            return history
+        except Exception as e:
+            log.warning(f"  Could not load player_ratings_history: {e}")
+            return {}
+
     # ─────────────────────────────────────────
     # BUILD
     # ─────────────────────────────────────────
@@ -421,8 +453,16 @@ class FeatureBuilder:
         self.elo_engine.fit(df)
         elo_df = self.elo_engine.match_features()
 
+        # Load RTT history for point-in-time feature lookup
+        try:
+            from sqlalchemy import create_engine
+            _engine = create_engine(self.db_url)
+            rtt_history = self._load_rtt_history(_engine)
+        except Exception:
+            rtt_history = {}
+
         log.info("Building rolling stats and H2H features ...")
-        rows = self._build_rows(df, elo_df, random_seed)
+        rows = self._build_rows(df, elo_df, random_seed, rtt_history)
 
         result = pd.DataFrame(rows)
         log.info(f"Feature matrix: {len(result):,} rows × {len(result.columns)} columns")
@@ -444,12 +484,40 @@ class FeatureBuilder:
         df: pd.DataFrame,
         elo_df: pd.DataFrame,
         random_seed: int,
+        rtt_history: Optional[dict] = None,
     ) -> list[dict]:
         """Core loop: iterate matches chronologically, build features, then update trackers."""
+
+        rtt_history = rtt_history or {}
+
+        def _lookup_rtt(player_id: int, match_date) -> dict:
+            """Return the most recent RTT ratings for player before match_date."""
+            DEFAULT = 50.0
+            pid = int(player_id)
+            entries = rtt_history.get(pid, [])
+            if not entries:
+                return None
+            md = match_date.date() if hasattr(match_date, 'date') else match_date
+            # entries are sorted ascending by rated_at — find last before md
+            result = None
+            for rated_at, ratings in entries:
+                if rated_at < md:
+                    result = ratings
+                else:
+                    break
+            return result
+
+        def _rtt_val(ratings: Optional[dict], key: str) -> float:
+            if ratings is None or ratings.get(key) is None:
+                return 50.0
+            v = ratings[key]
+            return float(v) if v is not None else 50.0
 
         rng = np.random.default_rng(random_seed)
         player_window = PlayerWindow(max_window=50)
         h2h = H2HTracker()
+        # Track last match minutes per player for fatigue feature
+        _last_mins: dict[int, float] = {}
 
         # Index elo_df by position (same order as df after sort)
         elo_records = elo_df.to_dict('records')
@@ -499,6 +567,44 @@ class FeatureBuilder:
             p2_ht    = match['loser_ht']     if p1_is_winner else match['winner_ht']
             p1_hand  = match['winner_hand']  if p1_is_winner else match['loser_hand']
             p2_hand  = match['loser_hand']   if p1_is_winner else match['winner_hand']
+
+            # Seeding
+            w_seed = match.get('winner_seed')
+            l_seed = match.get('loser_seed')
+            p1_seeded = int(w_seed is not None and not (isinstance(w_seed, float) and np.isnan(w_seed))) if p1_is_winner else int(l_seed is not None and not (isinstance(l_seed, float) and np.isnan(l_seed)))
+            p2_seeded = int(l_seed is not None and not (isinstance(l_seed, float) and np.isnan(l_seed))) if p1_is_winner else int(w_seed is not None and not (isinstance(w_seed, float) and np.isnan(w_seed)))
+
+            # RTT point-in-time lookup
+            p1_rtt_ratings = _lookup_rtt(p1_id, match_date)
+            p2_rtt_ratings = _lookup_rtt(p2_id, match_date)
+
+            # Determine surface-specific RTT column
+            surf_lower = (surface or '').lower()
+            if 'clay' in surf_lower:
+                surf_rtt_col = 'clay_rating'
+            elif 'grass' in surf_lower:
+                surf_rtt_col = 'grass_rating'
+            elif 'indoor' in surf_lower or 'carpet' in surf_lower:
+                surf_rtt_col = 'indoor_rating'
+            else:
+                surf_rtt_col = 'hard_rating'
+
+            p1_rtt      = _rtt_val(p1_rtt_ratings, 'rtt_score')
+            p2_rtt      = _rtt_val(p2_rtt_ratings, 'rtt_score')
+            p1_surf_rtg = _rtt_val(p1_rtt_ratings, surf_rtt_col)
+            p2_surf_rtg = _rtt_val(p2_rtt_ratings, surf_rtt_col)
+            p1_serve_rtg    = _rtt_val(p1_rtt_ratings, 'serve_rating')
+            p2_serve_rtg    = _rtt_val(p2_rtt_ratings, 'serve_rating')
+            p1_return_rtg   = _rtt_val(p1_rtt_ratings, 'return_rating')
+            p2_return_rtg   = _rtt_val(p2_rtt_ratings, 'return_rating')
+            p1_pressure_rtg = _rtt_val(p1_rtt_ratings, 'pressure_rating')
+            p2_pressure_rtg = _rtt_val(p2_rtt_ratings, 'pressure_rating')
+            p1_form_rtg     = _rtt_val(p1_rtt_ratings, 'form_score')
+            p2_form_rtg     = _rtt_val(p2_rtt_ratings, 'form_score')
+
+            # Fatigue: last match minutes
+            p1_last_mins = _last_mins.get(p1_id, 90.0)
+            p2_last_mins = _last_mins.get(p2_id, 90.0)
 
             # Elo features (swap if needed)
             w_elo_pre    = elo_row['w_elo_pre']
@@ -594,6 +700,36 @@ class FeatureBuilder:
 
                 # ── H2H
                 **h2h_f,
+
+                # ── Seeding
+                'p1_seeded':        p1_seeded,
+                'p2_seeded':        p2_seeded,
+                'seeding_adv':      p1_seeded - p2_seeded,
+
+                # ── RTT point-in-time ratings
+                'p1_rtt':           p1_rtt,
+                'p2_rtt':           p2_rtt,
+                'rtt_diff':         p1_rtt - p2_rtt,
+                'p1_surf_rtg':      p1_surf_rtg,
+                'p2_surf_rtg':      p2_surf_rtg,
+                'surf_rtg_diff':    p1_surf_rtg - p2_surf_rtg,
+                'p1_serve_rtg':     p1_serve_rtg,
+                'p2_serve_rtg':     p2_serve_rtg,
+                'serve_rtg_diff':   p1_serve_rtg - p2_serve_rtg,
+                'p1_return_rtg':    p1_return_rtg,
+                'p2_return_rtg':    p2_return_rtg,
+                'return_rtg_diff':  p1_return_rtg - p2_return_rtg,
+                'p1_pressure_rtg':  p1_pressure_rtg,
+                'p2_pressure_rtg':  p2_pressure_rtg,
+                'pressure_rtg_diff': p1_pressure_rtg - p2_pressure_rtg,
+                'p1_form_rtg':      p1_form_rtg,
+                'p2_form_rtg':      p2_form_rtg,
+                'form_rtg_diff':    p1_form_rtg - p2_form_rtg,
+
+                # ── Fatigue (last match duration)
+                'p1_last_mins':     p1_last_mins,
+                'p2_last_mins':     p2_last_mins,
+                'fatigue_diff':     p1_last_mins - p2_last_mins,
             }
 
             rows.append(row)
@@ -642,6 +778,16 @@ class FeatureBuilder:
                 sets_played=n_sets,
             )
             h2h.update(w_id, l_id, surface)
+
+            # Update last match minutes tracker
+            mins = match.get('minutes')
+            if mins is not None:
+                try:
+                    mins_float = float(mins)
+                    _last_mins[w_id] = mins_float
+                    _last_mins[l_id] = mins_float
+                except (TypeError, ValueError):
+                    pass
 
         return rows
 

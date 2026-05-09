@@ -19,8 +19,8 @@ echo "▶  1/4 Refresh hand-vs-hand splits..."
 python3 -m pipeline.player_splits || echo "    (player_splits step skipped — table may not exist yet)"
 
 echo ""
-echo "▶  2/4 Predict upcoming matches (RTT v1 — RTT-based, transparent factors)..."
-python3 -m ml.rtt_predictor --upcoming 7
+echo "▶  2/4 Predict upcoming matches (ML ensemble — trained XGBoost+LightGBM+Logistic)..."
+python3 -m ml.predict --upcoming 7
 
 echo ""
 echo "▶  3/4 Settle finished matches (last 14 days)..."

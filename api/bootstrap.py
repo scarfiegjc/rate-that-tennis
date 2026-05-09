@@ -366,16 +366,19 @@ def run_hand_splits() -> dict:
 
 def run_rtt_predictions(days_ahead: int = 7) -> dict:
     try:
-        from ml.rtt_predictor import RttPredictor  # noqa
+        from ml.predict import LivePredictor  # noqa
     except Exception as e:
-        log.error(f"rtt_predictor import failed: {e}")
+        log.error(f"ml.predict import failed: {e}")
         return {"error": f"import: {e}"}
-    rp = RttPredictor()
+    predictor = LivePredictor()
     try:
-        n = rp.predict_upcoming(days_ahead=days_ahead)
+        predictor.load_models()
+        predictor.load_player_history()
+        n = predictor.predict_upcoming(days_ahead=days_ahead)
         return {"predicted": n}
-    finally:
-        rp.close()
+    except Exception as e:
+        log.error(f"LivePredictor failed: {e}")
+        return {"error": str(e)}
 
 
 def run_settle() -> dict:

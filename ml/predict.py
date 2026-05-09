@@ -280,38 +280,42 @@ class LivePredictor:
                 """)
                 sa_rows = cur.fetchall()
 
-            # Load from live matches table
+            # Load from live matches table (join to get real surface)
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
-                        first_player_id  AS winner_id,
-                        second_player_id AS loser_id,
-                        event_date       AS tourney_date,
-                        NULL             AS surface,
-                        NULL             AS tourney_level,
-                        'ATP'            AS tour,
-                        0                AS match_num,
-                        final_result     AS score
-                    FROM matches
-                    WHERE event_status = 'Finished'
-                      AND winner = 'First Player'
-                      AND first_player_id IS NOT NULL
-                      AND second_player_id IS NOT NULL
+                        m.first_player_id  AS winner_id,
+                        m.second_player_id AS loser_id,
+                        m.event_date       AS tourney_date,
+                        s.name             AS surface,
+                        NULL               AS tourney_level,
+                        'ATP'              AS tour,
+                        0                  AS match_num,
+                        m.final_result     AS score
+                    FROM matches m
+                    LEFT JOIN tournaments t ON t.id = m.tournament_id
+                    LEFT JOIN surfaces s    ON s.id = t.surface_id
+                    WHERE m.event_status = 'Finished'
+                      AND m.winner = 'First Player'
+                      AND m.first_player_id IS NOT NULL
+                      AND m.second_player_id IS NOT NULL
                     UNION ALL
                     SELECT
-                        second_player_id AS winner_id,
-                        first_player_id  AS loser_id,
-                        event_date       AS tourney_date,
-                        NULL             AS surface,
-                        NULL             AS tourney_level,
-                        'ATP'            AS tour,
-                        0                AS match_num,
-                        final_result     AS score
-                    FROM matches
-                    WHERE event_status = 'Finished'
-                      AND winner = 'Second Player'
-                      AND first_player_id IS NOT NULL
-                      AND second_player_id IS NOT NULL
+                        m.second_player_id AS winner_id,
+                        m.first_player_id  AS loser_id,
+                        m.event_date       AS tourney_date,
+                        s.name             AS surface,
+                        NULL               AS tourney_level,
+                        'ATP'              AS tour,
+                        0                  AS match_num,
+                        m.final_result     AS score
+                    FROM matches m
+                    LEFT JOIN tournaments t ON t.id = m.tournament_id
+                    LEFT JOIN surfaces s    ON s.id = t.surface_id
+                    WHERE m.event_status = 'Finished'
+                      AND m.winner = 'Second Player'
+                      AND m.first_player_id IS NOT NULL
+                      AND m.second_player_id IS NOT NULL
                     ORDER BY tourney_date
                 """)
                 live_rows = cur.fetchall()
@@ -361,16 +365,28 @@ class LivePredictor:
                 row.get('w_svpt')
             )
 
+            # BP conversion: winner converts loser's BP faced - saved; loser converts winner's
+            w_bp_conv = safe_pct(
+                (row.get('l_bp_faced') or 0) - (row.get('l_bp_saved') or 0),
+                row.get('l_bp_faced')
+            ) if row.get('l_bp_faced') else None
+            l_bp_conv = safe_pct(
+                (row.get('w_bp_faced') or 0) - (row.get('w_bp_saved') or 0),
+                row.get('w_bp_faced')
+            ) if row.get('w_bp_faced') else None
+
             self._player_window.update(w_id, won=True,  surface=surface, match_date=date,
                                        svpt_won=w_svpt_won, ret_won=w_ret_won,
                                        ace_rate=safe_pct(row.get('w_ace'), row.get('w_sv_gms')),
                                        df_rate=safe_pct(row.get('w_df'), row.get('w_sv_gms')),
-                                       bp_save=row.get('w_bp_save_pct'))
+                                       bp_save=row.get('w_bp_save_pct'),
+                                       bp_conv=w_bp_conv)
             self._player_window.update(l_id, won=False, surface=surface, match_date=date,
                                        svpt_won=l_svpt_won, ret_won=l_ret_won,
                                        ace_rate=safe_pct(row.get('l_ace'), row.get('l_sv_gms')),
                                        df_rate=safe_pct(row.get('l_df'), row.get('l_sv_gms')),
-                                       bp_save=row.get('l_bp_save_pct'))
+                                       bp_save=row.get('l_bp_save_pct'),
+                                       bp_conv=l_bp_conv)
             self._h2h_tracker.update(w_id, l_id, surface)
 
         log.info("  Player history built")
@@ -427,6 +443,54 @@ class LivePredictor:
         # ── H2H
         h2h_f = self._h2h_tracker.get(p1_id, p2_id, surface)
 
+        # ── RTT ratings from player_ratings table
+        def _fetch_player_ratings(pid: int) -> dict:
+            try:
+                _conn = psycopg2.connect(self.db_url)
+                _conn.cursor_factory = psycopg2.extras.RealDictCursor
+                with _conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT rtt_score, clay_rating, hard_rating, grass_rating, indoor_rating,
+                               serve_rating, return_rating, pressure_rating, form_score
+                        FROM player_ratings WHERE player_id = %s
+                    """, (pid,))
+                    row = cur.fetchone()
+                _conn.close()
+                return dict(row) if row else {}
+            except Exception:
+                return {}
+
+        p1_rtg = _fetch_player_ratings(p1_id)
+        p2_rtg = _fetch_player_ratings(p2_id)
+
+        def _rtg(ratings: dict, key: str) -> float:
+            v = ratings.get(key)
+            return float(v) if v is not None else 50.0
+
+        # Determine surface column for RTT
+        surf_lower = (surface or '').lower()
+        if 'clay' in surf_lower:
+            surf_rtt_col = 'clay_rating'
+        elif 'grass' in surf_lower:
+            surf_rtt_col = 'grass_rating'
+        elif 'indoor' in surf_lower or 'carpet' in surf_lower:
+            surf_rtt_col = 'indoor_rating'
+        else:
+            surf_rtt_col = 'hard_rating'
+
+        p1_rtt_val      = _rtg(p1_rtg, 'rtt_score')
+        p2_rtt_val      = _rtg(p2_rtg, 'rtt_score')
+        p1_surf_rtg_val = _rtg(p1_rtg, surf_rtt_col)
+        p2_surf_rtg_val = _rtg(p2_rtg, surf_rtt_col)
+        p1_serve_rtg    = _rtg(p1_rtg, 'serve_rating')
+        p2_serve_rtg    = _rtg(p2_rtg, 'serve_rating')
+        p1_return_rtg   = _rtg(p1_rtg, 'return_rating')
+        p2_return_rtg   = _rtg(p2_rtg, 'return_rating')
+        p1_pressure_rtg = _rtg(p1_rtg, 'pressure_rating')
+        p2_pressure_rtg = _rtg(p2_rtg, 'pressure_rating')
+        p1_form_rtg     = _rtg(p1_rtg, 'form_score')
+        p2_form_rtg     = _rtg(p2_rtg, 'form_score')
+
         def diff(a, b):
             if a is None or b is None:
                 return None
@@ -472,7 +536,54 @@ class LivePredictor:
             'p2_days_rest':     p2_days,
             'days_rest_diff':   diff(p1_days, p2_days),
             **h2h_f,
+
+            # ── RTT ratings (from player_ratings table)
+            'p1_rtt':           p1_rtt_val,
+            'p2_rtt':           p2_rtt_val,
+            'rtt_diff':         p1_rtt_val - p2_rtt_val,
+            'p1_surf_rtg':      p1_surf_rtg_val,
+            'p2_surf_rtg':      p2_surf_rtg_val,
+            'surf_rtg_diff':    p1_surf_rtg_val - p2_surf_rtg_val,
+            'p1_serve_rtg':     p1_serve_rtg,
+            'p2_serve_rtg':     p2_serve_rtg,
+            'serve_rtg_diff':   p1_serve_rtg - p2_serve_rtg,
+            'p1_return_rtg':    p1_return_rtg,
+            'p2_return_rtg':    p2_return_rtg,
+            'return_rtg_diff':  p1_return_rtg - p2_return_rtg,
+            'p1_pressure_rtg':  p1_pressure_rtg,
+            'p2_pressure_rtg':  p2_pressure_rtg,
+            'pressure_rtg_diff': p1_pressure_rtg - p2_pressure_rtg,
+            'p1_form_rtg':      p1_form_rtg,
+            'p2_form_rtg':      p2_form_rtg,
+            'form_rtg_diff':    p1_form_rtg - p2_form_rtg,
         }
+
+        # ── Bookmaker implied probability (high-value signal)
+        try:
+            _bk_conn = psycopg2.connect(self.db_url)
+            _bk_conn.cursor_factory = psycopg2.extras.RealDictCursor
+            with _bk_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT odd_first_player, odd_second_player
+                    FROM bookmaker_odds
+                    WHERE match_id = %s
+                    ORDER BY fetched_at DESC
+                    LIMIT 1
+                """, (match_id,))
+                odds_row = cur.fetchone()
+            _bk_conn.close()
+            if odds_row and odds_row['odd_first_player'] and odds_row['odd_second_player']:
+                o1 = float(odds_row['odd_first_player'])
+                o2 = float(odds_row['odd_second_player'])
+                # Convert decimal odds to implied probability (no-vig)
+                raw1 = 1.0 / o1
+                raw2 = 1.0 / o2
+                total = raw1 + raw2
+                features['market_impl_p1'] = raw1 / total if total > 0 else 0.5
+            else:
+                features['market_impl_p1'] = 0.5
+        except Exception:
+            features['market_impl_p1'] = 0.5
 
         # ── Model prediction (fall back to Elo if no model loaded)
         model_key = 'elo_fallback'
@@ -566,6 +677,56 @@ class LivePredictor:
         finally:
             conn.close()
 
+    def _lookup_rank(self, player_id: int, conn) -> tuple[Optional[int], Optional[int]]:
+        """
+        Fetch current ranking and ranking points for a player from sa_matches
+        via player name lookup. Returns (rank, rank_pts) or (None, None).
+        """
+        try:
+            with conn.cursor() as cur:
+                # Get player name from production players table
+                cur.execute(
+                    "SELECT name, full_name FROM players WHERE id = %s",
+                    (player_id,)
+                )
+                row = cur.fetchone()
+            if not row:
+                return None, None
+            name, full_name = row[0], row[1]
+            # Get last token of full name or name for fuzzy match
+            last_token = None
+            for n in (full_name, name):
+                if n:
+                    tokens = n.replace('.', '').split()
+                    if tokens:
+                        last_token = tokens[-1].strip()
+                        if last_token and len(last_token) >= 3:
+                            break
+            if not last_token:
+                return None, None
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        COALESCE(
+                            MIN(sm.winner_rank) FILTER (WHERE sm.winner_id = sp.player_id),
+                            MIN(sm.loser_rank)  FILTER (WHERE sm.loser_id  = sp.player_id)
+                        ) AS rank,
+                        COALESCE(
+                            MAX(sm.winner_rank_points) FILTER (WHERE sm.winner_id = sp.player_id),
+                            MAX(sm.loser_rank_points)  FILTER (WHERE sm.loser_id  = sp.player_id)
+                        ) AS rank_pts
+                    FROM sa_players sp
+                    JOIN sa_matches sm ON (sm.winner_id = sp.player_id OR sm.loser_id = sp.player_id)
+                    WHERE sp.full_name ILIKE %s
+                      AND sm.tourney_date >= CURRENT_DATE - INTERVAL '2 years'
+                """, (f"%{last_token}%",))
+                r = cur.fetchone()
+            if r and r[0]:
+                return int(r[0]), (int(r[1]) if r[1] else None)
+            return None, None
+        except Exception:
+            return None, None
+
     @staticmethod
     def _tour_category_to_level(tour_category: Optional[str], type_name: Optional[str]) -> str:
         """
@@ -655,12 +816,21 @@ class LivePredictor:
         log.info(f"Predicting {len(upcoming)} upcoming matches ...")
         predicted = 0
 
+        # Open a persistent connection for rank lookups (avoids per-match reconnect)
+        conn_ranks = psycopg2.connect(self.db_url)
+
         for match in upcoming:
             try:
                 level = self._tour_category_to_level(
                     match.get('tour_category'), match.get('type_name')
                 )
                 event_date = match.get('event_date')
+                p1_rank, p1_rank_pts = self._lookup_rank(
+                    match['first_player_id'], conn_ranks
+                )
+                p2_rank, p2_rank_pts = self._lookup_rank(
+                    match['second_player_id'], conn_ranks
+                )
                 pred = self.predict_match(
                     match_id     = match['match_id'],
                     p1_id        = match['first_player_id'],
@@ -669,10 +839,10 @@ class LivePredictor:
                     tourney_level = level,
                     round_       = match.get('round', 'R32') or 'R32',
                     best_of      = match.get('best_of', 3) or 3,
-                    p1_rank      = None,
-                    p2_rank      = None,
-                    p1_rank_pts  = None,
-                    p2_rank_pts  = None,
+                    p1_rank      = p1_rank,
+                    p2_rank      = p2_rank,
+                    p1_rank_pts  = p1_rank_pts,
+                    p2_rank_pts  = p2_rank_pts,
                     p1_age       = self._age_at(match.get('p1_birthday'), event_date),
                     p2_age       = self._age_at(match.get('p2_birthday'), event_date),
                     p1_ht        = match.get('p1_ht'),
@@ -686,6 +856,7 @@ class LivePredictor:
             except Exception as e:
                 log.warning(f"  Failed match {match['match_id']}: {e}")
 
+        conn_ranks.close()
         log.info(f"  Predicted {predicted}/{len(upcoming)} matches")
 
 

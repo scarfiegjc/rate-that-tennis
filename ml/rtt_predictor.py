@@ -772,6 +772,49 @@ class RttPredictor:
                     "pressure", "Pressure rating", p1_p, p2_p, logit,
                 ))
 
+        # ── 8b) Serve vs return matchup ──────────────────────────────────────
+        # A strong server against a weak returner (or vice versa) is a meaningful
+        # edge. Modelled as p1_serve vs p2_return and p1_return vs p2_serve.
+        p1_serve  = f(p1_ratings.get("serve_rating"))
+        p2_serve  = f(p2_ratings.get("serve_rating"))
+        p1_return = f(p1_ratings.get("return_rating"))
+        p2_return = f(p2_ratings.get("return_rating"))
+        if all(v is not None for v in (p1_serve, p2_serve, p1_return, p2_return)):
+            # Net serve edge: p1's serve advantage over p2's return ability
+            serve_gap = (p1_serve - p2_return) - (p2_serve - p1_return)
+            logit = _clip(serve_gap * 0.008, -0.25, 0.25)
+            if abs(logit) >= 0.02:
+                factors.append(self._factor(
+                    "serve_return_matchup", "Serve vs return matchup",
+                    round(p1_serve, 1), round(p2_serve, 1), logit,
+                ))
+
+        # ── 8c) vs Top-10 rating ─────────────────────────────────────────────
+        # Already fetched but not used as a factor. Apply when opponent's
+        # RTT score is high (proxy for opponent quality).
+        p1_vs10 = f(p1_ratings.get("vs_top10_rating"))
+        p2_vs10 = f(p2_ratings.get("vs_top10_rating"))
+        if p1_vs10 is not None and p2_vs10 is not None:
+            gap = p1_vs10 - p2_vs10
+            logit = _clip(gap * 0.003, -0.20, 0.20)
+            if abs(logit) >= 0.02:
+                factors.append(self._factor(
+                    "vs_top10", "Performance vs top-10 opponents",
+                    round(p1_vs10, 1), round(p2_vs10, 1), logit,
+                ))
+
+        # ── 8d) Consistency rating differential ──────────────────────────────
+        p1_cons = f(p1_ratings.get("consistency_score"))
+        p2_cons = f(p2_ratings.get("consistency_score"))
+        if p1_cons is not None and p2_cons is not None:
+            gap = p1_cons - p2_cons
+            logit = _clip(gap * 0.005, -0.20, 0.20)
+            if abs(logit) >= 0.02:
+                factors.append(self._factor(
+                    "consistency", "Consistency rating",
+                    round(p1_cons, 1), round(p2_cons, 1), logit,
+                ))
+
         # ── 9) Production-data surface win rate (last 24 months) ─────────────
         if surface:
             p1_sr = self._surface_record(p1_id, surface)

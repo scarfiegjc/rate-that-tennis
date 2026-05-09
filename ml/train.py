@@ -107,6 +107,23 @@ CORE_FEATURES = [
 
     # Physical
     'age_diff', 'height_diff', 'hand_enc',
+
+    # Seeding
+    'p1_seeded', 'p2_seeded', 'seeding_adv',
+
+    # RTT point-in-time ratings
+    'p1_rtt', 'p2_rtt', 'rtt_diff',
+    'p1_surf_rtg', 'p2_surf_rtg', 'surf_rtg_diff',
+    'p1_serve_rtg', 'p2_serve_rtg', 'serve_rtg_diff',
+    'p1_return_rtg', 'p2_return_rtg', 'return_rtg_diff',
+    'p1_pressure_rtg', 'p2_pressure_rtg', 'pressure_rtg_diff',
+    'p1_form_rtg', 'p2_form_rtg', 'form_rtg_diff',
+
+    # Fatigue (last match duration)
+    'p1_last_mins', 'p2_last_mins', 'fatigue_diff',
+
+    # Bookmaker market implied probability (live only; fills 0.5 during training)
+    'market_impl_p1',
 ]
 
 
@@ -157,15 +174,14 @@ def make_xgboost() -> Optional[object]:
     if not HAS_XGB:
         return None
     base = xgb.XGBClassifier(
-        n_estimators=400,
+        n_estimators=600,
         max_depth=5,
-        learning_rate=0.05,
+        learning_rate=0.03,
         subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=10,
-        gamma=1,
+        colsample_bytree=0.7,
+        min_child_weight=3,
         reg_alpha=0.1,
-        reg_lambda=1.0,
+        reg_lambda=1.5,
         use_label_encoder=False,
         eval_metric='logloss',
         random_state=42,
@@ -181,15 +197,14 @@ def make_lightgbm() -> Optional[object]:
     if not HAS_LGB:
         return None
     base = lgb.LGBMClassifier(
-        n_estimators=400,
-        max_depth=5,
-        learning_rate=0.05,
+        n_estimators=600,
+        learning_rate=0.03,
         num_leaves=31,
         subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_samples=20,
+        colsample_bytree=0.7,
+        min_child_samples=25,
         reg_alpha=0.1,
-        reg_lambda=1.0,
+        reg_lambda=1.5,
         random_state=42,
         n_jobs=-1,
         verbose=-1,
@@ -362,12 +377,12 @@ class ModelTrainer:
 
         # ── Ensemble (if we have 2+ models)
         if len(fitted) >= 2:
-            # Weight by inverse log-loss (better models get more weight)
+            # Fixed weights: XGBoost=0.45, LightGBM=0.40, Logistic=0.15
+            weight_map = {'xgboost': 0.45, 'lightgbm': 0.40, 'logistic': 0.15}
             model_list = list(fitted.values())
-            lls = [metrics[n]['log_loss'] for n in fitted]
-            inv_ll = [1.0 / ll for ll in lls]
-            total  = sum(inv_ll)
-            weights = [w / total for w in inv_ll]
+            raw_weights = [weight_map.get(n, 0.15) for n in fitted]
+            total = sum(raw_weights)
+            weights = [w / total for w in raw_weights]
 
             ensemble = EnsembleModel(model_list, weights)
             m = evaluate(ensemble, X_te, y_te, f"{label}/ensemble")
