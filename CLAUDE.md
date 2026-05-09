@@ -5,6 +5,45 @@
 
 ---
 
+## ⚠️ CRITICAL — DO NOT REWRITE THESE FILES
+
+**This project has suffered repeated accidental deletion of carefully-built features when AI
+assistants rewrote files instead of editing them surgically. Before touching any file below,
+READ the existing file first, then make the minimum change required.**
+
+### `frontend/src/pages/MatchList.jsx` — EDIT ONLY, NEVER REWRITE
+
+This file has been rebuilt from scratch **five times** after AI sessions destroyed it.
+It contains all of the following — if any are missing after your change, you broke it:
+
+- `FormDots` import and usage in both player rows
+- `detectLevel(match)` function — classifies matches as Slam/Masters, Challenger, ITF, Tour
+- `Tickbox` component — styled checkbox with colour accent
+- `LEVELS` constant — `['Slam / Masters', 'Challenger', 'ITF']`
+- State: `levels` (Set), `upcomingOnly`, `ratedOnly`, `hideUnidentified`
+- `toggleLevel()` function
+- **Level tickboxes** in the filter bar (Slam/Masters, Challenger, ITF)
+- **Visibility tickboxes** in the filter bar (Upcoming only, Rated players only, Hide unidentified)
+- Surface pills, Tour pills, Tournament dropdown, Sort pills
+- Sidebar component with prediction win rate, RTT selections, top win chances
+- StarPick on each player name (non-finished matches only)
+- LiveLozenge and MomentumLozenge components
+
+**Rule:** When adding something to MatchList.jsx, use `Edit` with the smallest possible
+change. Never pass the full file to `Write`. Check the line count before and after — it
+should not decrease.
+
+### `frontend/src/pages/MatchDetail.jsx` — EDIT ONLY, NEVER REWRITE
+
+Contains a 6-tab match engine. All tabs must remain: Overview, Form, H2H, Serve,
+Intelligence, plus the court-image header. Do not replace this file.
+
+### `frontend/src/index.css` — EDIT ONLY, NEVER REWRITE
+
+The entire dark-theme design system. Adding styles = append or targeted edit only.
+
+---
+
 ## What this is
 
 **ratethat.tennis** is a machine-learning-powered tennis analytics and betting intelligence
