@@ -655,6 +655,25 @@ def admin_odds_debug():
     return {"key_set": bool(key), "key_prefix": key[:6] + "…", "tennis_sport_keys": [s["key"] for s in tennis_sports], "odds_fetch": results}
 
 
+@app.get("/admin/odds-matches")
+def admin_odds_matches():
+    """List all matches that currently have odds in the DB."""
+    from api.db import query
+    rows = query("""
+        SELECT bo.match_id, p1.name AS p1, p2.name AS p2,
+               COUNT(DISTINCT bo.bookmaker) AS bookmakers,
+               MAX(bo.fetched_at) AS last_fetched
+        FROM bookmaker_odds bo
+        JOIN matches m ON m.id = bo.match_id
+        JOIN players p1 ON p1.id = m.first_player_id
+        JOIN players p2 ON p2.id = m.second_player_id
+        GROUP BY bo.match_id, p1.name, p2.name
+        ORDER BY last_fetched DESC
+        LIMIT 30
+    """)
+    return {"count": len(rows), "matches": [dict(r) for r in rows]}
+
+
 _BZZOIRO_BIOS_STATUS = {"running": False, "started_at": None, "finished_at": None,
                         "updated": None, "error": None}
 
