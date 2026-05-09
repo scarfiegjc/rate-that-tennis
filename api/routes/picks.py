@@ -303,12 +303,27 @@ def get_active_picks(user=Depends(get_current_user)):
         (user["id"],),
     )
     enriched = []
+    errors = []
     for row in rows:
         try:
             enriched.append(_enrich_pick(dict(row)))
         except Exception as e:
-            log.warning(f"enrich_pick failed for pick {row['id']}: {e}")
-    return {"picks": enriched}
+            log.warning(f"enrich_pick failed for pick {row['id']}: {e}\n{traceback.format_exc()}")
+            errors.append({"pick_id": row["id"], "error": str(e)})
+            # Return raw pick with minimal structure so UI shows something
+            enriched.append({
+                "id": row["id"],
+                "match_id": row["match_id"],
+                "player_id": row["player_id"],
+                "status": row["status"],
+                "confidence_stars": row["confidence_stars"],
+                "_enrich_error": str(e),
+                "match": {"id": row["match_id"]},
+                "picked_player": {"name": "Loading...", "ratings": {}, "form_dots": []},
+                "opponent": {"name": "Loading...", "ratings": {}, "form_dots": []},
+                "h2h": {"wins": 0, "losses": 0, "total": 0},
+            })
+    return {"picks": enriched, "_errors": errors}
 
 
 @router.get("/results")

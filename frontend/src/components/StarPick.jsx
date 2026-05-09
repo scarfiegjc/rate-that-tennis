@@ -119,7 +119,14 @@ export default function StarPick({
       notify()
       onPickChange?.()
     } catch (e) {
-      console.warn('create pick failed', e)
+      // 409 = pick already exists in DB — treat as success, turn star yellow
+      if (e.message && (e.message.includes('already exists') || e.message.includes('409'))) {
+        _pickedSet.add(key)
+        notify()
+        onPickChange?.()
+      } else {
+        console.warn('create pick failed', e)
+      }
     } finally {
       setBusy(false)
     }
