@@ -721,7 +721,7 @@ export default function MatchList() {
   const groups = groupByDate(filtered)
 
   return (
-    <div className="page" style={{ maxWidth: 1280 }}>
+    <div className="page">
 
       {/* Header */}
       <div className="cc-header">
