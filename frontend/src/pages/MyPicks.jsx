@@ -133,211 +133,250 @@ function RatingBar({ label, value }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PickCard({ pick, onRemove }) {
-  const [side, setSide]     = useState('picked')   // 'picked' | 'opponent'
+  const [side, setSide]       = useState('picked')
   const [useOurs, setUseOurs] = useState(true)
+  const [intel, setIntel]     = useState(null)
+
+  const matchId = pick.match?.id
+  useEffect(() => {
+    if (!matchId) return
+    let on = true
+    api.matchIntelligence(matchId)
+      .then(d => { if (on) setIntel(d) })
+      .catch(() => {})
+    return () => { on = false }
+  }, [matchId])
 
   const isLive    = pick.status === 'live'
   const isPending = pick.status === 'pending'
   const surface   = pick.match?.surface || 'Hard'
   const srKey     = surfaceRatingKey(surface)
 
-  const player  = side === 'picked' ? pick.picked_player : pick.opponent
-  const ratings = player?.ratings || {}
-  const formDots = (player?.form_dots || [])
+  const player   = side === 'picked' ? pick.picked_player : pick.opponent
+  const ratings  = player?.ratings || {}
+  const formDots = player?.form_dots || []
 
-  const winProb     = player?.win_prob
-  const edge        = side === 'picked' ? pick.picked_player?.edge : null
+  const winProb       = player?.win_prob
+  const edge          = side === 'picked' ? pick.picked_player?.edge : null
   const surfaceRating = ratings[srKey]
-  const formRating  = ratings.form_score ?? ratings.form_rating
+  const formRating    = ratings.form_score ?? ratings.form_rating
+  const rttScore      = ratings.rtt_score
 
-  const oddsToShow  = useOurs
-    ? pick.our_odds
-    : (pick.best_odds || pick.our_odds)
-  const oddsLabel   = useOurs ? 'RTT odds' : `Best (${pick.best_odds_bookie || 'mkt'})`
+  // Pick intelligence: map player side to p1/p2 using is_first_player flag
+  const i = intel?.intel || {}
+  const intelText = (() => {
+    if (!i.p1_intel && !i.p2_intel) return null
+    if (side === 'picked') return pick.is_first_player ? i.p1_intel : i.p2_intel
+    return pick.is_first_player ? i.p2_intel : i.p1_intel
+  })()
 
-  const cardBg = isLive ? '#FFFBEB' : 'var(--bg-card)'
-  const cardBorder = isLive ? '2px solid #FDE68A' : '1px solid var(--border)'
+  const oddsToShow = useOurs ? pick.our_odds : (pick.best_odds || pick.our_odds)
+  const oddsLabel  = useOurs ? 'RTT odds' : `Best (${pick.best_odds_bookie || 'mkt'})`
+
+  const isWinner = pick.status === 'won'
+  const cardBg     = isLive ? '#FFFBEB' : isWinner ? '#f0fdf4' : 'var(--bg-card)'
+  const cardBorder = isLive ? '2px solid #FDE68A' : isWinner ? '1px solid #86efac' : '1px solid var(--border)'
 
   return (
-    <div style={{
-      background: cardBg,
-      border: cardBorder,
-      borderRadius: 'var(--r-lg)',
-      boxShadow: 'var(--shadow-sm)',
-      overflow: 'hidden',
-      position: 'relative',
-    }}>
-      {/* Card header */}
+    <div style={{ background: cardBg, border: cardBorder, borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+
+      {/* ── Header: tournament + meta ── */}
       <div style={{
         padding: '10px 14px 8px',
         borderBottom: '1px solid var(--border-faint)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8,
       }}>
-        {/* Match info */}
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <Link to={`/match/${pick.match?.id}`} style={{
             fontSize: 12, fontWeight: 600, color: 'var(--text-2)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            display: 'block',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block',
           }}>
             {pick.match?.tournament_name || 'Unknown tournament'}
           </Link>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-            <span style={{
-              fontSize: 10, fontWeight: 600,
-              color: surfaceColor(surface),
-            }}>{surface}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: surfaceColor(surface) }}>{surface}</span>
             <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-              {pick.match?.event_date}
-              {pick.match?.event_time ? ` · ${pick.match.event_time.slice(0,5)}` : ''}
+              {pick.match?.event_date}{pick.match?.event_time ? ` · ${pick.match.event_time.slice(0,5)}` : ''}
             </span>
             {isLive && <InPlayLozenge />}
           </div>
         </div>
-
-        {/* Player toggle + remove star */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {/* Toggle */}
-          <div style={{
-            display: 'flex',
-            background: 'var(--bg-raised)',
-            borderRadius: 20, padding: 2,
-          }}>
-            {['picked', 'opponent'].map(s => {
-              const label = s === 'picked'
-                ? (pick.picked_player?.name?.split(' ').pop() || 'Pick')
-                : (pick.opponent?.name?.split(' ').pop() || 'Opp')
-              return (
-                <button
-                  key={s}
-                  onClick={() => setSide(s)}
-                  style={{
-                    padding: '3px 9px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                    background: side === s ? 'var(--bg-card)' : 'transparent',
-                    color: side === s ? 'var(--text)' : 'var(--text-3)',
-                    boxShadow: side === s ? 'var(--shadow-sm)' : 'none',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Deselect star — only if pending */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {isPending && (
-            <button
-              onClick={() => onRemove(pick.id)}
-              title="Remove pick"
-              style={{
-                fontSize: 20, color: '#F59E0B',
-                textShadow: '0 0 2px rgba(245,158,11,0.4)',
-                lineHeight: 1, padding: '2px 4px',
-              }}
-            >
-              ★
-            </button>
+            <button onClick={() => onRemove(pick.id)} title="Remove pick"
+              style={{ fontSize: 18, color: '#F59E0B', lineHeight: 1, padding: '2px 4px', textShadow: '0 0 2px rgba(245,158,11,0.4)' }}>★</button>
           )}
-          {isLive && (
-            <span title="Can't remove live picks" style={{ fontSize: 18, opacity: 0.4, lineHeight: 1 }}>★</span>
-          )}
+          {isLive && <span style={{ fontSize: 16, opacity: 0.4 }}>★</span>}
         </div>
       </div>
 
-      {/* Live score banner */}
+      {/* Live score */}
       {isLive && pick.match?.live_score && (
-        <div style={{
-          background: '#FEF9C3', padding: '6px 14px',
-          fontSize: 13, fontWeight: 700, textAlign: 'center',
-          letterSpacing: '0.5px', borderBottom: '1px solid #FDE68A',
-        }}>
+        <div style={{ background: '#FEF9C3', padding: '6px 14px', fontSize: 13, fontWeight: 700, textAlign: 'center', borderBottom: '1px solid #FDE68A' }}>
           {pick.match.live_score}
         </div>
       )}
 
-      {/* Main body */}
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* ── Player tabs ── */}
+      <div style={{ display: 'flex', borderBottom: '2px solid var(--border-faint)' }}>
+        {['picked', 'opponent'].map(s => {
+          const p = s === 'picked' ? pick.picked_player : pick.opponent
+          const prob = p?.win_prob
+          return (
+            <button key={s} onClick={() => setSide(s)} style={{
+              flex: 1, padding: '8px 14px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              borderBottom: `2px solid ${side === s ? (s === 'picked' ? 'var(--green)' : 'var(--text-3)') : 'transparent'}`,
+              marginBottom: -2,
+              color: side === s ? 'var(--text)' : 'var(--text-3)',
+              transition: 'all 0.15s',
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>
+                {s === 'picked' ? '★ ' : ''}{p?.name?.split(' ').slice(-1)[0] || (s === 'picked' ? 'My pick' : 'Opponent')}
+              </span>
+              {prob != null && (
+                <span style={{ fontSize: 13, fontWeight: 800, color: s === 'picked' ? 'var(--green)' : 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(prob, 0)}%
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── Body ── */}
+      <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* Player name + win prob */}
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', lineHeight: 1.1 }}>
             {player?.name || '—'}
           </span>
           {winProb != null && (
-            <span style={{
-              fontSize: 22, fontWeight: 800,
-              color: side === 'picked' ? 'var(--green)' : 'var(--text-2)',
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {fmt(winProb, 0)}%
-            </span>
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1, color: side === 'picked' ? 'var(--green)' : 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+                {fmt(winProb, 0)}%
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>win probability</div>
+            </div>
           )}
+        </div>
+
+        {/* Ratings squares */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[
+            { label: 'RTT', value: rttScore },
+            { label: surface.split(' ')[0], value: surfaceRating },
+            { label: 'Form', value: formRating },
+          ].map(({ label, value }) => {
+            const v = Math.round(value || 0)
+            const color = value == null ? 'var(--text-3)' : v >= 70 ? 'var(--green)' : v >= 50 ? 'var(--amber)' : 'var(--red)'
+            return (
+              <div key={label} style={{ flex: 1, background: 'var(--bg-raised)', borderRadius: 'var(--r)', padding: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {value != null ? v : '—'}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         {/* Form dots */}
         {formDots.length > 0 && (
-          <div style={{ display: 'flex', gap: 3 }}>
-            {formDots.slice(0, 8).map((d, i) => (
-              <span key={i} title={d === 'W' ? 'Win' : 'Loss'} style={{
-                display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                background: d === 'W' ? '#166534' : '#E5E0D8',
-                opacity: d === 'W' ? 1 : 0.6,
-              }} />
-            ))}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+              Recent form
+            </div>
+            <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+              {formDots.slice(0, 10).map((d, idx) => (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <span style={{
+                    display: 'inline-block', width: 11, height: 11, borderRadius: '50%',
+                    background: d === 'W' ? '#166534' : '#DC2626',
+                    opacity: d === 'W' ? 1 : 0.75,
+                  }} />
+                  <span style={{ fontSize: 9, fontWeight: 800, color: d === 'W' ? '#166534' : '#DC2626' }}>{d}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Ratings */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <RatingBar label="Form" value={formRating} />
-          <RatingBar label={`${surface} rating`} value={surfaceRating} />
-        </div>
-
-        {/* H2H */}
-        {side === 'picked' && pick.h2h?.total > 0 && (
+        {/* H2H — always shown when viewing picked side */}
+        {side === 'picked' && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '6px 10px',
-            background: 'var(--bg-raised)', borderRadius: 'var(--r)',
-            fontSize: 12,
+            padding: '10px 12px', background: 'var(--bg-raised)', borderRadius: 'var(--r)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <span style={{ color: 'var(--text-3)' }}>H2H</span>
-            <span style={{ fontWeight: 700 }}>
-              {pick.h2h.wins}–{pick.h2h.losses}
-            </span>
-            <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
-              ({pick.h2h.total} meetings)
-            </span>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>
+                Head to head
+              </div>
+              {pick.h2h?.total > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: pick.h2h.wins > pick.h2h.losses ? 'var(--green)' : pick.h2h.wins < pick.h2h.losses ? 'var(--red)' : 'var(--text)' }}>
+                    {pick.h2h.wins}–{pick.h2h.losses}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    from {pick.h2h.total} meeting{pick.h2h.total !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>No previous meetings</span>
+              )}
+            </div>
+            {pick.h2h?.total > 0 && (
+              <div style={{ display: 'flex', gap: 3 }}>
+                {Array.from({ length: Math.min(pick.h2h.total, 6) }, (_, i) => {
+                  const isWin = i < pick.h2h.wins
+                  return (
+                    <span key={i} style={{
+                      display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+                      background: isWin ? '#166534' : '#DC2626', opacity: 0.8,
+                    }} />
+                  )
+                }).reverse()}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Edge + odds row */}
+        {/* Intelligence snippet */}
+        {intelText && (
+          <div style={{
+            padding: '12px 14px',
+            background: 'var(--bg-sunken)',
+            borderLeft: '3px solid var(--green)',
+            borderRadius: '0 var(--r) var(--r) 0',
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>
+              Intelligence
+            </div>
+            <p style={{ fontSize: 12, lineHeight: 1.65, color: 'var(--text-2)', margin: 0 }}>
+              {intelText.length > 320 ? intelText.slice(0, 320) + '…' : intelText}
+            </p>
+          </div>
+        )}
+
+        {/* ── Footer: edge + confidence + odds ── */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          paddingTop: 6, borderTop: '1px solid var(--border-faint)',
+          paddingTop: 10, borderTop: '1px solid var(--border-faint)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {side === 'picked' && <EdgeBadge edge={edge} />}
             <ConfidenceStars n={pick.confidence_stars} small />
           </div>
-
-          {/* Odds toggle + value */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => setUseOurs(v => !v)}
-              style={{
-                fontSize: 10, fontWeight: 600, padding: '3px 7px',
-                borderRadius: 20, border: '1px solid var(--border)',
-                background: 'var(--bg-raised)', color: 'var(--text-3)',
-              }}
-            >
+            <button onClick={() => setUseOurs(v => !v)} style={{
+              fontSize: 10, fontWeight: 600, padding: '3px 7px',
+              borderRadius: 20, border: '1px solid var(--border)',
+              background: 'var(--bg-raised)', color: 'var(--text-3)',
+            }}>
               {oddsLabel}
             </button>
-            <span style={{
-              fontSize: 16, fontWeight: 800,
-              color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-            }}>
+            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
               {oddsToShow ? fmt(oddsToShow, 2) : '—'}
             </span>
           </div>

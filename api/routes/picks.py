@@ -188,6 +188,7 @@ def _enrich_pick(pick: dict) -> dict:
     return {
         **pick,
         "status": status,
+        "is_first_player": is_first,
         "match": {
             "id":              mid,
             "event_date":      str(match.get("event_date", "")),
