@@ -389,7 +389,6 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
               {p1.name || '—'}
             </Link>
             <RttLozenge score={p1.ratings?.rtt_score} />
-            <OddsLozenge odds={p1odds} edge={edge.p1} />
             {!isFinished && p1.player_id && (
               <StarPick
                 matchId={match.match_id}
@@ -401,6 +400,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <OddsLozenge odds={p1odds} edge={edge.p1} />
             {/* W/L dots */}
             {(p1.form_dots || []).length > 0 && (
               <div style={{ display: 'flex', gap: 3 }}>
@@ -443,7 +443,6 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
         {/* Player 2 */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <OddsLozenge odds={p2odds} edge={edge.p2} />
             <RttLozenge score={p2.ratings?.rtt_score} />
             {!isFinished && p2.player_id && (
               <StarPick
@@ -478,6 +477,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
                 ))}
               </div>
             )}
+            <OddsLozenge odds={p2odds} edge={edge.p2} />
           </div>
         </div>
       </div>
@@ -679,11 +679,6 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {generatedAt && (
-        <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', marginBottom: 16 }}>
-          Generated {new Date(generatedAt).toLocaleString()} · {i.model || 'AI'}
-        </div>
-      )}
 
       {/* Bet recommendations — kept below the journalistic block */}
       {bets.length > 0 && (
@@ -713,142 +708,162 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {/* Bookmaker odds panel */}
+      {/* Bookmaker odds — split panel */}
       {(() => {
-        const mkt     = match.market || {}
-        const allBk   = mkt.all_bookmakers || []
-        const hasOdds = allBk.length > 0 || mkt.odds_first_player || mkt.odds_second_player
-        const p1name  = p1.name?.split(' ').pop() || 'P1'
-        const p2name  = p2.name?.split(' ').pop() || 'P2'
-        const p1prob  = pred.prob_first_player
-        const p2prob  = pred.prob_second_player
+        const mkt    = match.market || {}
+        const allBk  = mkt.all_bookmakers || []
+        const p1prob = pred.prob_first_player
+        const p2prob = pred.prob_second_player
 
-        const calcEdge = (odds, prob) => {
-          if (!odds || !prob) return null
-          return Math.round((prob - (1 / odds)) * 1000) / 1000
-        }
-        const edgeColor = (e) => e == null ? 'var(--text-3)' : e >= 0.05 ? 'var(--green)' : e <= -0.05 ? '#ef4444' : 'var(--amber)'
+        const calcEdge  = (odds, prob) => (!odds || !prob) ? null : Math.round((prob - (1 / odds)) * 1000) / 1000
         const fmtEdge   = (e) => e == null ? null : (e >= 0 ? '+' : '') + (e * 100).toFixed(1) + '%'
 
-        // Best odds = first bookmaker in list (API sorts best p1 first) or fall back to mkt
-        const bestBk    = allBk[0] || null
-        const bestP1    = bestBk?.p1_odds ?? mkt.odds_first_player
-        const bestP2    = bestBk?.p2_odds ?? mkt.odds_second_player
-        const bestName  = bestBk?.bookmaker ?? mkt.bookmaker
-        const e1        = calcEdge(bestP1, p1prob)
-        const e2        = calcEdge(bestP2, p2prob)
+        // Best odds per player across all bookmakers
+        const bestP1bk = allBk.reduce((best, bk) => (!bk.p1_odds ? best : (!best || bk.p1_odds > best.p1_odds ? bk : best)), null)
+        const bestP2bk = allBk.reduce((best, bk) => (!bk.p2_odds ? best : (!best || bk.p2_odds > best.p2_odds ? bk : best)), null)
+        const bestP1   = bestP1bk?.p1_odds ?? mkt.odds_first_player
+        const bestP2   = bestP2bk?.p2_odds ?? mkt.odds_second_player
+        const bk1name  = bestP1bk?.bookmaker ?? mkt.bookmaker
+        const bk2name  = bestP2bk?.bookmaker ?? mkt.bookmaker
+        const e1       = calcEdge(bestP1, p1prob)
+        const e2       = calcEdge(bestP2, p2prob)
+        const hasOdds  = bestP1 || bestP2
 
-        // Which side has positive edge (value)?
-        const valueEdge = (e1 != null && e1 > 0.01) ? { name: p1name, val: e1 }
-                        : (e2 != null && e2 > 0.01) ? { name: p2name, val: e2 }
-                        : null
+        const EdgePill = ({ edge }) => {
+          if (edge == null) return null
+          const positive = edge > 0
+          const neutral  = Math.abs(edge) < 0.01
+          const bg  = neutral ? 'var(--bg-sunken)' : positive ? 'rgba(22,101,52,0.12)' : 'rgba(220,38,38,0.10)'
+          const col = neutral ? 'var(--text-3)'    : positive ? '#15803d'               : '#dc2626'
+          const bdr = neutral ? 'var(--border)'    : positive ? 'rgba(22,101,52,0.3)'   : 'rgba(220,38,38,0.3)'
+          return (
+            <span style={{
+              display: 'inline-block',
+              background: bg, color: col, border: `1px solid ${bdr}`,
+              borderRadius: 20, padding: '3px 10px',
+              fontSize: 13, fontWeight: 800, letterSpacing: '-0.2px',
+            }}>
+              RTT Edge {fmtEdge(edge)}
+            </span>
+          )
+        }
 
-        // Build the summary sentence
-        const sentence = (() => {
-          if (!hasOdds) return null
-          const parts = []
-          if (bestP1) parts.push(`${p1name} ${bestP1.toFixed(2)}`)
-          if (bestP2) parts.push(`${p2name} ${bestP2.toFixed(2)}`)
-          const oddsStr = parts.join(' · ')
-          return oddsStr
-        })()
+        const OddsPill = ({ odds }) => odds == null ? <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-3)' }}>—</span> : (
+          <span style={{
+            display: 'inline-block',
+            background: 'var(--bg-card)', border: '2px solid var(--border)',
+            borderRadius: 10, padding: '6px 16px',
+            fontSize: 24, fontWeight: 900, color: 'var(--text)',
+            fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px',
+          }}>
+            {odds.toFixed(2)}
+          </span>
+        )
 
         return (
           <div style={{
             marginTop: 20,
-            background: 'var(--bg-raised)',
             border: '1px solid var(--border)',
             borderRadius: 'var(--r-lg)',
             overflow: 'hidden',
           }}>
-            {/* Summary row */}
+            {/* Header */}
             <div style={{
-              padding: '12px 16px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-              flexWrap: 'wrap',
+              padding: '8px 16px',
+              background: 'var(--bg-raised)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: '0.7px', color: 'var(--text-3)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)', flexShrink: 0 }}>
-                  Bookmaker odds
-                </span>
-                {hasOdds && bestName && (
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>· {bestName}</span>
-                )}
-                {sentence && (
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sentence}</span>
-                )}
-                {!hasOdds && (
-                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                    Not yet available — fetched at 07:00 and 19:00 UTC
-                  </span>
-                )}
-              </div>
-              {/* RTT Edge badge */}
-              {valueEdge ? (
-                <span style={{
-                  fontSize: 12, fontWeight: 800, color: edgeColor(valueEdge.val),
-                  background: 'rgba(99,153,34,0.10)', border: '1px solid rgba(99,153,34,0.25)',
-                  borderRadius: 20, padding: '3px 10px', flexShrink: 0,
-                }}>
-                  RTT Edge: {valueEdge.name} {fmtEdge(valueEdge.val)}
-                </span>
-              ) : (e1 != null || e2 != null) ? (
-                <span style={{ fontSize: 11, color: 'var(--text-3)', flexShrink: 0 }}>
-                  RTT Edge: {fmtEdge(e1) ?? '—'} / {fmtEdge(e2) ?? '—'}
-                </span>
-              ) : null}
+              Best bookmaker odds
             </div>
 
-            {/* Collapsible bookmaker dropdown */}
+            {hasOdds ? (
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr',
+                background: 'var(--bg-card)',
+              }}>
+                {/* P1 — left aligned */}
+                <div style={{
+                  padding: '20px 24px',
+                  borderRight: '1px solid var(--border)',
+                  display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start',
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    {p1.name}
+                  </div>
+                  <OddsPill odds={bestP1} />
+                  {bk1name && (
+                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk1name}</span>
+                  )}
+                  <EdgePill edge={e1} />
+                </div>
+
+                {/* P2 — right aligned */}
+                <div style={{
+                  padding: '20px 24px',
+                  display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end',
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    {p2.name}
+                  </div>
+                  <OddsPill odds={bestP2} />
+                  {bk2name && (
+                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk2name}</span>
+                  )}
+                  <EdgePill edge={e2} />
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '20px 24px', fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic', textAlign: 'center' }}>
+                Odds not yet available — fetched automatically at 07:00 and 19:00 UTC
+              </div>
+            )}
+
+            {/* Collapsible all-bookmakers dropdown */}
             {allBk.length > 1 && (
               <details style={{ borderTop: '1px solid var(--border-faint)' }}>
                 <summary style={{
                   padding: '8px 16px', fontSize: 11, color: 'var(--text-3)', cursor: 'pointer',
-                  listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6,
-                  userSelect: 'none',
+                  listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none',
                 }}>
                   <span style={{ fontSize: 9 }}>▸</span>
                   All bookmakers ({allBk.length})
                 </summary>
                 <div style={{ borderTop: '1px solid var(--border-faint)' }}>
-                  {/* Column headers */}
                   <div style={{
                     display: 'grid', gridTemplateColumns: '1fr auto auto auto',
-                    padding: '6px 16px',
-                    background: 'var(--bg-sunken)',
+                    padding: '6px 16px', background: 'var(--bg-sunken)',
                     fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
                     letterSpacing: '0.5px', color: 'var(--text-3)', gap: 16,
                   }}>
                     <span>Bookmaker</span>
-                    <span style={{ minWidth: 48, textAlign: 'right' }}>{p1name}</span>
-                    <span style={{ minWidth: 48, textAlign: 'right' }}>{p2name}</span>
-                    <span style={{ minWidth: 60, textAlign: 'right' }}>RTT Edge</span>
+                    <span style={{ minWidth: 44, textAlign: 'right' }}>{p1.name?.split(' ').pop()}</span>
+                    <span style={{ minWidth: 44, textAlign: 'right' }}>{p2.name?.split(' ').pop()}</span>
+                    <span style={{ minWidth: 70, textAlign: 'right' }}>RTT Edge</span>
                   </div>
                   {allBk.map((bk, idx) => {
                     const re1 = calcEdge(bk.p1_odds, p1prob)
                     const re2 = calcEdge(bk.p2_odds, p2prob)
-                    const rowEdge = (re1 != null && (re2 == null || re1 >= re2)) ? { name: p1name, val: re1 }
-                                  : re2 != null ? { name: p2name, val: re2 } : null
+                    const topEdge = re1 != null && (re2 == null || Math.abs(re1) >= Math.abs(re2))
+                      ? { name: p1.name?.split(' ').pop(), val: re1 }
+                      : re2 != null ? { name: p2.name?.split(' ').pop(), val: re2 } : null
+                    const edgeCol = topEdge ? (topEdge.val > 0.01 ? '#15803d' : topEdge.val < -0.01 ? '#dc2626' : 'var(--text-3)') : 'var(--text-3)'
                     return (
                       <div key={bk.bookmaker} style={{
                         display: 'grid', gridTemplateColumns: '1fr auto auto auto',
                         padding: '8px 16px', gap: 16,
-                        borderTop: '1px solid var(--border-faint)',
-                        alignItems: 'center',
-                        background: idx === 0 ? 'rgba(99,153,34,0.05)' : 'transparent',
+                        borderTop: '1px solid var(--border-faint)', alignItems: 'center',
+                        background: idx === 0 ? 'rgba(99,153,34,0.04)' : 'transparent',
                       }}>
-                        <span style={{ fontSize: 12, color: idx === 0 ? 'var(--text)' : 'var(--text-2)', fontWeight: idx === 0 ? 600 : 400 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: idx === 0 ? 600 : 400 }}>
                           {idx === 0 && <span style={{ fontSize: 9, background: 'var(--green)', color: '#fff', padding: '1px 5px', borderRadius: 4, marginRight: 5, fontWeight: 700 }}>BEST</span>}
                           {bk.bookmaker}
                         </span>
-                        <span style={{ minWidth: 48, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {bk.p1_odds?.toFixed(2) ?? '—'}
-                        </span>
-                        <span style={{ minWidth: 48, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {bk.p2_odds?.toFixed(2) ?? '—'}
-                        </span>
-                        <span style={{ minWidth: 60, textAlign: 'right', fontSize: 11, fontWeight: 600, color: rowEdge ? edgeColor(rowEdge.val) : 'var(--text-3)' }}>
-                          {rowEdge ? `${rowEdge.name} ${fmtEdge(rowEdge.val)}` : '—'}
+                        <span style={{ minWidth: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{bk.p1_odds?.toFixed(2) ?? '—'}</span>
+                        <span style={{ minWidth: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{bk.p2_odds?.toFixed(2) ?? '—'}</span>
+                        <span style={{ minWidth: 70, textAlign: 'right', fontSize: 11, fontWeight: 700, color: edgeCol }}>
+                          {topEdge ? `${topEdge.name} ${fmtEdge(topEdge.val)}` : '—'}
                         </span>
                       </div>
                     )
@@ -858,7 +873,7 @@ function SectionIntelligence({ match }) {
             )}
 
             <div style={{ padding: '6px 16px', borderTop: '1px solid var(--border-faint)', fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
-              RTT Edge = model probability minus implied odds · For reference only · Please gamble responsibly
+              RTT Edge = our model probability minus bookmaker implied probability · For reference only · Please gamble responsibly
             </div>
           </div>
         )
