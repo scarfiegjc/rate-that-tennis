@@ -36,6 +36,7 @@ COPY pipeline/settle_predictions.py  ./settle_predictions.py
 COPY pipeline/matchstat_ingest.py    ./matchstat_ingest.py
 COPY pipeline/affiliate_config.py    ./affiliate_config.py
 COPY pipeline/merge_duplicate_players.py ./merge_duplicate_players.py
+COPY pipeline/odds.py                ./odds.py
 
 # ML package (rtt_predictor + systems engine — both lightweight)
 COPY ml/__init__.py                  ./ml/__init__.py
