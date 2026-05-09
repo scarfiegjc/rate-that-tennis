@@ -12,6 +12,7 @@ import SystemsList from './pages/SystemsList.jsx'
 import SystemDetail from './pages/SystemDetail.jsx'
 import PlayerDatabase from './pages/PlayerDatabase.jsx'
 import MyPicks from './pages/MyPicks.jsx'
+import StatConflicts from './pages/StatConflicts.jsx'
 import rttLogo from './assets/rtt_logo.png'
 
 function Header() {
@@ -24,6 +25,8 @@ function Header() {
     p === '/' ? loc.pathname === '/' : loc.pathname.startsWith(p)
   )
 
+  const matchesActive = is('/') && !is('/predictions','/systems','/in-play','/players','/player','/my-picks','/stats')
+
   return (
     <>
       <header className="app-header">
@@ -32,7 +35,7 @@ function Header() {
             <img src={rttLogo} alt="ratethat.tennis" className="app-logo-img" />
           </Link>
           <nav className="app-nav">
-            <Link to="/" className={`nav-link ${is('/') && !is('/predictions','/systems','/in-play','/players','/player','/my-picks') ? 'active' : ''}`}>
+            <Link to="/" className={`nav-link ${matchesActive ? 'active' : ''}`}>
               Matches
             </Link>
             <Link to="/in-play" className={`nav-link ${is('/in-play') ? 'active' : ''}`}>
@@ -47,6 +50,9 @@ function Header() {
             </Link>
             <Link to="/players" className={`nav-link ${is('/players') && !loc.pathname.startsWith('/player/') ? 'active' : ''}`}>
               Players
+            </Link>
+            <Link to="/stats" className={`nav-link ${is('/stats') ? 'active' : ''}`}>
+              Stats
             </Link>
             <Link to="/my-picks" className={`nav-link ${is('/my-picks') ? 'active' : ''}`}
                   style={{ display:'flex', alignItems:'center', gap:5 }}>
@@ -132,6 +138,7 @@ function AppRoutes() {
         <Route path="/systems"                element={<SystemsList />} />
         <Route path="/systems/:code"          element={<SystemDetail />} />
         <Route path="/my-picks"               element={<MyPicks />} />
+        <Route path="/stats"                  element={<StatConflicts />} />
       </Routes>
     </>
   )

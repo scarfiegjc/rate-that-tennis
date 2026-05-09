@@ -84,6 +84,9 @@ export const api = {
     get(`/api/v1/systems/${code}/picks?status=${status}&limit=${limit}`),
   systemStats:       (code)      => get(`/api/v1/systems/${code}/stats`),
 
+  // Statistics
+  statConflicts:     (daysAhead = 2) => get(`/api/v1/stats/conflicts?days_ahead=${daysAhead}`),
+
   // My Picks
   picksActive:       ()          => get('/api/v1/picks/active'),
   picksResults:      ()          => get('/api/v1/picks/results'),

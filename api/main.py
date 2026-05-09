@@ -20,6 +20,7 @@ from api.routes.predictions import router as predictions_router
 from api.routes.odds import router as odds_router
 from api.routes.auth import router as auth_router
 from api.routes.picks import router as picks_router
+from api.routes.stats import router as stats_router
 
 # Optional routes — these files exist in dev but may not be in this image yet.
 # Wrap each so a missing module doesn't crash the whole API on startup.
@@ -79,6 +80,7 @@ app.include_router(predictions_router, prefix="/api/v1")
 app.include_router(odds_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(picks_router, prefix="/api/v1")
+app.include_router(stats_router, prefix="/api/v1")
 if lab_router:         app.include_router(lab_router,         prefix="/api/v1")
 if health_router:      app.include_router(health_router,      prefix="/api/v1")
 if diagnose_router:    app.include_router(diagnose_router,    prefix="/api/v1")
