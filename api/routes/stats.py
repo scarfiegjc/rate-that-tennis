@@ -207,7 +207,7 @@ def get_stat_conflicts(days_ahead: int = 2, min_conflicts: int = 1):
             m.tournament_round,
             m.event_status,
             t.name  AS tournament_name,
-            t.level AS tourney_level,
+            et.name AS event_type_name,
             s.name  AS surface_name,
             p1.name AS p1_name,
             p1.country_code AS p1_country,
@@ -248,6 +248,7 @@ def get_stat_conflicts(days_ahead: int = 2, min_conflicts: int = 1):
             bo2.implied_prob AS impl_p2
         FROM matches m
         LEFT JOIN tournaments t   ON t.id = m.tournament_id
+        LEFT JOIN event_types et  ON et.id = m.event_type_id
         LEFT JOIN surfaces s      ON s.id = t.surface_id
         LEFT JOIN players p1      ON p1.id = m.first_player_id
         LEFT JOIN players p2      ON p2.id = m.second_player_id
@@ -310,10 +311,13 @@ def get_stat_conflicts(days_ahead: int = 2, min_conflicts: int = 1):
             "vs_top10_rating":   m.get("p2_vstop10"),
         }
 
+        event_type = (m.get("event_type_name") or "").lower()
+        is_big_match = any(x in event_type for x in ("grand slam", "masters", "atp 1000", "wta 1000"))
+
         conflicts = _find_conflicts(
             p1_ratings, p2_ratings,
             surface,
-            m.get("tourney_level") or "",
+            "Masters" if is_big_match else "",
         )
 
         if len(conflicts) < min_conflicts:
