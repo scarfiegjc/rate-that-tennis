@@ -23,6 +23,7 @@ import logging
 import pickle
 import warnings
 import argparse
+import unicodedata
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -97,7 +98,7 @@ DB_URL = (
 
 MODELS_DIR  = Path(__file__).parent / "models"
 RESULTS_DIR = Path(__file__).parent / "results"
-MODEL_VERSION = "v1"
+MODEL_VERSION = "v2-namekey-elo-blend"
 
 # ─────────────────────────────────────────────
 # FACTOR DESCRIPTIONS
@@ -194,12 +195,60 @@ class LivePredictor:
     to give the richest possible feature set.
     """
 
-    def __init__(self, db_url: str = DB_URL):
+    def __init__(self, db_url: str = DB_URL, neutralise_rtt: bool = True):
         self.db_url = db_url
         self._models: dict[str, object] = {}
         self._elo_engine = None
         self._player_window = None
         self._h2h_tracker = None
+        # See predict_match() — when True, RTT-derived features are forced to
+        # the population median (50). Defaults to True until ml.ratings has
+        # been rerun against the corrected match data.
+        self.neutralise_rtt = neutralise_rtt
+        # Player keying: normalised-name → synthetic int id used internally
+        # by Elo / PlayerWindow / H2HTracker. This unifies Sackmann historical
+        # data (where winner_id is often NULL but winner_name is reliable) with
+        # live production data (where first_player_id is in a different keyspace
+        # from sa_matches.winner_id). Production player_id is still used for
+        # RTT-rating lookups, since player_ratings is keyed off it.
+        self._name_to_pid: dict[str, int] = {}
+        self._next_synth_id: int = 1
+        self._prod_id_to_name: dict[int, str] = {}
+
+    @staticmethod
+    def _norm_name(name: Optional[str]) -> str:
+        """Lower-case, strip diacritics, collapse whitespace.
+        Matches the convention in pipeline/merge_duplicate_players.py so the
+        production-side merge and the predictor's keying agree."""
+        if not name:
+            return ""
+        s = str(name).strip().lower()
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        return " ".join(s.split())
+
+    def _key(self, name: Optional[str]) -> Optional[int]:
+        """Translate a player name to a stable synthetic int id.
+        Returns None if name is empty (caller should skip the row)."""
+        norm = self._norm_name(name)
+        if not norm:
+            return None
+        pid = self._name_to_pid.get(norm)
+        if pid is None:
+            pid = self._next_synth_id
+            self._name_to_pid[norm] = pid
+            self._next_synth_id += 1
+        return pid
+
+    def _key_for_prod_id(self, prod_id: Optional[int]) -> Optional[int]:
+        """Translate a production players.id → synthetic Elo/window/H2H key
+        via the cached prod_id → full_name map populated in load_player_history."""
+        if prod_id is None:
+            return None
+        name = self._prod_id_to_name.get(int(prod_id))
+        if not name:
+            return None
+        return self._key(name)
 
     def load_models(self) -> "LivePredictor":
         """
@@ -248,25 +297,54 @@ class LivePredictor:
                 return self._models[key], key
         raise RuntimeError("No models loaded")
 
-    def load_player_history(self) -> "LivePredictor":
+    def load_player_history(self, years_back: Optional[int] = None) -> "LivePredictor":
         """
         Load historical match data (both sa_matches and live matches) to
         build Elo ratings and rolling stats for all active players.
+
+        years_back: optional cutoff — only load matches from the last N years.
+                    None = full history. Setting this (e.g. 8) speeds up the
+                    Elo fit by 4–5× with negligible loss for current-form
+                    predictions, since pre-cutoff matches mostly contribute
+                    to long-retired players' ratings.
         """
         from ml.elo import EloEngine, SURFACE_MAP
         from ml.features import PlayerWindow, H2HTracker, safe_pct
+        from datetime import date as _date, timedelta as _td
 
-        log.info("Building player history from sa_matches + live matches ...")
+        if years_back:
+            cutoff_date = _date.today() - _td(days=int(years_back) * 365)
+            log.info(f"Building player history from sa_matches + live matches "
+                     f"(cutoff={cutoff_date}) ...")
+        else:
+            cutoff_date = None
+            log.info("Building player history from sa_matches + live matches ...")
 
         conn = psycopg2.connect(self.db_url)
         conn.cursor_factory = psycopg2.extras.RealDictCursor
 
         try:
-            # Load from sa_matches (historical)
+            # Cache prod_id → full_name so predict_match() can translate live
+            # player_ids into the same name-based key space.
             with conn.cursor() as cur:
                 cur.execute("""
+                    SELECT id, COALESCE(NULLIF(TRIM(full_name), ''), name) AS name
+                    FROM players
+                    WHERE COALESCE(NULLIF(TRIM(full_name), ''), name) IS NOT NULL
+                """)
+                for r in cur.fetchall():
+                    self._prod_id_to_name[int(r['id'])] = r['name']
+
+            # Load from sa_matches (historical) — key by NAME, not id, because
+            # ~77k recent rows have NULL winner_id even though winner_name is
+            # populated, and Sackmann ID space ≠ production players.id space.
+            sa_cutoff_clause = "AND tourney_date >= %s" if cutoff_date else ""
+            sa_params = (cutoff_date,) if cutoff_date else ()
+            with conn.cursor() as cur:
+                cur.execute(f"""
                     SELECT
-                        winner_id, loser_id, tourney_date, surface, tourney_level,
+                        winner_name, loser_name,
+                        tourney_date, surface, tourney_level,
                         tour, match_num, score,
                         w_svpt, w_1st_won, w_2nd_won, w_sv_gms, w_ace, w_df,
                         w_bp_saved, w_bp_faced, w_bp_save_pct,
@@ -274,18 +352,21 @@ class LivePredictor:
                         l_bp_saved, l_bp_faced, l_bp_save_pct
                     FROM sa_matches
                     WHERE tourney_date IS NOT NULL
-                      AND winner_id IS NOT NULL
-                      AND loser_id IS NOT NULL
+                      AND winner_name IS NOT NULL AND TRIM(winner_name) <> ''
+                      AND loser_name  IS NOT NULL AND TRIM(loser_name)  <> ''
+                      {sa_cutoff_clause}
                     ORDER BY tourney_date, match_num
-                """)
+                """, sa_params)
                 sa_rows = cur.fetchall()
 
-            # Load from live matches table (join to get real surface)
+            # Load from live matches table — also key by NAME (joined from
+            # players.full_name) so the live history merges into the same
+            # player buckets as the Sackmann history.
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
-                        m.first_player_id  AS winner_id,
-                        m.second_player_id AS loser_id,
+                        COALESCE(NULLIF(TRIM(p1.full_name), ''), p1.name) AS winner_name,
+                        COALESCE(NULLIF(TRIM(p2.full_name), ''), p2.name) AS loser_name,
                         m.event_date       AS tourney_date,
                         s.name             AS surface,
                         NULL               AS tourney_level,
@@ -295,14 +376,16 @@ class LivePredictor:
                     FROM matches m
                     LEFT JOIN tournaments t ON t.id = m.tournament_id
                     LEFT JOIN surfaces s    ON s.id = t.surface_id
+                    JOIN players p1 ON p1.id = m.first_player_id
+                    JOIN players p2 ON p2.id = m.second_player_id
                     WHERE m.event_status = 'Finished'
                       AND m.winner = 'First Player'
-                      AND m.first_player_id IS NOT NULL
-                      AND m.second_player_id IS NOT NULL
+                      AND COALESCE(NULLIF(TRIM(p1.full_name), ''), p1.name) IS NOT NULL
+                      AND COALESCE(NULLIF(TRIM(p2.full_name), ''), p2.name) IS NOT NULL
                     UNION ALL
                     SELECT
-                        m.second_player_id AS winner_id,
-                        m.first_player_id  AS loser_id,
+                        COALESCE(NULLIF(TRIM(p2.full_name), ''), p2.name) AS winner_name,
+                        COALESCE(NULLIF(TRIM(p1.full_name), ''), p1.name) AS loser_name,
                         m.event_date       AS tourney_date,
                         s.name             AS surface,
                         NULL               AS tourney_level,
@@ -312,10 +395,12 @@ class LivePredictor:
                     FROM matches m
                     LEFT JOIN tournaments t ON t.id = m.tournament_id
                     LEFT JOIN surfaces s    ON s.id = t.surface_id
+                    JOIN players p1 ON p1.id = m.first_player_id
+                    JOIN players p2 ON p2.id = m.second_player_id
                     WHERE m.event_status = 'Finished'
                       AND m.winner = 'Second Player'
-                      AND m.first_player_id IS NOT NULL
-                      AND m.second_player_id IS NOT NULL
+                      AND COALESCE(NULLIF(TRIM(p1.full_name), ''), p1.name) IS NOT NULL
+                      AND COALESCE(NULLIF(TRIM(p2.full_name), ''), p2.name) IS NOT NULL
                     ORDER BY tourney_date
                 """)
                 live_rows = cur.fetchall()
@@ -329,7 +414,16 @@ class LivePredictor:
         df_hist['tourney_date'] = pd.to_datetime(df_hist['tourney_date'])
         df_hist = df_hist.sort_values('tourney_date')
 
-        log.info(f"  {len(df_hist):,} historical matches loaded")
+        # Translate names → synthetic int ids consumed by EloEngine /
+        # PlayerWindow / H2HTracker (all of which `int()` their player_id arg).
+        df_hist['winner_id'] = df_hist['winner_name'].map(self._key)
+        df_hist['loser_id']  = df_hist['loser_name'].map(self._key)
+        df_hist = df_hist.dropna(subset=['winner_id', 'loser_id'])
+        df_hist['winner_id'] = df_hist['winner_id'].astype(int)
+        df_hist['loser_id']  = df_hist['loser_id'].astype(int)
+
+        log.info(f"  {len(df_hist):,} historical matches loaded "
+                 f"({len(self._name_to_pid):,} unique players)")
 
         # Fit Elo
         self._elo_engine = EloEngine()
@@ -375,18 +469,23 @@ class LivePredictor:
                 row.get('w_bp_faced')
             ) if row.get('w_bp_faced') else None
 
+            # bp_save_pct comes back from PostgreSQL as decimal.Decimal which
+            # breaks np.mean() in PlayerWindow.get_stats() — coerce to float.
+            def _f(v):
+                return float(v) if v is not None else None
+
             self._player_window.update(w_id, won=True,  surface=surface, match_date=date,
-                                       svpt_won=w_svpt_won, ret_won=w_ret_won,
-                                       ace_rate=safe_pct(row.get('w_ace'), row.get('w_sv_gms')),
-                                       df_rate=safe_pct(row.get('w_df'), row.get('w_sv_gms')),
-                                       bp_save=row.get('w_bp_save_pct'),
-                                       bp_conv=w_bp_conv)
+                                       svpt_won=_f(w_svpt_won), ret_won=_f(w_ret_won),
+                                       ace_rate=_f(safe_pct(row.get('w_ace'), row.get('w_sv_gms'))),
+                                       df_rate=_f(safe_pct(row.get('w_df'), row.get('w_sv_gms'))),
+                                       bp_save=_f(row.get('w_bp_save_pct')),
+                                       bp_conv=_f(w_bp_conv))
             self._player_window.update(l_id, won=False, surface=surface, match_date=date,
-                                       svpt_won=l_svpt_won, ret_won=l_ret_won,
-                                       ace_rate=safe_pct(row.get('l_ace'), row.get('l_sv_gms')),
-                                       df_rate=safe_pct(row.get('l_df'), row.get('l_sv_gms')),
-                                       bp_save=row.get('l_bp_save_pct'),
-                                       bp_conv=l_bp_conv)
+                                       svpt_won=_f(l_svpt_won), ret_won=_f(l_ret_won),
+                                       ace_rate=_f(safe_pct(row.get('l_ace'), row.get('l_sv_gms'))),
+                                       df_rate=_f(safe_pct(row.get('l_df'), row.get('l_sv_gms'))),
+                                       bp_save=_f(row.get('l_bp_save_pct')),
+                                       bp_conv=_f(l_bp_conv))
             self._h2h_tracker.update(w_id, l_id, surface)
 
         log.info("  Player history built")
@@ -422,9 +521,16 @@ class LivePredictor:
 
         surf_key = SURFACE_MAP.get(surface or '', None)
 
+        # ── Translate the production player ids to the name-based synthetic
+        # keys used by the Elo / window / H2H trackers (see load_player_history).
+        # Falls back to the raw id if the player has no full_name on file —
+        # they will still get whatever live-match Elo accrued under that key.
+        p1_skey = self._key_for_prod_id(p1_id) or int(p1_id)
+        p2_skey = self._key_for_prod_id(p2_id) or int(p2_id)
+
         # ── Elo features
-        p1_elo = self._elo_engine.player_elo(p1_id)
-        p2_elo = self._elo_engine.player_elo(p2_id)
+        p1_elo = self._elo_engine.player_elo(p1_skey)
+        p2_elo = self._elo_engine.player_elo(p2_skey)
         p1_elo_overall = p1_elo['overall']
         p2_elo_overall = p2_elo['overall']
         p1_surf_elo = p1_elo.get(f'elo_{surf_key}') if surf_key else None
@@ -435,15 +541,21 @@ class LivePredictor:
         surf_elo_win_prob = expected_score(p1_surf_elo, p2_surf_elo) if surf_key else None
 
         # ── Rolling stats
-        p1_w = self._player_window.get_stats(p1_id, surface, [10, 20, 50])
-        p2_w = self._player_window.get_stats(p2_id, surface, [10, 20, 50])
-        p1_days = self._player_window.days_since_last(p1_id, match_date)
-        p2_days = self._player_window.days_since_last(p2_id, match_date)
+        p1_w = self._player_window.get_stats(p1_skey, surface, [10, 20, 50])
+        p2_w = self._player_window.get_stats(p2_skey, surface, [10, 20, 50])
+        p1_days = self._player_window.days_since_last(p1_skey, match_date)
+        p2_days = self._player_window.days_since_last(p2_skey, match_date)
 
         # ── H2H
-        h2h_f = self._h2h_tracker.get(p1_id, p2_id, surface)
+        h2h_f = self._h2h_tracker.get(p1_skey, p2_skey, surface)
 
-        # ── RTT ratings from player_ratings table
+        # ── RTT ratings from player_ratings table.
+        # When `neutralise_rtt` is set, every RTT-derived feature is forced
+        # to the population median (50). Use this when the player_ratings
+        # table is known to be stale (e.g. recently after a duplicate-merge
+        # or a name-keying change to the predictor) — it stops the model
+        # being misled by miscomputed scores. The flag defaults to True
+        # until ml.ratings has been rerun on the corrected match data.
         def _fetch_player_ratings(pid: int) -> dict:
             try:
                 _conn = psycopg2.connect(self.db_url)
@@ -460,36 +572,50 @@ class LivePredictor:
             except Exception:
                 return {}
 
-        p1_rtg = _fetch_player_ratings(p1_id)
-        p2_rtg = _fetch_player_ratings(p2_id)
-
-        def _rtg(ratings: dict, key: str) -> float:
-            v = ratings.get(key)
-            return float(v) if v is not None else 50.0
-
-        # Determine surface column for RTT
-        surf_lower = (surface or '').lower()
-        if 'clay' in surf_lower:
-            surf_rtt_col = 'clay_rating'
-        elif 'grass' in surf_lower:
-            surf_rtt_col = 'grass_rating'
-        elif 'indoor' in surf_lower or 'carpet' in surf_lower:
-            surf_rtt_col = 'indoor_rating'
+        if getattr(self, 'neutralise_rtt', True):
+            p1_rtt_val = p2_rtt_val = 50.0
+            p1_surf_rtg_val = p2_surf_rtg_val = 50.0
+            p1_serve_rtg = p2_serve_rtg = 50.0
+            p1_return_rtg = p2_return_rtg = 50.0
+            p1_pressure_rtg = p2_pressure_rtg = 50.0
+            p1_form_rtg = p2_form_rtg = 50.0
         else:
-            surf_rtt_col = 'hard_rating'
+            # Use the prefetched cache when predict_upcoming has populated it.
+            cached_rtt = getattr(self, '_rtt_by_pid', None)
+            if cached_rtt is not None:
+                p1_rtg = cached_rtt.get(p1_id, {})
+                p2_rtg = cached_rtt.get(p2_id, {})
+            else:
+                p1_rtg = _fetch_player_ratings(p1_id)
+                p2_rtg = _fetch_player_ratings(p2_id)
 
-        p1_rtt_val      = _rtg(p1_rtg, 'rtt_score')
-        p2_rtt_val      = _rtg(p2_rtg, 'rtt_score')
-        p1_surf_rtg_val = _rtg(p1_rtg, surf_rtt_col)
-        p2_surf_rtg_val = _rtg(p2_rtg, surf_rtt_col)
-        p1_serve_rtg    = _rtg(p1_rtg, 'serve_rating')
-        p2_serve_rtg    = _rtg(p2_rtg, 'serve_rating')
-        p1_return_rtg   = _rtg(p1_rtg, 'return_rating')
-        p2_return_rtg   = _rtg(p2_rtg, 'return_rating')
-        p1_pressure_rtg = _rtg(p1_rtg, 'pressure_rating')
-        p2_pressure_rtg = _rtg(p2_rtg, 'pressure_rating')
-        p1_form_rtg     = _rtg(p1_rtg, 'form_score')
-        p2_form_rtg     = _rtg(p2_rtg, 'form_score')
+            def _rtg(ratings: dict, key: str) -> float:
+                v = ratings.get(key)
+                return float(v) if v is not None else 50.0
+
+            # Determine surface column for RTT
+            surf_lower = (surface or '').lower()
+            if 'clay' in surf_lower:
+                surf_rtt_col = 'clay_rating'
+            elif 'grass' in surf_lower:
+                surf_rtt_col = 'grass_rating'
+            elif 'indoor' in surf_lower or 'carpet' in surf_lower:
+                surf_rtt_col = 'indoor_rating'
+            else:
+                surf_rtt_col = 'hard_rating'
+
+            p1_rtt_val      = _rtg(p1_rtg, 'rtt_score')
+            p2_rtt_val      = _rtg(p2_rtg, 'rtt_score')
+            p1_surf_rtg_val = _rtg(p1_rtg, surf_rtt_col)
+            p2_surf_rtg_val = _rtg(p2_rtg, surf_rtt_col)
+            p1_serve_rtg    = _rtg(p1_rtg, 'serve_rating')
+            p2_serve_rtg    = _rtg(p2_rtg, 'serve_rating')
+            p1_return_rtg   = _rtg(p1_rtg, 'return_rating')
+            p2_return_rtg   = _rtg(p2_rtg, 'return_rating')
+            p1_pressure_rtg = _rtg(p1_rtg, 'pressure_rating')
+            p2_pressure_rtg = _rtg(p2_rtg, 'pressure_rating')
+            p1_form_rtg     = _rtg(p1_rtg, 'form_score')
+            p2_form_rtg     = _rtg(p2_rtg, 'form_score')
 
         def diff(a, b):
             if a is None or b is None:
@@ -559,34 +685,53 @@ class LivePredictor:
         }
 
         # ── Bookmaker implied probability (high-value signal)
-        try:
-            _bk_conn = psycopg2.connect(self.db_url)
-            _bk_conn.cursor_factory = psycopg2.extras.RealDictCursor
-            with _bk_conn.cursor() as cur:
-                cur.execute("""
-                    SELECT odd_first_player, odd_second_player
-                    FROM bookmaker_odds
-                    WHERE match_id = %s
-                    ORDER BY fetched_at DESC
-                    LIMIT 1
-                """, (match_id,))
-                odds_row = cur.fetchone()
-            _bk_conn.close()
-            if odds_row and odds_row['odd_first_player'] and odds_row['odd_second_player']:
-                o1 = float(odds_row['odd_first_player'])
-                o2 = float(odds_row['odd_second_player'])
-                # Convert decimal odds to implied probability (no-vig)
-                raw1 = 1.0 / o1
-                raw2 = 1.0 / o2
-                total = raw1 + raw2
-                features['market_impl_p1'] = raw1 / total if total > 0 else 0.5
-            else:
-                features['market_impl_p1'] = 0.5
-        except Exception:
+        # bookmaker_odds schema is one row per (match_id, bookmaker, player_ref)
+        # where player_ref ∈ {'first_player','second_player'}. Average the
+        # implied_prob across books per side, then de-vig.
+        # When predict_upcoming has prefetched odds in bulk (self._odds_by_mid)
+        # use the cache; otherwise fall back to a per-match SQL hit.
+        ip = None
+        cached = getattr(self, '_odds_by_mid', None)
+        if cached is not None:
+            ip = cached.get(match_id)
+        if ip is None:
+            try:
+                _bk_conn = psycopg2.connect(self.db_url)
+                _bk_conn.cursor_factory = psycopg2.extras.RealDictCursor
+                with _bk_conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT player_ref, AVG(implied_prob) AS p
+                        FROM bookmaker_odds
+                        WHERE match_id = %s
+                        GROUP BY player_ref
+                    """, (match_id,))
+                    odds_rows = cur.fetchall()
+                _bk_conn.close()
+                ip = {r['player_ref']: float(r['p']) for r in odds_rows if r['p'] is not None}
+            except Exception:
+                ip = {}
+        ip1 = ip.get('first_player') if ip else None
+        ip2 = ip.get('second_player') if ip else None
+        if ip1 is not None and ip2 is not None and (ip1 + ip2) > 0:
+            features['market_impl_p1'] = ip1 / (ip1 + ip2)
+        else:
             features['market_impl_p1'] = 0.5
 
-        # ── Model prediction (fall back to Elo if no model loaded)
-        model_key = 'elo_fallback'
+        # ── Predict — surface-Elo-led with optional model refinement.
+        #
+        # The trained logistic / XGBoost / LightGBM models in ml/models/ were
+        # fit on features built BEFORE the name-keyed Elo fix (when modern top
+        # players had NULL winner_id in sa_matches and were skipped). Their
+        # response surface is miscalibrated for the corrected Elo distribution
+        # and inverts on some moderate-favourite matches (Rublev/Tiafoe-style).
+        #
+        # Until the models are retrained on corrected features, take the
+        # surface-Elo expected score as the primary signal and only blend in
+        # the model output when it agrees with Elo on direction.
+        elo_prob = surf_elo_win_prob if surf_elo_win_prob is not None else elo_win_prob
+        elo_prob = max(0.02, min(0.98, elo_prob))   # clamp away from 0/1
+        model_prob: Optional[float] = None
+        model_key = 'elo'
         if self._models:
             try:
                 model, model_key = self._get_model(surface)
@@ -595,14 +740,20 @@ class LivePredictor:
                     from ml.train import CORE_FEATURES
                     feat_names = CORE_FEATURES
                 X = pd.DataFrame([{k: features.get(k) for k in feat_names}])
-                prob_p1 = float(model.predict_proba(X)[0, 1])
+                model_prob = float(model.predict_proba(X)[0, 1])
             except Exception as e:
                 log.debug(f"Model prediction failed ({e}), falling back to Elo")
-                prob_p1 = surf_elo_win_prob if surf_elo_win_prob is not None else elo_win_prob
-                model_key = 'elo_fallback'
+                model_prob = None
+                model_key = 'elo'
+
+        # Blend only when model and Elo agree on direction. On disagreement,
+        # trust Elo — it's grounded in the corrected name-keyed history.
+        if model_prob is not None and (model_prob - 0.5) * (elo_prob - 0.5) > 0:
+            prob_p1 = 0.7 * elo_prob + 0.3 * model_prob
         else:
-            # No models loaded — use surface Elo as best available estimate
-            prob_p1 = surf_elo_win_prob if surf_elo_win_prob is not None else elo_win_prob
+            prob_p1 = elo_prob
+            if model_prob is not None:
+                model_key = f"{model_key}+elo_override"
         prob_p2 = 1.0 - prob_p1
 
         # ── Confidence tier
@@ -647,10 +798,17 @@ class LivePredictor:
         }
 
     def write_prediction(self, prediction: dict):
-        """Write a single prediction to the model_predictions table."""
-        conn = psycopg2.connect(self.db_url)
+        """Write a single prediction to the model_predictions table.
+
+        Uses a persistent self._write_conn when available (set by
+        predict_upcoming) so the per-match loop avoids reconnecting to the
+        DB on every write — that round-trip dominated the loop time."""
+        wconn = getattr(self, '_write_conn', None)
+        owns_conn = wconn is None
+        if wconn is None:
+            wconn = psycopg2.connect(self.db_url)
         try:
-            with conn.cursor() as cur:
+            with wconn.cursor() as cur:
                 # Sanitize key_factors: NaN/Inf → None (otherwise jsonb rejects them)
                 clean_factors = _sanitize_json(prediction['key_factors'])
                 cur.execute("""
@@ -673,9 +831,15 @@ class LivePredictor:
                     json.dumps(clean_factors),
                     prediction['model_version'],
                 ))
-            conn.commit()
+            # Only auto-commit when this call owns the connection. When
+            # predict_upcoming holds a persistent self._write_conn, defer
+            # the commit to the end of the loop to avoid a per-match
+            # network round-trip.
+            if owns_conn:
+                wconn.commit()
         finally:
-            conn.close()
+            if owns_conn:
+                wconn.close()
 
     def _lookup_rank(self, player_id: int, conn) -> tuple[Optional[int], Optional[int]]:
         """
@@ -769,16 +933,36 @@ class LivePredictor:
         except Exception:
             return None
 
-    def predict_upcoming(self, days_ahead: int = 1):
-        """Predict all upcoming matches in the production matches table."""
+    def predict_upcoming(self, days_ahead: int = 1, skip_existing: bool = False):
+        """Predict all upcoming matches in the production matches table.
+
+        Pre-fetches player_ratings, bookmaker_odds, and ranks in bulk so the
+        per-match prediction loop avoids per-row DB round-trips. This was
+        the main bottleneck preventing the predictor from running inside
+        short shell windows.
+
+        skip_existing: when True, skip matches that already have a prediction
+                       at the current MODEL_VERSION (idempotent re-runs)."""
         conn = psycopg2.connect(self.db_url)
         conn.cursor_factory = psycopg2.extras.RealDictCursor
         today = date.today()
         cutoff = today + timedelta(days=days_ahead)
 
+        skip_clause = ""
+        if skip_existing:
+            skip_clause = """
+                AND NOT EXISTS (
+                    SELECT 1 FROM model_predictions mp
+                    WHERE mp.match_id = m.id AND mp.model_version = %s
+                )
+            """
+
         try:
             with conn.cursor() as cur:
-                cur.execute("""
+                params = [str(today), str(cutoff)]
+                if skip_existing:
+                    params.append(MODEL_VERSION)
+                cur.execute(f"""
                     SELECT
                         m.id AS match_id,
                         m.first_player_id,
@@ -808,16 +992,93 @@ class LivePredictor:
                       AND m.first_player_id IS NOT NULL
                       AND m.second_player_id IS NOT NULL
                       AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
-                """, (str(today), str(cutoff)))
+                      {skip_clause}
+                """, tuple(params))
                 upcoming = cur.fetchall()
+
+            # ── Bulk prefetches keyed by player_id / match_id
+            pids = set()
+            mids = []
+            for m in upcoming:
+                pids.add(m['first_player_id']); pids.add(m['second_player_id'])
+                mids.append(m['match_id'])
+            pids = [p for p in pids if p is not None]
+
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT match_id, player_ref, AVG(implied_prob) AS p
+                    FROM bookmaker_odds
+                    WHERE match_id = ANY(%s)
+                    GROUP BY match_id, player_ref
+                """, (mids,))
+                odds_by_mid: dict[int, dict[str, float]] = {}
+                for r in cur.fetchall():
+                    d = odds_by_mid.setdefault(r['match_id'], {})
+                    d[r['player_ref']] = float(r['p']) if r['p'] is not None else None
+
+            # RTT prefetch — only consulted when neutralise_rtt is False.
+            rtt_by_pid: dict[int, dict] = {}
+            if not getattr(self, 'neutralise_rtt', True) and pids:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT player_id, rtt_score, clay_rating, hard_rating,
+                               grass_rating, indoor_rating, serve_rating,
+                               return_rating, pressure_rating, form_score
+                        FROM player_ratings
+                        WHERE player_id = ANY(%s)
+                    """, (pids,))
+                    rtt_by_pid = {r['player_id']: dict(r) for r in cur.fetchall()}
+
+            # Pre-build rank lookups for all players in a single query
+            rank_by_pid: dict[int, tuple] = {}
+            with conn.cursor() as cur:
+                cur.execute("""
+                    WITH names AS (
+                        SELECT p.id AS pid,
+                               COALESCE(NULLIF(TRIM(p.full_name), ''), p.name) AS name
+                        FROM players p WHERE p.id = ANY(%s)
+                    ),
+                    tokens AS (
+                        SELECT pid, name,
+                               SPLIT_PART(REPLACE(name, '.', ''), ' ',
+                                   array_length(string_to_array(REPLACE(name,'.',''),' '),1)
+                               ) AS last_token
+                        FROM names
+                    ),
+                    ranks AS (
+                        SELECT
+                            t.pid,
+                            MIN(sm.winner_rank) FILTER (WHERE sm.winner_id = sp.player_id) AS rank_w,
+                            MIN(sm.loser_rank)  FILTER (WHERE sm.loser_id  = sp.player_id) AS rank_l,
+                            MAX(sm.winner_rank_points) FILTER (WHERE sm.winner_id = sp.player_id) AS pts_w,
+                            MAX(sm.loser_rank_points)  FILTER (WHERE sm.loser_id  = sp.player_id) AS pts_l
+                        FROM tokens t
+                        JOIN sa_players sp ON sp.full_name ILIKE '%%' || t.last_token || '%%'
+                        JOIN sa_matches sm ON (sm.winner_id = sp.player_id OR sm.loser_id = sp.player_id)
+                        WHERE LENGTH(t.last_token) >= 3
+                          AND sm.tourney_date >= CURRENT_DATE - INTERVAL '2 years'
+                        GROUP BY t.pid
+                    )
+                    SELECT pid, COALESCE(rank_w, rank_l) AS rank, COALESCE(pts_w, pts_l) AS rank_pts
+                    FROM ranks
+                """, (pids,))
+                for r in cur.fetchall():
+                    rank_by_pid[r['pid']] = (r['rank'], r['rank_pts'])
         finally:
             conn.close()
 
-        log.info(f"Predicting {len(upcoming)} upcoming matches ...")
+        log.info(f"Predicting {len(upcoming)} upcoming matches "
+                 f"(prefetched odds for {len(odds_by_mid)} matches, "
+                 f"ranks for {len(rank_by_pid)} players)...")
         predicted = 0
 
-        # Open a persistent connection for rank lookups (avoids per-match reconnect)
-        conn_ranks = psycopg2.connect(self.db_url)
+        # Stash prefetches on self so predict_match can use them via the
+        # _odds_by_mid / _rtt_by_pid hooks (predict_match falls back to
+        # SQL if a cache isn't populated).
+        self._odds_by_mid = odds_by_mid
+        self._rtt_by_pid = rtt_by_pid if rtt_by_pid else None
+        # Persistent write connection — eliminates per-match reconnect.
+        self._write_conn = psycopg2.connect(self.db_url)
 
         for match in upcoming:
             try:
@@ -825,12 +1086,8 @@ class LivePredictor:
                     match.get('tour_category'), match.get('type_name')
                 )
                 event_date = match.get('event_date')
-                p1_rank, p1_rank_pts = self._lookup_rank(
-                    match['first_player_id'], conn_ranks
-                )
-                p2_rank, p2_rank_pts = self._lookup_rank(
-                    match['second_player_id'], conn_ranks
-                )
+                p1_rank, p1_rank_pts = rank_by_pid.get(match['first_player_id'], (None, None))
+                p2_rank, p2_rank_pts = rank_by_pid.get(match['second_player_id'], (None, None))
                 pred = self.predict_match(
                     match_id     = match['match_id'],
                     p1_id        = match['first_player_id'],
@@ -852,11 +1109,17 @@ class LivePredictor:
                     match_date   = event_date,
                 )
                 self.write_prediction(pred)
+                self._write_conn.commit()  # commit per row so partial runs persist
                 predicted += 1
             except Exception as e:
                 log.warning(f"  Failed match {match['match_id']}: {e}")
 
-        conn_ranks.close()
+        try:
+            self._write_conn.commit()
+            self._write_conn.close()
+        except Exception:
+            pass
+        self._write_conn = None
         log.info(f"  Predicted {predicted}/{len(upcoming)} matches")
 
 
@@ -869,14 +1132,34 @@ def main():
     parser.add_argument('--match-id',  type=int)
     parser.add_argument('--today',     action='store_true')
     parser.add_argument('--upcoming',  type=int, default=1)
+    parser.add_argument('--years-back', type=int, default=8,
+                        help='Limit Elo training data to last N years (default 8). '
+                             'None / 0 = full history.')
+    parser.add_argument('--use-rtt', action='store_true',
+                        help='Read player_ratings instead of neutralising RTT '
+                             'features. Only enable after running ml.ratings on '
+                             'the corrected match data.')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Skip matches that already have a prediction at '
+                             'the current MODEL_VERSION. Useful for resuming '
+                             'a long run.')
+    parser.add_argument('--no-model', action='store_true',
+                        help='Skip loading the trained logistic / xgboost / '
+                             'lightgbm models — predictions use pure surface '
+                             'Elo. Roughly 10× faster, and the trained models '
+                             'are currently miscalibrated for the corrected '
+                             'name-keyed feature distribution anyway.')
     args = parser.parse_args()
 
-    predictor = LivePredictor()
-    predictor.load_models()
-    predictor.load_player_history()
+    predictor = LivePredictor(neutralise_rtt=not args.use_rtt)
+    if not args.no_model:
+        predictor.load_models()
+    yb = args.years_back if args.years_back and args.years_back > 0 else None
+    predictor.load_player_history(years_back=yb)
 
     if args.today or args.upcoming:
-        predictor.predict_upcoming(days_ahead=args.upcoming)
+        predictor.predict_upcoming(days_ahead=args.upcoming,
+                                   skip_existing=args.skip_existing)
 
 
 if __name__ == '__main__':

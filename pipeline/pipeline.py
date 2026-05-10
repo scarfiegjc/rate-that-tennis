@@ -177,13 +177,33 @@ def upsert_event_type(cur, api_key: int, type_name: str) -> int:
 
 
 def upsert_tournament(cur, api_key: int, name: str, event_type_id: int, surface_id: int) -> int:
+    """
+    Upsert a tournament keyed on api_key.
+
+    Surface preservation: api-tennis.com doesn't ship a surface field on
+    tournament objects, so the daily_fixtures and livescore paths always
+    pass surface_id = "Unknown". The real surface is filled in afterwards
+    by pipeline.surface_backfill (Madrid → Clay, Wimbledon → Grass, etc.).
+    Without the CASE below, every livescore tick (every 5 minutes) would
+    overwrite the backfilled value back to "Unknown". So: only overwrite
+    surface_id when the incoming value is NOT Unknown — i.e. the caller
+    actually has new information.
+    """
     cur.execute("""
         INSERT INTO tournaments (api_key, name, event_type_id, surface_id)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (api_key) DO UPDATE SET
             name          = EXCLUDED.name,
             event_type_id = EXCLUDED.event_type_id,
-            surface_id    = EXCLUDED.surface_id,
+            surface_id    = CASE
+                              WHEN EXCLUDED.surface_id IS NULL
+                                THEN tournaments.surface_id
+                              WHEN (SELECT name FROM surfaces WHERE id = EXCLUDED.surface_id) = 'Unknown'
+                                   AND tournaments.surface_id IS NOT NULL
+                                   AND (SELECT name FROM surfaces WHERE id = tournaments.surface_id) <> 'Unknown'
+                                THEN tournaments.surface_id
+                              ELSE EXCLUDED.surface_id
+                            END,
             updated_at    = NOW()
         RETURNING id
     """, (api_key, name.strip(), event_type_id, surface_id))

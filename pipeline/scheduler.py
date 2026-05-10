@@ -155,16 +155,21 @@ def run_predictions():
     except Exception as e:
         log.error(f"hand splits failed: {e}")
 
-    # 2) RTT predictions
+    # 2) Predictions — use the name-keyed Elo predictor (ml.predict).
+    # The previous additive-logit RttPredictor (model_version='rtt-v2'/'rtt-v3')
+    # was retired in May 2026: it produced 50/50 outputs whenever the rtt_score
+    # population was clustered (e.g. after a percentile-based rating refresh),
+    # because rtt_gap → 0 and sigmoid(0) = 0.5. The replacement reads Elo from
+    # the corrected sa_matches.winner_name + live history and blends in the
+    # trained logistic only when it agrees with Elo direction.
     try:
-        from ml.rtt_predictor import RttPredictor
-        rp = RttPredictor()
-        try:
-            rp.predict_upcoming(days_ahead=7)
-        finally:
-            rp.close()
+        from ml.predict import LivePredictor
+        predictor = LivePredictor(neutralise_rtt=False)
+        predictor.load_models()
+        predictor.load_player_history(years_back=8)
+        predictor.predict_upcoming(days_ahead=7)
     except Exception as e:
-        log.error(f"rtt predictions failed: {e}")
+        log.error(f"predictions failed: {e}")
         import traceback
         log.error(traceback.format_exc())
 
