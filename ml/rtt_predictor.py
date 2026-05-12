@@ -1075,7 +1075,19 @@ class RttPredictor:
                     p2_momentum        = EXCLUDED.p2_momentum,
                     total_logit        = EXCLUDED.total_logit,
                     predicted_winner   = EXCLUDED.predicted_winner,
-                    predicted_at       = NOW()
+                    predicted_at       = NOW(),
+                    -- Invalidate stored intel / result tracking on flip.
+                    -- Otherwise the prose narrates the old pick and
+                    -- is_correct stays settled against the wrong side.
+                    p1_intel = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.p1_intel END,
+                    p2_intel = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.p2_intel END,
+                    match_preview = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.match_preview END,
+                    did_you_know = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.did_you_know END,
+                    confidence_line = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.confidence_line END,
+                    intel_generated_at = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.intel_generated_at END,
+                    actual_winner = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.actual_winner END,
+                    is_correct = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.is_correct END,
+                    settled_at = CASE WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner THEN NULL ELSE model_predictions.settled_at END
                 """,
                 (
                     pred.match_id,

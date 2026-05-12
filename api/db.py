@@ -74,10 +74,23 @@ def get_conn():
     The connection is committed on success and rolled back on exception, so
     callers don't need to worry about transaction state. The connection is
     always returned to the pool — even on errors — so we can't leak them.
+
+    Safety: if the connection is in 'idle in transaction' state when it comes
+    back to us (e.g. from a previous exception that bypassed rollback), we
+    force-rollback it before use so it can't hold locks silently.
     """
     pool = _get_pool()
     conn = pool.getconn()
     try:
+        # Guard: if this connection was left in mid-transaction state by a
+        # previous user (the pool doesn't reset connections between checkouts),
+        # roll it back before we run anything. An idle-in-transaction connection
+        # holds row-share locks that block ALTER TABLE → queue cascade → site down.
+        if conn.status != psycopg2.extensions.STATUS_READY:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         yield conn
         conn.commit()
     except Exception:

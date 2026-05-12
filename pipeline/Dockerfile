@@ -1,4 +1,4 @@
-# ratethat.tennis — Pipeline service
+# ratethat.tennis — Pipeline service — rebuild forced 2026-05-12i
 # Railway deployment:
 #   * Service Root Directory: / (repo root) — IMPORTANT: must be `/`, not `pipeline/`,
 #     because the pipeline now also imports ml/ for the RTT predictor.
@@ -32,13 +32,17 @@ COPY pipeline/fill_ratings.py        ./fill_ratings.py
 COPY pipeline/schema_additions.sql      ./schema_additions.sql
 COPY pipeline/predictions_schema.sql    ./predictions_schema.sql
 
-# ML package (proper package import — `from ml.rtt_predictor import …`).
-# We deliberately copy ONLY the lightweight modules the scheduler needs at
-# runtime — they use psycopg2 + stdlib only. Heavy modules (ratings.py uses
-# scipy; train/backtest use xgboost+lightgbm) stay out so the pipeline image
-# remains slim and boots fast.
+# ML package — all modules needed by the scheduler:
+#   rtt_predictor + systems (legacy / systems engine)
+#   predict + elo + features = LivePredictor (Elo-led match predictions)
+# Heavy train/backtest/ratings modules (scipy, xgboost, lightgbm) are
+# intentionally excluded — load_models() falls back to Elo cleanly when
+# no .pkl files are present, so the image stays slim.
 COPY ml/__init__.py                  ./ml/__init__.py
 COPY ml/rtt_predictor.py             ./ml/rtt_predictor.py
 COPY ml/systems.py                   ./ml/systems.py
+COPY ml/predict.py                   ./ml/predict.py
+COPY ml/elo.py                       ./ml/elo.py
+COPY ml/features.py                  ./ml/features.py
 
 CMD ["python", "scheduler.py"]
