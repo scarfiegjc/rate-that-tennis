@@ -9,15 +9,25 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import FormDots from '../components/FormDots.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
+import courtClayImg  from '../assets/court-clay.jpg'
+import courtGrassImg from '../assets/court-grass.jpg'
+import courtHardImg  from '../assets/court-hard.jpg'
 
 const REFRESH_MS = 20_000
+
+function courtBg(surface) {
+  const s = (surface || '').toLowerCase()
+  if (s.includes('clay'))  return courtClayImg
+  if (s.includes('grass')) return courtGrassImg
+  if (s.includes('hard'))  return courtHardImg
+  return null
+}
 
 function isLiveStatus(status) {
   return /in play|live|set \d|game/i.test(status || '')
 }
 
 function LiveScoreDisplay({ match }) {
-  // Prefer aggregated set scores; fall back to game_result / final_result.
   const sets = match.set_scores || match.final_result || ''
   const game = match.game_result || ''
   const status = match.event_status || ''
@@ -57,7 +67,12 @@ function InPlayRow({ match }) {
 
       {/* Player 1 */}
       <div className="match-player-cell">
-        <div className="match-player-name">{p1.name || '—'}</div>
+        <div className="match-player-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {p1.name || '—'}
+          {p1prob != null && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>{p1prob}%</span>
+          )}
+        </div>
         <div className="match-player-sub">
           <span className="match-player-country">{p1.country_code || ''}</span>
           <RttLozenge score={p1.rtt_score} hideIfMissing />
@@ -65,12 +80,17 @@ function InPlayRow({ match }) {
         </div>
       </div>
 
-      {/* Centre — live score is the headline */}
+      {/* Centre — live score */}
       <LiveScoreDisplay match={match} />
 
       {/* Player 2 */}
       <div className="match-player-cell right">
-        <div className="match-player-name">{p2.name || '—'}</div>
+        <div className="match-player-name" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+          {p2prob != null && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue)' }}>{p2prob}%</span>
+          )}
+          {p2.name || '—'}
+        </div>
         <div className="match-player-sub">
           <FormDots dots={p2.form_dots || []} max={10} />
           <RttLozenge score={p2.rtt_score} hideIfMissing />
@@ -78,15 +98,8 @@ function InPlayRow({ match }) {
         </div>
       </div>
 
-      {/* Right meta — model probabilities + tournament */}
+      {/* Right meta — just the live badge */}
       <div className="match-row-meta">
-        {p1prob != null && (
-          <span className="match-prob-pair" title="Model prediction">
-            <span className={p1prob >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p1prob}%</span>
-            <span style={{ color: 'var(--border)', margin: '0 3px' }}>·</span>
-            <span className={p2prob >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p2prob}%</span>
-          </span>
-        )}
         <span className="live-badge amber">
           <span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE
         </span>
@@ -95,10 +108,15 @@ function InPlayRow({ match }) {
   )
 }
 
-function TournamentGroup({ name, matches }) {
+function TournamentGroup({ name, surface, matches }) {
+  const bg = courtBg(surface)
+  const cls = (surface || '').toLowerCase()
   return (
     <div className="tournament-block" style={{ marginBottom: 12 }}>
-      <div className="tournament-header" style={{ cursor: 'default' }}>
+      <div
+        className={`tournament-header ${cls}`}
+        style={bg ? { backgroundImage: `url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center', cursor: 'default' } : { cursor: 'default' }}
+      >
         <span className="tournament-name">{name || 'Tournament'}</span>
         <div className="tournament-info">
           <span className="count-badge live">
@@ -140,12 +158,12 @@ export default function InPlayPage() {
   if (loading) return <div className="page"><div className="loading">Loading live matches…</div></div>
   if (error)   return <div className="page"><div className="error">{error}</div></div>
 
-  // Group by tournament
+  // Group by tournament, carrying surface from first match in group
   const byTournament = {}
   for (const m of matches) {
     const key = m.tournament || 'Other'
-    if (!byTournament[key]) byTournament[key] = []
-    byTournament[key].push(m)
+    if (!byTournament[key]) byTournament[key] = { surface: m.surface, matches: [] }
+    byTournament[key].matches.push(m)
   }
   const tournamentList = Object.entries(byTournament).sort(([a], [b]) => a.localeCompare(b))
 
@@ -178,8 +196,8 @@ export default function InPlayPage() {
           </div>
         </div>
       ) : (
-        tournamentList.map(([name, ms]) => (
-          <TournamentGroup key={name} name={name} matches={ms} />
+        tournamentList.map(([name, { surface, matches: ms }]) => (
+          <TournamentGroup key={name} name={name} surface={surface} matches={ms} />
         ))
       )}
     </div>

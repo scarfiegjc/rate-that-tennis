@@ -77,9 +77,11 @@ export const api = {
       ? get(`/api/v1/predictions/history?date=${date}`)
       : get(`/api/v1/predictions/history?days=${days}`),
   predictionsStats:  ()          => get(`/api/v1/predictions/stats`),
+  predictionsResults: ()         => get(`/api/v1/predictions/results`),
 
   // Systems
   systems:           ()          => get(`/api/v1/systems`),
+  systemsDashboard:  ()          => get(`/api/v1/systems/dashboard`),
   systemPicks:       (code, { status = 'all', limit = 50 } = {}) =>
     get(`/api/v1/systems/${code}/picks?status=${status}&limit=${limit}`),
   systemStats:       (code)      => get(`/api/v1/systems/${code}/stats`),

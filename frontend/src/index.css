@@ -559,13 +559,7 @@ h1, .cc-title {
   flex-wrap: wrap;
 }
 
-.cc-title {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  color: var(--text);
-  margin: 0;
-}
+/* .cc-title inherits from h1, .cc-title rule above — no override needed */
 
 .cc-subtitle {
   font-size: 13px;
@@ -614,6 +608,7 @@ h1, .cc-title {
   width: 100%;
   text-align: left;
   transition: background 0.1s;
+  font-family: var(--font);
 }
 
 .tournament-header:hover { background: var(--bg-raised); }
@@ -732,8 +727,8 @@ h1, .cc-title {
 
 .match-row:last-child { border-bottom: none; }
 .match-row:hover { background: var(--bg-raised); }
-.match-row--live { background: var(--red-bg); }
-.match-row--live:hover { background: #fde8e8; }
+.match-row--live { background: #fffbeb; }
+.match-row--live:hover { background: #fef3c7; }
 
 .match-row-time {
   font-size: 12px;
@@ -1531,6 +1526,25 @@ h1, .cc-title {
 
 .form-input:focus {
   border-color: var(--text-3);
+}
+
+/* ── Match Centre layout ─────────────────────────────── */
+
+.matchcenter-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+.matchcenter-main {
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .matchcenter-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Scrollbar ───────────────────────────────────────── */
