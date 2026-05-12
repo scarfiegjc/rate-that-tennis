@@ -101,6 +101,565 @@ def health():
         return {"status": "error", "db": str(e)}
 
 
+# NOTE: An /admin/run-intel endpoint and a Step 5b in _daily_worker were
+# briefly wired up here. Removed — intel/deep-reasoning prose is generated
+# manually via Cowork sessions (analogous to the ratethat.dog and
+# ratethat.horse "deep-reasoning" skills), not by an automated cron
+# calling the Anthropic API. The /admin/intel/queue + /admin/intel/store
+# endpoints in api/routes/predictions.py are kept — those are the
+# read/write hooks the Cowork session uses.
+
+
+@app.get("/admin/fix-stuck-live")
+def admin_fix_stuck_live(dry_run: bool = True):
+    """
+    Some matches stay flagged is_live=TRUE in the matches table after the
+    pipeline has already written event_status='Finished' + winner. This
+    confuses the frontend, which shows a pulsing IN PLAY indicator on a
+    match that's already over. One-shot: clear is_live for any Finished
+    match. Going forward the API also defends in the serialization layer.
+    """
+    from api.db import query, get_conn
+    stuck = query(
+        """
+        SELECT id, event_date, event_status, winner
+        FROM matches
+        WHERE is_live = TRUE
+          AND event_status IN ('Finished','Retired','Walk Over','Walkover')
+        ORDER BY event_date DESC
+        LIMIT 1000
+        """
+    )
+    if dry_run:
+        return {"dry_run": True, "stuck_count": len(stuck), "sample": stuck[:10]}
+
+    if not stuck:
+        return {"dry_run": False, "cleared": 0}
+
+    ids = [r["id"] for r in stuck]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE matches SET is_live = FALSE WHERE id = ANY(%s)", (ids,))
+    return {"dry_run": False, "cleared": len(ids)}
+
+
+@app.get("/admin/fix-stale-intel")
+def admin_fix_stale_intel(dry_run: bool = True):
+    """
+    One-shot repair: clear stored intel on any match where the intel was
+    generated BEFORE the most recent predicted_at (i.e. probabilities
+    changed after the prose was written). Going forward, predictor
+    upserts auto-invalidate, but this catches the historical backlog.
+    """
+    from api.db import query, get_conn
+    candidates = query(
+        """
+        SELECT match_id, intel_generated_at, predicted_at,
+               LENGTH(COALESCE(match_preview, '')) AS preview_len,
+               predicted_winner
+        FROM model_predictions
+        WHERE intel_generated_at IS NOT NULL
+          AND predicted_at IS NOT NULL
+          AND intel_generated_at < predicted_at
+          AND (match_preview IS NOT NULL OR p1_intel IS NOT NULL OR p2_intel IS NOT NULL)
+        ORDER BY predicted_at DESC
+        LIMIT 500
+        """,
+    )
+    if dry_run or not candidates:
+        return {"dry_run": dry_run, "stale_count": len(candidates),
+                "sample": candidates[:10]}
+
+    updated = 0
+    for c in candidates:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE model_predictions
+                    SET p1_intel           = NULL,
+                        p2_intel           = NULL,
+                        match_preview      = NULL,
+                        did_you_know       = NULL,
+                        confidence_line    = NULL,
+                        intel_generated_at = NULL
+                    WHERE match_id = %s
+                    """,
+                    (c["match_id"],),
+                )
+        updated += 1
+    return {"dry_run": False, "cleared": updated, "candidates": len(candidates)}
+
+
+@app.get("/admin/fix-stale-picks")
+def admin_fix_stale_picks(dry_run: bool = True):
+    """
+    One-shot repair: recompute predicted_winner + is_correct on every
+    model_predictions row where the stored predicted_winner doesn't match
+    the higher-probability side. These rows came from a predictor-version
+    swap that updated probabilities without touching predicted_winner.
+    """
+    from api.db import query, get_conn
+    candidates = query(
+        """
+        SELECT match_id, prob_first_player, prob_second_player,
+               predicted_winner, actual_winner, is_correct
+        FROM model_predictions
+        WHERE prob_first_player IS NOT NULL
+          AND prob_second_player IS NOT NULL
+          AND predicted_winner IS NOT NULL
+          AND (
+                (predicted_winner = 'first_player'  AND prob_first_player  < prob_second_player)
+             OR (predicted_winner = 'second_player' AND prob_second_player < prob_first_player)
+          )
+        """,
+    )
+    if dry_run or not candidates:
+        return {"dry_run": dry_run, "stale_count": len(candidates),
+                "sample": candidates[:10]}
+
+    updated = 0
+    for c in candidates:
+        p1 = float(c["prob_first_player"]); p2 = float(c["prob_second_player"])
+        correct_pick = "first_player" if p1 >= p2 else "second_player"
+        new_is_correct = None
+        if c.get("actual_winner") is not None:
+            new_is_correct = (correct_pick == c["actual_winner"])
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE model_predictions
+                    SET predicted_winner = %s,
+                        is_correct       = COALESCE(%s, is_correct)
+                    WHERE match_id = %s
+                    """,
+                    (correct_pick, new_is_correct, c["match_id"]),
+                )
+        updated += 1
+    return {"dry_run": False, "fixed": updated, "candidates": len(candidates)}
+
+
+@app.get("/admin/debug-prediction/{match_id}")
+def admin_debug_prediction(match_id: int):
+    """Show the full model_predictions + matches row for one match — used to
+    diagnose data inconsistencies between endpoints."""
+    from api.db import query_one
+    mp = query_one(
+        """
+        SELECT match_id, prob_first_player, prob_second_player, confidence,
+               predicted_winner, actual_winner, is_correct, settled_at,
+               predicted_at, predictor_version, model_version
+        FROM model_predictions
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    m = query_one(
+        """
+        SELECT id, event_date, event_status, winner, first_player_id, second_player_id,
+               final_result
+        FROM matches WHERE id = %s
+        """,
+        (match_id,),
+    )
+    return {"match": m, "prediction": mp}
+
+
+@app.get("/admin/surface-audit")
+def admin_surface_audit():
+    """How many tournaments are still on Unknown, broken out by recency
+    of their last match. Helps decide whether to extend the backfill map."""
+    from api.db import query
+    summary = query("""
+        SELECT s.name AS surface_label,
+               COUNT(*) AS tournament_count,
+               COUNT(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM matches m
+                   WHERE m.tournament_id = t.id
+                     AND m.event_date >= CURRENT_DATE - INTERVAL '60 days'
+               )) AS recent_active,
+               COUNT(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM matches m
+                   WHERE m.tournament_id = t.id
+                     AND m.event_date >= CURRENT_DATE
+               )) AS upcoming
+        FROM tournaments t
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        GROUP BY s.name
+        ORDER BY tournament_count DESC
+    """)
+    # Sample of Unknown tournaments with their recent activity
+    sample = query("""
+        SELECT t.id, t.name, t.city, t.country,
+               (SELECT MAX(event_date) FROM matches m WHERE m.tournament_id = t.id) AS last_match,
+               (SELECT COUNT(*) FROM matches m WHERE m.tournament_id = t.id) AS match_count
+        FROM tournaments t
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        WHERE s.name = 'Unknown' OR s.name IS NULL
+        ORDER BY (SELECT MAX(event_date) FROM matches m WHERE m.tournament_id = t.id) DESC NULLS LAST
+        LIMIT 80
+    """)
+    return {"summary": summary, "unknown_sample": sample}
+
+
+@app.get("/admin/picks-resolve-stuck")
+def admin_picks_resolve_stuck(min_age_days: int = 1, dry_run: bool = True):
+    """
+    Resolve user_picks that are stuck in pending/live past their match date.
+
+    Strategy:
+      1. For each stale pick, look for a finished match between the same two
+         players on the same event_date. Some matches get duplicated under
+         a different match_id when a player has multiple ID variants — the
+         "real" match with the result lives under the duplicate.
+      2. If a finished twin is found: settle the pick against it.
+      3. If no twin and the match is more than `min_age_days` past its date
+         with no result: mark the pick as 'void' (no settlement will ever
+         arrive — most likely a walkover/cancellation that wasn't recorded
+         on our side).
+
+    Default is dry-run — pass `?dry_run=false` to actually update.
+    """
+    from api.db import query, query_one, get_conn
+
+    stale = query(
+        """
+        SELECT up.id  AS pick_id,
+               up.user_id,
+               up.match_id,
+               up.player_id,
+               up.confidence_stars,
+               up.our_odds,
+               up.status,
+               m.event_date,
+               m.event_status,
+               m.winner,
+               m.first_player_id,
+               m.second_player_id,
+               p1.name AS p1_name,
+               p2.name AS p2_name,
+               pp.name AS picked_name
+        FROM user_picks up
+        JOIN matches m  ON m.id = up.match_id
+        LEFT JOIN players p1 ON p1.id = m.first_player_id
+        LEFT JOIN players p2 ON p2.id = m.second_player_id
+        LEFT JOIN players pp ON pp.id = up.player_id
+        WHERE up.status IN ('pending','live')
+          AND m.event_date < CURRENT_DATE - (%s || ' days')::interval
+        ORDER BY m.event_date ASC
+        LIMIT 200
+        """,
+        (min_age_days,),
+    )
+
+    actions = []
+
+    for sp in stale:
+        # Try to find a "twin" finished match for the same date + same surnames.
+        # We match on the last word of the player name only (surname) so that
+        # duplicate-player ghosts like "T. Etcheverry" vs "T. M. Etcheverry"
+        # still resolve to the same physical match.
+        def _surname(s):
+            return (s or "").strip().split()[-1] if s else ""
+        twin = None
+        s1 = _surname(sp["p1_name"])
+        s2 = _surname(sp["p2_name"])
+        if s1 and s2:
+            twin = query_one(
+                """
+                SELECT m.id AS match_id, m.winner,
+                       m.first_player_id, m.second_player_id,
+                       m.event_status, m.final_result,
+                       p1.name AS p1_name, p2.name AS p2_name
+                FROM matches m
+                JOIN players p1 ON p1.id = m.first_player_id
+                JOIN players p2 ON p2.id = m.second_player_id
+                WHERE m.event_date = %s
+                  AND m.id != %s
+                  AND m.winner IN ('First Player','Second Player')
+                  AND m.event_status ILIKE 'Finished'
+                  AND (
+                        (p1.name ILIKE %s AND p2.name ILIKE %s)
+                     OR (p1.name ILIKE %s AND p2.name ILIKE %s)
+                      )
+                LIMIT 1
+                """,
+                (sp["event_date"], sp["match_id"],
+                 f"%{s1}%", f"%{s2}%",
+                 f"%{s2}%", f"%{s1}%"),
+            )
+
+        if twin:
+            # Map the picked player_name to the twin's first/second slot.
+            # Use surname matching (same fuzz reason as above).
+            picked_surname = _surname(sp["picked_name"])
+            picked_is_p1 = (
+                picked_surname.lower() in (twin["p1_name"] or "").lower()
+                and picked_surname.lower() not in (twin["p2_name"] or "").lower()
+            )
+            winner_is_p1 = twin["winner"] == "First Player"
+            won = (picked_is_p1 == winner_is_p1)
+            new_status = "won" if won else "lost"
+            stake = float(sp.get("confidence_stars") or 1)
+            if won:
+                odds = float(sp.get("our_odds") or 2.0)
+                pl = round((odds - 1) * stake, 2)
+            else:
+                pl = round(-stake, 2)
+
+            actions.append({
+                "pick_id":      sp["pick_id"],
+                "action":       "settle_via_twin",
+                "twin_match":   twin["match_id"],
+                "twin_score":   twin["final_result"],
+                "new_status":   new_status,
+                "profit_loss":  pl,
+            })
+            if not dry_run:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """UPDATE user_picks
+                               SET status = %s, settled_at = NOW(), profit_loss = %s
+                               WHERE id = %s AND status IN ('pending','live')""",
+                            (new_status, pl, sp["pick_id"]),
+                        )
+        else:
+            # No twin — void it (no result is going to arrive)
+            actions.append({
+                "pick_id":     sp["pick_id"],
+                "action":      "void",
+                "reason":      "no twin match found and event_date is past",
+                "match_status": sp["event_status"],
+            })
+            if not dry_run:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """UPDATE user_picks
+                               SET status = 'void', settled_at = NOW(), profit_loss = 0
+                               WHERE id = %s AND status IN ('pending','live')""",
+                            (sp["pick_id"],),
+                        )
+
+    return {
+        "dry_run":   dry_run,
+        "stale_count": len(stale),
+        "actions":   actions,
+    }
+
+
+@app.get("/admin/picks-diagnose")
+def admin_picks_diagnose():
+    """
+    Diagnose stuck user_picks: list any pick still in pending/live whose
+    underlying match has finished or is past event_date. Helps identify
+    whether the settle pipeline is failing to catch certain match states
+    (e.g. event_status case variants, walkovers, retirements, missing winners).
+    """
+    from api.db import query
+
+    # Picks past their match date that are still pending/live
+    stale = query(
+        """
+        SELECT up.id AS pick_id,
+               up.user_id,
+               up.match_id,
+               up.status                     AS pick_status,
+               up.player_id,
+               up.confidence_stars,
+               up.created_at,
+               m.event_date,
+               m.event_time,
+               m.event_status                AS match_status,
+               m.winner                      AS match_winner,
+               m.first_player_id, m.second_player_id,
+               m.final_result                AS match_score,
+               p1.name AS p1_name, p2.name AS p2_name,
+               pp.name AS picked_name
+        FROM user_picks up
+        JOIN matches m  ON m.id = up.match_id
+        LEFT JOIN players p1 ON p1.id = m.first_player_id
+        LEFT JOIN players p2 ON p2.id = m.second_player_id
+        LEFT JOIN players pp ON pp.id = up.player_id
+        WHERE up.status IN ('pending','live')
+          AND m.event_date < CURRENT_DATE
+        ORDER BY m.event_date ASC, up.created_at ASC
+        LIMIT 50
+        """,
+    )
+
+    # Status-value distribution for finished-but-unsettled context
+    statuses = query(
+        """
+        SELECT m.event_status, m.winner, COUNT(*) AS n
+        FROM user_picks up
+        JOIN matches m ON m.id = up.match_id
+        WHERE up.status IN ('pending','live')
+          AND m.event_date <= CURRENT_DATE
+        GROUP BY m.event_status, m.winner
+        ORDER BY n DESC
+        """,
+    )
+
+    return {
+        "stale_picks":         stale,
+        "stuck_status_breakdown": statuses,
+        "settle_filter_used":  "m.event_status = 'Finished' AND m.winner IN ('First Player','Second Player')",
+    }
+
+
+@app.get("/admin/db-kill-stuck")
+def admin_db_kill_stuck(min_seconds: int = 60, dry_run: bool = True):
+    """
+    Terminate any backend that has been running a query for longer than
+    `min_seconds` (default 60). Use when an ALTER TABLE has queued for
+    ACCESS EXCLUSIVE and is blocking every subsequent read.
+
+    Default is dry-run — pass `?dry_run=false` to actually terminate.
+    Returns the list of pids it killed (or would kill) plus the queries
+    so you can sanity-check before retrying.
+    """
+    from api.db import get_conn
+
+    candidates = []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = 3000")
+            cur.execute("""
+                SELECT pid,
+                       application_name,
+                       state,
+                       EXTRACT(EPOCH FROM (clock_timestamp() - query_start))::int AS runtime_sec,
+                       LEFT(query, 240) AS query
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND query_start IS NOT NULL
+                  AND state IN ('active','idle in transaction')
+                  AND EXTRACT(EPOCH FROM (clock_timestamp() - query_start)) > %s
+                  AND query NOT LIKE '%%pg_stat_activity%%'
+                ORDER BY query_start ASC
+            """, (min_seconds,))
+            for r in cur.fetchall():
+                candidates.append(dict(r))
+
+    if dry_run or not candidates:
+        return {
+            "dry_run": dry_run,
+            "min_seconds": min_seconds,
+            "would_kill": candidates,
+            "note": "Pass ?dry_run=false to actually terminate." if dry_run else "Nothing matched.",
+        }
+
+    killed = []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = 5000")
+            for c in candidates:
+                try:
+                    cur.execute("SELECT pg_terminate_backend(%s) AS ok", (c["pid"],))
+                    row = cur.fetchone()
+                    killed.append({**c, "terminated": bool(row.get("ok"))})
+                except Exception as e:
+                    killed.append({**c, "terminated": False, "error": str(e)[:200]})
+    return {"dry_run": False, "killed": killed, "count": len(killed)}
+
+
+@app.get("/admin/db-stats")
+def admin_db_stats():
+    """
+    Quick DB-side diagnostic: table sizes, row counts, vacuum/analyze status,
+    long-running queries, and lock status. Run this when endpoints time out
+    to identify the bottleneck without needing direct DB access.
+    Each query has its own short statement_timeout so the endpoint itself
+    can't hang.
+    """
+    from api.db import query, query_one
+
+    def _safe(sql, params=None, ms=3000):
+        try:
+            with __import__("api.db", fromlist=["get_conn"]).get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SET LOCAL statement_timeout = {ms}")
+                    cur.execute(sql, params or ())
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows]
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+    out = {}
+
+    # Table sizes for the suspects
+    out["table_sizes"] = _safe("""
+        SELECT relname AS table,
+               pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+               pg_size_pretty(pg_relation_size(c.oid))       AS heap_size,
+               n_live_tup AS live_rows,
+               n_dead_tup AS dead_rows,
+               last_autovacuum, last_autoanalyze, last_vacuum, last_analyze
+        FROM pg_stat_user_tables s
+        JOIN pg_class c ON c.relname = s.relname
+        WHERE s.relname IN ('model_predictions','matches','match_points',
+                            'match_games','match_scores','sa_matches',
+                            'player_ratings_history','bookmaker_odds')
+        ORDER BY pg_total_relation_size(c.oid) DESC
+    """, ms=4000)
+
+    # In-flight queries longer than 5s
+    out["long_running"] = _safe("""
+        SELECT pid, age(clock_timestamp(), query_start) AS runtime,
+               state, application_name, LEFT(query, 200) AS query
+        FROM pg_stat_activity
+        WHERE state != 'idle'
+          AND query_start IS NOT NULL
+          AND age(clock_timestamp(), query_start) > interval '5 seconds'
+          AND query NOT LIKE '%pg_stat_activity%'
+        ORDER BY query_start
+        LIMIT 20
+    """, ms=2000)
+
+    # Locks held that are blocking other queries
+    out["blocking_locks"] = _safe("""
+        SELECT blocked.pid AS blocked_pid,
+               LEFT(blocked.query, 100) AS blocked_query,
+               blocking.pid AS blocking_pid,
+               LEFT(blocking.query, 100) AS blocking_query,
+               age(clock_timestamp(), blocked.query_start) AS blocked_for
+        FROM pg_stat_activity blocked
+        JOIN pg_locks bl ON bl.pid = blocked.pid AND NOT bl.granted
+        JOIN pg_locks bg ON bg.locktype = bl.locktype
+                        AND bg.database IS NOT DISTINCT FROM bl.database
+                        AND bg.relation IS NOT DISTINCT FROM bl.relation
+                        AND bg.page     IS NOT DISTINCT FROM bl.page
+                        AND bg.tuple    IS NOT DISTINCT FROM bl.tuple
+                        AND bg.granted
+                        AND bg.pid <> bl.pid
+        JOIN pg_stat_activity blocking ON blocking.pid = bg.pid
+        LIMIT 10
+    """, ms=2000)
+
+    # Connection counts by application
+    out["connections"] = _safe("""
+        SELECT application_name, state, COUNT(*) AS n
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+        GROUP BY application_name, state
+        ORDER BY n DESC
+    """, ms=2000)
+
+    # Try the slow query plan: predictions/stats
+    out["plan_predictions_stats"] = _safe("""
+        EXPLAIN (FORMAT JSON, ANALYZE FALSE, BUFFERS FALSE)
+        SELECT COUNT(*) FILTER (WHERE settled_at IS NOT NULL) AS settled,
+               COUNT(*) FILTER (WHERE is_correct)             AS correct
+        FROM model_predictions
+    """, ms=2000)
+
+    return out
+
+
 @app.get("/diagnostics")
 def diagnostics():
     """
@@ -302,11 +861,81 @@ def admin_migrate():
     return _safe_admin(apply_schema_migrations)
 
 
+@app.get("/admin/deactivate-legacy-systems")
+def admin_deactivate_legacy_systems():
+    """Directly deactivate the v1 legacy systems that have negative ROI."""
+    from contextlib import contextmanager
+    import psycopg2, os
+    legacy = [
+        "surface_monster", "form_surge", "hand_advantage", "big_match_player",
+        "underdog_value", "rtt_mismatch", "clutch_in_decider",
+    ]
+    try:
+        db_url = (os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL") or "").strip()
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE systems SET is_active = FALSE WHERE code = ANY(%s) RETURNING code",
+                (legacy,),
+            )
+            deactivated = [r[0] for r in cur.fetchall()]
+        conn.commit()
+        conn.close()
+        return {"deactivated": deactivated, "count": len(deactivated)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+_PREDICT_STATUS: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "days_ahead": None, "result": None, "error": None,
+}
+
+
+def _predict_worker(days_ahead: int):
+    import time
+    _PREDICT_STATUS.update({
+        "running": True, "started_at": time.time(), "finished_at": None,
+        "days_ahead": days_ahead, "result": None, "error": None,
+    })
+    try:
+        from api.bootstrap import run_rtt_predictions
+        result = run_rtt_predictions(days_ahead=days_ahead)
+        _PREDICT_STATUS.update({"running": False, "finished_at": time.time(), "result": result})
+    except Exception as e:
+        import traceback
+        _PREDICT_STATUS.update({"running": False, "finished_at": time.time(), "error": str(e)})
+        log.error(f"predict worker failed: {e}\n{traceback.format_exc()}")
+
+
 @app.get("/admin/predict")
-def admin_predict(days_ahead: int = 7):
-    """Run RTT predictor for upcoming matches."""
+def admin_predict(days_ahead: int = 7, bg: bool = True):
+    """Run RTT predictor for upcoming matches.
+    bg=true (default): fires in a background thread and returns immediately.
+    bg=false: runs synchronously (will timeout for large date ranges).
+    """
+    if bg:
+        if _PREDICT_STATUS.get("running"):
+            return {"status": "already_running", "started_at": _PREDICT_STATUS.get("started_at")}
+        import threading
+        t = threading.Thread(target=_predict_worker, args=(days_ahead,), daemon=True)
+        t.start()
+        return {"status": "started", "days_ahead": days_ahead,
+                "check": "/admin/predict-status"}
     from api.bootstrap import run_rtt_predictions
     return _safe_admin(run_rtt_predictions, days_ahead=days_ahead)
+
+
+@app.get("/admin/predict-status")
+def admin_predict_status():
+    """Check the status of the background prediction run."""
+    import time
+    s = dict(_PREDICT_STATUS)
+    if s.get("started_at"):
+        elapsed = (s.get("finished_at") or time.time()) - s["started_at"]
+        s["elapsed_seconds"] = round(elapsed, 1)
+    return s
 
 _MS_BACKFILL_STATUS = {
     "running": False, "started_at": None, "finished_at": None,
@@ -409,6 +1038,56 @@ def admin_matchstat_backfill(tour: str = "atp", limit: int = 0,
 @app.get("/admin/matchstat-backfill/status")
 def admin_matchstat_backfill_status():
     return _MS_BACKFILL_STATUS
+
+
+@app.get("/admin/merge-player-pair")
+def admin_merge_player_pair(from_id: int, to_id: int, dry_run: bool = True):
+    """
+    Manually merge one player record into another. Use for cases the auto
+    merge-duplicate-players doesn't catch — typically when the two records
+    have different full_names (e.g. short form 'J. Sinner' vs long form
+    'Jannik Sinner') so the normaliser refuses to cluster them.
+
+    Moves every foreign-key reference from `from_id` to `to_id` and deletes
+    the from_id row. Pass dry_run=true to see what would happen first.
+    """
+    def _run():
+        import os, psycopg2
+        from merge_duplicate_players import _merge_pair
+        from api.db import get_conn, query_one
+
+        # Sanity check: confirm both exist
+        from_row = query_one("SELECT id, name, full_name, country_code FROM players WHERE id = %s", (from_id,))
+        to_row   = query_one("SELECT id, name, full_name, country_code FROM players WHERE id = %s", (to_id,))
+        if not from_row or not to_row:
+            return {"error": "one of the IDs doesn't exist", "from": from_row, "to": to_row}
+
+        if dry_run:
+            # Count references that would move
+            ref_count = query_one(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM matches WHERE first_player_id = %s OR second_player_id = %s) AS match_refs,
+                    (SELECT COUNT(*) FROM player_ratings WHERE player_id = %s) AS rating_refs,
+                    (SELECT COUNT(*) FROM model_predictions mp JOIN matches m ON m.id = mp.match_id
+                     WHERE m.first_player_id = %s OR m.second_player_id = %s) AS pred_refs
+                """,
+                (from_id, from_id, from_id, from_id, from_id),
+            )
+            return {
+                "dry_run": True,
+                "from": from_row,
+                "to":   to_row,
+                "would_move": ref_count,
+                "next_step": "Re-call with ?dry_run=false to execute the merge.",
+            }
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                result = _merge_pair(cur, canonical_id=to_id, shadow_id=from_id)
+        return {"dry_run": False, "from": from_row, "to": to_row, "merge_result": result}
+
+    return _safe_admin(_run)
 
 
 @app.get("/admin/merge-duplicate-players")
@@ -574,7 +1253,7 @@ def admin_settle_picks():
             FROM user_picks up
             JOIN matches m ON m.id = up.match_id
             WHERE up.status IN ('pending','live')
-              AND m.event_status = 'Finished'
+              AND m.event_status IN ('Finished','Retired','Walk Over','Walkover')
               AND m.winner IN ('First Player','Second Player')
             """
         )
@@ -905,6 +1584,11 @@ def _daily_worker():
                 _log("odds: skipped (ODDS_API_KEY not set)")
         except Exception as e:
             _log(f"odds FAILED: {e}")
+
+        # Intentionally no auto-intel step here. Intel/deep-reasoning prose
+        # is generated by Cowork sessions (the human/Claude driven path),
+        # not via an automated Anthropic API call. The hook was briefly
+        # added and then removed — don't re-add without explicit ask.
 
         # 6. Force fill ratings (recompute cold-start)
         _DAILY_STATUS["phase"] = "fill_ratings_force"
@@ -1297,4 +1981,83 @@ def _kick_off_bootstrap():
     if os.environ.get("RTT_DISABLE_AUTO_BOOTSTRAP", "").lower() in ("1", "true", "yes"):
         log.info("[startup] auto-bootstrap disabled via RTT_DISABLE_AUTO_BOOTSTRAP")
         return
+    # Deactivate legacy v1 systems immediately (synchronous, fast) before
+    # the heavy bootstrap thread starts — ensures they're gone on every deploy.
+    try:
+        import psycopg2
+        db_url = (os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL") or "").strip()
+        if db_url:
+            _conn = psycopg2.connect(db_url)
+            _conn.autocommit = True
+            with _conn.cursor() as _cur:
+                legacy = ["surface_monster","form_surge","hand_advantage",
+                          "big_match_player","underdog_value","rtt_mismatch","clutch_in_decider"]
+                _cur.execute("UPDATE systems SET is_active = FALSE WHERE code = ANY(%s)", (legacy,))
+
+                # ── Comprehensive surface correction ──────────────────────────
+                # Root cause: pipeline inserts tournaments as Unknown when the
+                # live API omits a surface field; _infer_surface import fails on
+                # Railway flat-copy so inference never fires for new records.
+                # Fix: on every deploy, correct all well-known clay/grass names.
+                # Unconditional — NULL, Unknown, and wrong values all get fixed.
+
+                clay_keywords = [
+                    '%rome%','%internazionali%','%italian open%',
+                    '%roland garros%','%french open%',
+                    '%monte carlo%','%monte-carlo%',
+                    '%madrid open%','%mutua madrid%',
+                    '%barcelona%',
+                    '%hamburg%',
+                    '%buenos aires%','%rio open%',
+                    '%geneva%','%lyon%',
+                    '%parma%','%reggio emilia%',
+                    '%bordeaux%','%strasbourg%',
+                    '%marrakech%','%rabat%','%tunis%',
+                    '%istanbul%',
+                    '%houston%','%charleston%',
+                    '%bucharest%','%warsaw%',
+                    '%budapest%','%bastad%',
+                    '%estoril%','%oeiras%','%estoril%',
+                    '%cordoba%',
+                    '%santiago%',
+                    '%zagreb%','%umag%','%gstaad%',
+                    '%kitzbuhel%','%kitzbuehel%',
+                    '%marbella%','%valencia%',
+                    '%trnava%','%prostejov%',
+                    '%louny%','%kutaisi%','%vic%',
+                    '%monastir%',
+                ]
+                grass_keywords = [
+                    '%wimbledon%',
+                    '%queen\'s%','%queens club%',
+                    '%halle%',
+                    '%eastbourne%','%bad homburg%',
+                    '%nottingham%','%surbiton%','%ilkley%',
+                    '%den bosch%','%rosmalen%',
+                    '%birmingham%',
+                    '%mallorca%',
+                    '%newport%',
+                    '%boss open%',
+                ]
+                clay_conditions = " OR ".join(f"LOWER(name) LIKE '{kw}'" for kw in clay_keywords)
+                grass_conditions = " OR ".join(f"LOWER(name) LIKE '{kw}'" for kw in grass_keywords)
+
+                _cur.execute(f"""
+                    UPDATE tournaments
+                    SET surface_id = (SELECT id FROM surfaces WHERE LOWER(name) = 'clay' LIMIT 1)
+                    WHERE {clay_conditions}
+                """)
+                clay_fixed = _cur.rowcount
+
+                _cur.execute(f"""
+                    UPDATE tournaments
+                    SET surface_id = (SELECT id FROM surfaces WHERE LOWER(name) = 'grass' LIMIT 1)
+                    WHERE {grass_conditions}
+                """)
+                grass_fixed = _cur.rowcount
+
+            _conn.close()
+            log.info(f"[startup] legacy systems deactivated; surface fixed: {clay_fixed} clay, {grass_fixed} grass")
+    except Exception as _e:
+        log.warning(f"[startup] quick-fix failed (non-fatal): {_e}")
     threading.Thread(target=_startup_bootstrap, daemon=True).start()

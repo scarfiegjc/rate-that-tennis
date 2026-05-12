@@ -1,4 +1,4 @@
-# ratethat.tennis — API service
+# ratethat.tennis — API service — rebuild forced 2026-05-12i
 # Railway deployment: set root directory to / (repo root), Dockerfile path to ./Dockerfile
 #
 # This image now also carries the lightweight pipeline modules so the API can
@@ -38,10 +38,19 @@ COPY pipeline/affiliate_config.py    ./affiliate_config.py
 COPY pipeline/merge_duplicate_players.py ./merge_duplicate_players.py
 COPY pipeline/odds.py                ./odds.py
 
-# ML package (rtt_predictor + systems engine — both lightweight)
+# ML package: the live predictor (predict.py), its Elo engine, and the
+# feature shaper. predict.py is what bootstrap.run_rtt_predictions calls,
+# and we need it bundled here so /admin/predict can run an emergency
+# re-prediction without waiting for the pipeline service's cron tick.
+# Trained model pickles (ml/models/*.pkl) are intentionally NOT bundled —
+# load_models() falls through cleanly to Elo+RTT when the dir is empty,
+# which matches our current "Elo is primary" strategy.
 COPY ml/__init__.py                  ./ml/__init__.py
 COPY ml/rtt_predictor.py             ./ml/rtt_predictor.py
 COPY ml/systems.py                   ./ml/systems.py
+COPY ml/predict.py                   ./ml/predict.py
+COPY ml/elo.py                       ./ml/elo.py
+COPY ml/features.py                  ./ml/features.py
 
 # Expose port — must match $PORT injected by Railway (default 8080)
 EXPOSE 8080
