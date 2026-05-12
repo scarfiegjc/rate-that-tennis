@@ -470,19 +470,58 @@ def run_hand_splits() -> dict:
 
 
 def run_rtt_predictions(days_ahead: int = 7) -> dict:
+    """
+    Run match predictions for the next `days_ahead` days.
+
+    Primary path: LivePredictor (ml.predict) — Elo-led ensemble. Requires
+    numpy/pandas which are NOT in the API image, so this will fail there.
+
+    Fallback: RttPredictor (ml.rtt_predictor) — pure-psycopg2, always
+    importable on the API service. Runs fill_missing_ratings first so every
+    player in an upcoming match gets at least a rank-based RTT score, avoiding
+    blanket 50/50 outputs.
+    """
+    # ── Primary: LivePredictor (Elo + ensemble) ───────────────────────────────
     try:
-        from ml.predict import LivePredictor  # noqa
-    except Exception as e:
-        log.error(f"ml.predict import failed: {e}")
-        return {"error": f"import: {e}"}
-    predictor = LivePredictor()
-    try:
+        from ml.predict import LivePredictor  # needs numpy/pandas
+        predictor = LivePredictor()
         predictor.load_models()
         predictor.load_player_history()
         n = predictor.predict_upcoming(days_ahead=days_ahead)
-        return {"predicted": n}
+        log.info(f"LivePredictor wrote {n} predictions")
+        return {"predictor": "LivePredictor", "predicted": n}
+    except ImportError as e:
+        log.warning(f"LivePredictor not available ({e}), falling back to RttPredictor")
     except Exception as e:
         log.error(f"LivePredictor failed: {e}")
+        return {"error": str(e)}
+
+    # ── Fallback: RttPredictor (psycopg2-only) ────────────────────────────────
+    # Ensure every player in an upcoming match has at least a rank-based RTT
+    # score so RttPredictor produces meaningful probabilities instead of 50/50.
+    db_url = _db_url()
+    try:
+        from fill_ratings import fill_missing_ratings
+        conn = psycopg2.connect(db_url)
+        try:
+            fill_missing_ratings(conn)
+        finally:
+            conn.close()
+        log.info("fill_missing_ratings complete (pre-RttPredictor)")
+    except Exception as e:
+        log.warning(f"fill_missing_ratings pre-step failed (non-fatal): {e}")
+
+    try:
+        from ml.rtt_predictor import RttPredictor
+        predictor = RttPredictor(db_url=db_url)
+        try:
+            n = predictor.predict_upcoming(days_ahead=days_ahead)
+            log.info(f"RttPredictor wrote {n} predictions")
+            return {"predictor": "RttPredictor", "predicted": n}
+        finally:
+            predictor.close()
+    except Exception as e:
+        log.error(f"RttPredictor failed: {e}")
         return {"error": str(e)}
 
 
