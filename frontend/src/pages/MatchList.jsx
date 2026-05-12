@@ -15,6 +15,16 @@ import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
+import courtClayImg  from '../assets/court-clay.jpg'
+import courtGrassImg from '../assets/court-grass.jpg'
+import courtHardImg  from '../assets/court-hard.jpg'
+
+function courtBg(surface) {
+  const s = (surface || '').toLowerCase()
+  if (s.includes('clay'))  return courtClayImg
+  if (s.includes('grass')) return courtGrassImg
+  return courtHardImg
+}
 
 // ── SEO URL helpers ───────────────────────────────────────────────────────────
 
@@ -154,7 +164,24 @@ function MatchRow({ match, showTournament }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  const liveScore = match.game_result || match.final_result || ''
+  // Build a rich live score: "6-4, 3-2 (40-15)"
+  // set_scores comes as "6-4 3-2" (space-separated from SQL string_agg), convert to ", "
+  const liveSetScores = match.set_scores
+    ? match.set_scores.replace(/ /g, ', ')
+    : null
+  // game_result from the API may be "40 - 15" — normalise to "40-15"
+  const liveGameScore = match.game_result
+    ? match.game_result.replace(/\s*-\s*/g, '-').trim()
+    : null
+  // Combined display: sets + game score in parens, or fall back to whatever we have
+  const liveScore = liveSetScores
+    ? liveGameScore
+      ? `${liveSetScores} (${liveGameScore})`
+      : liveSetScores
+    : liveGameScore || match.final_result || ''
+  // Serving indicator: "First Player" | "Second Player"
+  const p1Serving = isLive && match.serve === 'First Player'
+  const p2Serving = isLive && match.serve === 'Second Player'
 
   return (
     <button className={rowCls} onClick={() => navigate(matchUrl(match))}>
@@ -177,6 +204,7 @@ function MatchRow({ match, showTournament }) {
           className={`match-player-name ${winner1 ? 'winner' : ''}`}
           style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
+          {p1Serving && <span title="Serving" style={{ marginRight: 4, fontSize: 10 }}>●</span>}
           {p1.name || '—'}
         </div>
         <div className="match-player-sub">
@@ -192,12 +220,22 @@ function MatchRow({ match, showTournament }) {
       {/* Centre — live lozenge / score / probabilities / vs */}
       <div className="match-centre">
         {isLive ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
             <LiveLozenge />
-            {liveScore && <span className="match-live-score">{liveScore}</span>}
+            {liveSetScores && (
+              <span className="match-live-score-big">{liveSetScores}</span>
+            )}
+            {liveGameScore && (
+              <span className="match-live-game">({liveGameScore})</span>
+            )}
+            {!liveSetScores && !liveGameScore && match.final_result && (
+              <span className="match-live-score">{match.final_result}</span>
+            )}
           </div>
         ) : isFinished && (match.set_scores || match.final_result) ? (
-          <span className="match-final-score">{match.set_scores || match.final_result}</span>
+          <span className="match-final-score">
+            {match.set_scores ? match.set_scores.replace(/ /g, ', ') : match.final_result}
+          </span>
         ) : p1prob != null ? (
           <>
             <div className="match-probs">
@@ -225,6 +263,7 @@ function MatchRow({ match, showTournament }) {
           style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
           {p2.name || '—'}
+          {p2Serving && <span title="Serving" style={{ marginLeft: 4, fontSize: 10 }}>●</span>}
         </div>
         <div className="match-player-sub">
           <FormDots dots={p2.form_dots || []} max={10} />
@@ -280,7 +319,10 @@ function TournamentBlock({ name, surface, matches }) {
 
   return (
     <div className="tournament-block">
-      <button className="tournament-header" onClick={() => setOpen(o => !o)}>
+      <button
+        className={`tournament-header ${(surface || '').toLowerCase()}`}
+        style={{ backgroundImage: `url(${courtBg(surface)})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+        onClick={() => setOpen(o => !o)}>
         <span className={`chevron ${open ? 'open' : ''}`}>›</span>
         <SurfaceDot surface={surface} />
         <span className="tournament-name">{name}</span>
@@ -736,7 +778,6 @@ export default function MatchList() {
       <div className="cc-header">
         <div>
           <h1 className="cc-title">Match Centre</h1>
-          <div className="cc-subtitle">{todayLabel()}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <div className="cc-meta-badges">
