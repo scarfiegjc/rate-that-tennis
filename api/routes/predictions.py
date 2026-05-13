@@ -1219,7 +1219,7 @@ _BLOCK_SQL = """
     FROM model_predictions mp
     JOIN matches m ON m.id = mp.match_id
     {joins}
-    WHERE mp.settled_at IS NOT NULL
+    WHERE mp.is_correct IS NOT NULL
       {extra_where}
 """
 
@@ -1235,10 +1235,10 @@ def _fetch_breakdown(extra_where="", params=None, joins=""):
     return {
         "all_time": _fetch_block(extra_where, params, joins),
         "last_30d": _fetch_block(
-            extra_where + " AND mp.settled_at >= NOW() - INTERVAL '30 days'",
+            extra_where + " AND m.event_date >= CURRENT_DATE - INTERVAL '30 days'",
             params, joins),
         "last_7d":  _fetch_block(
-            extra_where + " AND mp.settled_at >= NOW() - INTERVAL '7 days'",
+            extra_where + " AND m.event_date >= CURRENT_DATE - INTERVAL '7 days'",
             params, joins),
     }
 
@@ -1295,15 +1295,18 @@ _PICK_JOINS = """
 def _predictions_results_inner():
     # ── Model cutover date ────────────────────────────────────────────────────
     cutover_row = safe_query_one(
-        "SELECT MIN(DATE(settled_at)) AS cutover FROM model_predictions WHERE settled_at IS NOT NULL"
+        """SELECT MIN(m.event_date) AS cutover
+        FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        WHERE mp.is_correct IS NOT NULL"""
     )
     model_cutover = str(cutover_row["cutover"]) if cutover_row and cutover_row.get("cutover") else None
 
     # ── Top-level time windows ────────────────────────────────────────────────
     all_time   = _fetch_block()
-    last_30d   = _fetch_block("AND mp.settled_at >= NOW() - INTERVAL '30 days'")
-    last_7d    = _fetch_block("AND mp.settled_at >= NOW() - INTERVAL '7 days'")
-    today_block = _fetch_block("AND DATE(mp.settled_at) = CURRENT_DATE")
+    last_30d   = _fetch_block("AND m.event_date >= CURRENT_DATE - INTERVAL '30 days'")
+    last_7d    = _fetch_block("AND m.event_date >= CURRENT_DATE - INTERVAL '7 days'")
+    today_block = _fetch_block("AND m.event_date = CURRENT_DATE")
 
     # ── By surface ────────────────────────────────────────────────────────────
     surf_joins = """
@@ -1335,9 +1338,9 @@ def _predictions_results_inner():
         FROM model_predictions mp
         JOIN matches m ON m.id = mp.match_id
         {_PICK_JOINS}
-        WHERE mp.settled_at IS NOT NULL
+        WHERE mp.is_correct IS NOT NULL
           AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
-        ORDER BY mp.settled_at DESC
+        ORDER BY m.event_date DESC, mp.match_id DESC
         LIMIT 20
     """)
     recent_picks = [_fmt_pick(r) for r in recent_rows]
@@ -1348,20 +1351,20 @@ def _predictions_results_inner():
         FROM model_predictions mp
         JOIN matches m ON m.id = mp.match_id
         {_PICK_JOINS}
-        WHERE mp.settled_at >= NOW() - INTERVAL '7 days'
-          AND mp.settled_at IS NOT NULL
+        WHERE mp.is_correct IS NOT NULL
+          AND m.event_date >= CURRENT_DATE - INTERVAL '7 days'
           AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
-        ORDER BY mp.settled_at DESC
+        ORDER BY m.event_date DESC, mp.match_id DESC
     """)
     weekly_bars = [_fmt_pick(r) for r in weekly_rows]
 
     # ── Current streak ────────────────────────────────────────────────────────
     streak_rows = safe_query("""
-        SELECT is_correct FROM model_predictions
-        WHERE settled_at IS NOT NULL
-          AND is_correct IS NOT NULL
-          AND NOT (prob_first_player BETWEEN 0.49 AND 0.51)
-        ORDER BY settled_at DESC
+        SELECT mp.is_correct FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        WHERE mp.is_correct IS NOT NULL
+          AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+        ORDER BY m.event_date DESC, mp.match_id DESC
         LIMIT 20
     """)
     streak = None
@@ -1383,7 +1386,7 @@ def _predictions_results_inner():
             COUNT(*) AS n,
             ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / COUNT(*), 1) AS actual_pct
         FROM model_predictions mp
-        WHERE mp.settled_at IS NOT NULL
+        WHERE mp.is_correct IS NOT NULL
           AND mp.is_correct IS NOT NULL
           AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
         GROUP BY prob_bucket
@@ -1402,7 +1405,7 @@ def _predictions_results_inner():
     # ── P&L trend (cumulative, last 60 days) ──────────────────────────────────
     pnl_rows = safe_query("""
         SELECT
-            DATE(mp.settled_at) AS day,
+            DATE(m.event_date) AS day,
             SUM(CASE
                   WHEN mp.is_correct = TRUE
                    AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
@@ -1417,8 +1420,8 @@ def _predictions_results_inner():
                 END) AS daily_pnl
         FROM model_predictions mp
         JOIN matches m ON m.id = mp.match_id
-        WHERE mp.settled_at >= NOW() - INTERVAL '60 days'
-          AND mp.settled_at IS NOT NULL
+        WHERE m.event_date >= CURRENT_DATE - INTERVAL '60 days'
+          AND mp.is_correct IS NOT NULL
         GROUP BY day
         ORDER BY day
     """)
