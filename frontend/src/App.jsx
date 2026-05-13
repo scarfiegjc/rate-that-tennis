@@ -1,21 +1,19 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import MatchList from './pages/MatchList.jsx'
 import MatchDetail from './pages/MatchDetail.jsx'
 import PlayerPage from './pages/PlayerPage.jsx'
 import InPlayPage from './pages/InPlayPage.jsx'
+import PredictionsToday from './pages/PredictionsToday.jsx'
 import PredictionsHistory from './pages/PredictionsHistory.jsx'
-import PredictionsResults from './pages/PredictionsResults.jsx'
 import SystemsList from './pages/SystemsList.jsx'
 import SystemDetail from './pages/SystemDetail.jsx'
 import PlayerDatabase from './pages/PlayerDatabase.jsx'
 import MyPicks from './pages/MyPicks.jsx'
 import StatConflicts from './pages/StatConflicts.jsx'
-import JoinPage from './pages/JoinPage.jsx'
-import AccountPage from './pages/AccountPage.jsx'
-import AdminPage from './pages/AdminPage.jsx'
+import AffiliatesAdmin from './pages/AffiliatesAdmin.jsx'
 import rttLogo from './assets/rtt_logo.png'
 
 function Header() {
@@ -28,7 +26,7 @@ function Header() {
     p === '/' ? loc.pathname === '/' : loc.pathname.startsWith(p)
   )
 
-  const matchesActive = is('/') && !is('/predictions','/systems','/in-play','/players','/player','/my-picks','/stats','/join','/account','/admin')
+  const matchesActive = is('/') && !is('/predictions','/systems','/in-play','/players','/player','/my-picks','/stats')
 
   return (
     <>
@@ -96,16 +94,6 @@ function Header() {
                       style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500 }}>
                       My Picks
                     </Link>
-                    <Link to="/account" onClick={() => setShowUserMenu(false)}
-                      style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500 }}>
-                      Account &amp; emails
-                    </Link>
-                    {user?.is_admin && (
-                      <Link to="/admin" onClick={() => setShowUserMenu(false)}
-                        style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500 }}>
-                        Admin
-                      </Link>
-                    )}
                     <button onClick={() => { logout(); setShowUserMenu(false) }}
                       style={{ display:'block', width:'100%', textAlign:'left',
                                padding:'7px 12px', fontSize:13, color:'var(--red)' }}>
@@ -115,27 +103,16 @@ function Header() {
                 )}
               </div>
             ) : (
-              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                <Link to="/join"
-                  style={{
-                    padding:'6px 14px', borderRadius:'var(--r)',
-                    background:'var(--green)', color:'#000',
-                    fontSize:13, fontWeight:700, textDecoration:'none',
-                  }}
-                >
-                  Join free
-                </Link>
-                <button
-                  onClick={() => setShowAuth(true)}
-                  style={{
-                    padding:'6px 14px', borderRadius:'var(--r)',
-                    background:'var(--text)', color:'var(--text-inv)',
-                    fontSize:13, fontWeight:600,
-                  }}
-                >
-                  Log in
-                </button>
-              </div>
+              <button
+                onClick={() => setShowAuth(true)}
+                style={{
+                  padding:'6px 14px', borderRadius:'var(--r)',
+                  background:'var(--text)', color:'var(--text-inv)',
+                  fontSize:13, fontWeight:600,
+                }}
+              >
+                Log in
+              </button>
             )}
           </div>
         </div>
@@ -146,28 +123,9 @@ function Header() {
   )
 }
 
-// Send a GA4 page_view on every client-side route change. The gtag snippet
-// in index.html only fires page_view on the initial document load; React
-// Router pushes don't reload the page, so we need to nudge gtag manually
-// or analytics will under-count by ~10x for any SPA navigation.
-function GaRouteTracker() {
-  const loc = useLocation()
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.gtag !== 'function') return
-    const path = loc.pathname + loc.search
-    window.gtag('event', 'page_view', {
-      page_path:     path,
-      page_location: window.location.href,
-      page_title:    document.title,
-    })
-  }, [loc.pathname, loc.search])
-  return null
-}
-
 function AppRoutes() {
   return (
     <>
-      <GaRouteTracker />
       <Header />
       <Routes>
         <Route path="/"                       element={<MatchList />} />
@@ -176,18 +134,13 @@ function AppRoutes() {
         <Route path="/match/:id/:slug"        element={<MatchDetail />} />
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
-        <Route path="/player/:id/:slug"       element={<PlayerPage />} />
-        <Route path="/predictions"            element={<PredictionsResults />} />
-        {/* /predictions/today merged into the main page; redirect any old links */}
-        <Route path="/predictions/today"      element={<Navigate to="/predictions" replace />} />
+        <Route path="/predictions"            element={<PredictionsToday />} />
         <Route path="/predictions/history"    element={<PredictionsHistory />} />
         <Route path="/systems"                element={<SystemsList />} />
         <Route path="/systems/:code"          element={<SystemDetail />} />
         <Route path="/my-picks"               element={<MyPicks />} />
         <Route path="/stats"                  element={<StatConflicts />} />
-        <Route path="/join"                   element={<JoinPage />} />
-        <Route path="/account"                element={<AccountPage />} />
-        <Route path="/admin"                  element={<AdminPage />} />
+        <Route path="/admin/affiliates"       element={<AffiliatesAdmin />} />
       </Routes>
     </>
   )

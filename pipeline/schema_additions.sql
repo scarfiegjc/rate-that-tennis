@@ -130,4 +130,26 @@ CREATE TABLE IF NOT EXISTS serve_zones (
 -- Done
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 7. bookmaker_affiliates — affiliate URLs per bookmaker (admin-managed)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS bookmaker_affiliates (
+    bookmaker_key   TEXT PRIMARY KEY,          -- matches bookmaker_odds.bookmaker
+    display_name    TEXT NOT NULL,
+    affiliate_url   TEXT,                      -- set when affiliate deal is live
+    homepage_url    TEXT,                      -- fallback link for users
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    priority        INTEGER NOT NULL DEFAULT 50,  -- lower = show first
+    notes           TEXT,
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Pre-populate with the two bookmakers we fetch odds for
+INSERT INTO bookmaker_affiliates (bookmaker_key, display_name, homepage_url, priority)
+VALUES
+    ('Bet365',  'bet365',  'https://www.bet365.com', 10),
+    ('Unibet',  'Unibet',  'https://www.unibet.com', 20)
+ON CONFLICT (bookmaker_key) DO NOTHING;
+
 SELECT 'Schema additions applied successfully' AS status;

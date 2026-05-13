@@ -684,6 +684,101 @@ def admin_odds_matches():
     return {"count": len(rows), "matches": [dict(r) for r in rows]}
 
 
+@app.get("/admin/run-odds-io")
+def admin_run_odds_io():
+    """Fetch odds from odds-api.io (broader coverage: Challengers, ITF)."""
+    def _run():
+        if not os.environ.get("ODDS_API_IO_KEY"):
+            return {"skipped": True, "reason": "ODDS_API_IO_KEY not set on Railway env vars"}
+        try:
+            from pipeline.odds_io import run as odds_io_run
+        except ImportError:
+            from odds_io import run as odds_io_run
+        return odds_io_run()
+    return _safe_admin(_run)
+
+
+# ─── Affiliate link management ───────────────────────────────────────────────
+
+@app.get("/admin/affiliates")
+def admin_affiliates_list():
+    """List all bookmakers with their affiliate URL config."""
+    from api.db import query
+    rows = query("""
+        SELECT ba.bookmaker_key, ba.display_name, ba.affiliate_url,
+               ba.homepage_url, ba.is_active, ba.priority, ba.notes,
+               ba.updated_at,
+               COUNT(DISTINCT bo.match_id) AS matches_with_odds
+        FROM bookmaker_affiliates ba
+        LEFT JOIN bookmaker_odds bo ON bo.bookmaker = ba.bookmaker_key
+        GROUP BY ba.bookmaker_key, ba.display_name, ba.affiliate_url,
+                 ba.homepage_url, ba.is_active, ba.priority, ba.notes, ba.updated_at
+        ORDER BY ba.priority ASC, ba.bookmaker_key ASC
+    """)
+    return {"bookmakers": [dict(r) for r in rows]}
+
+
+from pydantic import BaseModel as _BaseModel
+from typing import Optional as _OptStr
+
+class AffiliateUpdate(_BaseModel):
+    affiliate_url: _OptStr[str] = None
+    homepage_url:  _OptStr[str] = None
+    display_name:  _OptStr[str] = None
+    is_active:     _OptStr[bool] = None
+    priority:      _OptStr[int]  = None
+    notes:         _OptStr[str]  = None
+
+@app.put("/admin/affiliates/{bookmaker_key}")
+def admin_affiliates_update(bookmaker_key: str, body: AffiliateUpdate):
+    """Update affiliate URL and settings for one bookmaker."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_PUBLIC_URL")
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO bookmaker_affiliates (bookmaker_key, display_name)
+                VALUES (%s, %s)
+                ON CONFLICT (bookmaker_key) DO NOTHING
+                """,
+                (bookmaker_key, body.display_name or bookmaker_key),
+            )
+            fields = {}
+            if body.affiliate_url is not None: fields["affiliate_url"] = body.affiliate_url
+            if body.homepage_url  is not None: fields["homepage_url"]  = body.homepage_url
+            if body.display_name  is not None: fields["display_name"]  = body.display_name
+            if body.is_active     is not None: fields["is_active"]     = body.is_active
+            if body.priority      is not None: fields["priority"]      = body.priority
+            if body.notes         is not None: fields["notes"]         = body.notes
+            if fields:
+                set_parts = []
+                values = []
+                for k, v in fields.items():
+                    set_parts.append(f"{k} = %s")
+                    values.append(v)
+                set_parts.append("updated_at = NOW()")
+                cur.execute(
+                    f"UPDATE bookmaker_affiliates SET {', '.join(set_parts)} WHERE bookmaker_key = %s",
+                    values + [bookmaker_key],
+                )
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT bookmaker_key, display_name, affiliate_url, homepage_url, "
+                "is_active, priority, notes FROM bookmaker_affiliates WHERE bookmaker_key = %s",
+                (bookmaker_key,),
+            )
+            row = cur.fetchone()
+            cols = ["bookmaker_key","display_name","affiliate_url","homepage_url",
+                    "is_active","priority","notes"]
+            return {"updated": dict(zip(cols, row)) if row else None}
+    finally:
+        conn.close()
+
+
 _BZZOIRO_BIOS_STATUS = {"running": False, "started_at": None, "finished_at": None,
                         "updated": None, "error": None}
 
