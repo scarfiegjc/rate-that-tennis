@@ -324,6 +324,8 @@ function WeeklyBars({ items }) {
 // ─── recent picks scrollable table ───────────────────────────────────────
 
 function RecentPicksTable({ items }) {
+  const [outcome, setOutcome] = useState('all')  // all | won | lost
+
   if (!items || items.length === 0) {
     return (
       <div style={{ padding: 24, color: 'var(--text-3)', textAlign: 'center', fontSize: 13 }}>
@@ -331,63 +333,106 @@ function RecentPicksTable({ items }) {
       </div>
     )
   }
+
+  const wins   = items.filter(p => p.won)
+  const losses = items.filter(p => !p.won)
+  const visible = outcome === 'won' ? wins : outcome === 'lost' ? losses : items
+
   return (
-    <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+    <>
+      {/* Filter tabs + count */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '70px 1fr 1fr 130px 90px 80px 70px 70px',
-        padding: '8px 12px', borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-raised)', position: 'sticky', top: 0, zIndex: 1,
-        fontSize: 9, fontWeight: 700, letterSpacing: 0.4,
-        color: 'var(--text-3)', textTransform: 'uppercase',
+        display: 'flex', gap: 4, alignItems: 'center',
+        padding: '6px 12px', borderBottom: '1px solid var(--border-faint)',
+        background: 'var(--bg-sunken)',
       }}>
-        <div>Date</div>
-        <div>Pick</div>
-        <div>vs</div>
-        <div>Tournament</div>
-        <div>Surface</div>
-        <div style={{ textAlign: 'right' }}>Pred.</div>
-        <div style={{ textAlign: 'right' }}>Score</div>
-        <div style={{ textAlign: 'right' }}>Odds</div>
+        {[
+          { id: 'all',  label: `All (${items.length})` },
+          { id: 'won',  label: `✓ Wins (${wins.length})`,   colour: 'var(--green)' },
+          { id: 'lost', label: `✗ Losses (${losses.length})`, colour: 'var(--red)' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setOutcome(tab.id)}
+            style={{
+              padding: '3px 9px', borderRadius: 4, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 700,
+              background: outcome === tab.id ? (tab.colour || 'var(--text)') : 'transparent',
+              color: outcome === tab.id
+                ? (tab.id === 'all' ? 'var(--text-inv)' : '#fff')
+                : (tab.colour || 'var(--text-3)'),
+              opacity: outcome === tab.id ? 1 : 0.7,
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-3)' }}>
+          Click a row · * = RTT-implied odds
+        </span>
       </div>
-      {items.map((p) => (
-        <Link
-          key={p.match_id}
-          to={matchUrl(p)}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '70px 1fr 1fr 130px 90px 80px 70px 70px',
-            padding: '9px 12px', borderBottom: '1px solid var(--border-faint)',
-            fontSize: 12, alignItems: 'center', fontVariantNumeric: 'tabular-nums',
-            background: p.won ? 'var(--green-bg)' : 'var(--red-bg)',
-            borderLeft: `3px solid ${p.won ? 'var(--green)' : 'var(--red)'}`,
-            textDecoration: 'none', color: 'inherit',
-          }}
-        >
-          <div style={{ fontSize: 11 }}>{p.event_date?.slice(5) /* MM-DD */}</div>
-          <div style={{ fontWeight: 600 }}>
-            {p.pick_name}
-            {p.confidence === 'high' && (
-              <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--green-text)' }}>★</span>
-            )}
+
+      <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '70px 1fr 1fr 130px 90px 80px 70px 70px',
+          padding: '8px 12px', borderBottom: '1px solid var(--border)',
+          background: 'var(--bg-raised)', position: 'sticky', top: 0, zIndex: 1,
+          fontSize: 9, fontWeight: 700, letterSpacing: 0.4,
+          color: 'var(--text-3)', textTransform: 'uppercase',
+        }}>
+          <div>Date</div>
+          <div>Pick</div>
+          <div>vs</div>
+          <div>Tournament</div>
+          <div>Surface</div>
+          <div style={{ textAlign: 'right' }}>Pred.</div>
+          <div style={{ textAlign: 'right' }}>Score</div>
+          <div style={{ textAlign: 'right' }}>Odds</div>
+        </div>
+        {visible.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+            No {outcome === 'won' ? 'wins' : 'losses'} yet.
           </div>
-          <div style={{ color: 'var(--text-3)' }}>{p.opp_name}</div>
-          <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {p.tournament || '—'}
-          </div>
-          <div>
-            {p.surface ? <SurfaceBadge surface={p.surface} /> : <span style={{ color: 'var(--text-3)' }}>—</span>}
-          </div>
-          <div style={{ textAlign: 'right', fontWeight: 600 }}>
-            {fmtPctInt((p.pick_prob ?? 0) * 100)}
-          </div>
-          <div style={{ textAlign: 'right', fontSize: 11 }}>{p.score || '—'}</div>
-          <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-3)' }}>
-            {p.book_odds ? p.book_odds.toFixed(2) : `${p.rtt_odds?.toFixed(2) || '—'}*`}
-          </div>
-        </Link>
-      ))}
-    </div>
+        ) : visible.map((p) => (
+          <Link
+            key={p.match_id}
+            to={matchUrl(p)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '70px 1fr 1fr 130px 90px 80px 70px 70px',
+              padding: '9px 12px', borderBottom: '1px solid var(--border-faint)',
+              fontSize: 12, alignItems: 'center', fontVariantNumeric: 'tabular-nums',
+              background: p.won ? 'var(--green-bg)' : 'var(--red-bg)',
+              borderLeft: `3px solid ${p.won ? 'var(--green)' : 'var(--red)'}`,
+              textDecoration: 'none', color: 'inherit',
+            }}
+          >
+            <div style={{ fontSize: 11 }}>{p.event_date?.slice(5) /* MM-DD */}</div>
+            <div style={{ fontWeight: 600 }}>
+              {p.pick_name}
+              {p.confidence === 'high' && (
+                <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--green-text)' }}>★</span>
+              )}
+            </div>
+            <div style={{ color: 'var(--text-3)' }}>{p.opp_name}</div>
+            <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {p.tournament || '—'}
+            </div>
+            <div>
+              {p.surface ? <SurfaceBadge surface={p.surface} /> : <span style={{ color: 'var(--text-3)' }}>—</span>}
+            </div>
+            <div style={{ textAlign: 'right', fontWeight: 600 }}>
+              {fmtPctInt((p.pick_prob ?? 0) * 100)}
+            </div>
+            <div style={{ textAlign: 'right', fontSize: 11 }}>{p.score || '—'}</div>
+            <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-3)' }}>
+              {p.book_odds ? p.book_odds.toFixed(2) : `${p.rtt_odds?.toFixed(2) || '—'}*`}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -1281,9 +1326,9 @@ export default function PredictionsResults() {
           background: 'var(--bg-raised)', fontSize: 13, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span>Last 15 picks</span>
+          <span>Recent picks</span>
           <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-3)' }}>
-            Click a row for the match · scroll for more · * = RTT-implied odds (no bookmaker price)
+            Last {recent_picks?.length ?? 0} settled picks — filter by outcome below
           </span>
         </div>
         <RecentPicksTable items={recent_picks} />
