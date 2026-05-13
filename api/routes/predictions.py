@@ -1074,3 +1074,350 @@ def system_stats(code: str):
             for t in trend
         ],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /predictions/results — comprehensive results dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/predictions/results")
+def predictions_results():
+    """
+    Full results dashboard: all-time, last 30d, last 7d, by surface, by tour,
+    recent picks, weekly bars, streak, calibration, P&L trend.
+    Returns empty/zero data gracefully if no settled predictions yet.
+    """
+    try:
+        return _predictions_results_inner()
+    except Exception as e:
+        log.error(f"predictions_results error: {e}")
+        return {
+            "model_cutover": None,
+            "today": _empty_stat_block(),
+            "all_time": _empty_stat_block(),
+            "last_30d": _empty_stat_block(),
+            "last_7d": _empty_stat_block(),
+            "streak": None,
+            "best_7d": None,
+            "worst_7d": None,
+            "weekly_bars": [],
+            "recent_picks": [],
+            "by_surface": {"Clay": _empty_stat_block(), "Hard": _empty_stat_block(),
+                           "Grass": _empty_stat_block(), "Indoor": _empty_stat_block()},
+            "by_tour": {"ATP": _empty_stat_block(), "WTA": _empty_stat_block(),
+                        "Challenger": _empty_stat_block(), "ITF": _empty_stat_block()},
+            "edge_buckets": [],
+            "calibration": [],
+            "pnl_trend": [],
+            "error": str(e),
+        }
+
+
+def _empty_stat_block():
+    return {"picks_settled": 0, "picks_correct": 0, "accuracy_pct": None,
+            "profit_units": None, "roi_pct": None}
+
+
+def _stat_block_from_rows(rows) -> dict:
+    if not rows:
+        return _empty_stat_block()
+    r = rows[0] if isinstance(rows, list) else rows
+    if not r:
+        return _empty_stat_block()
+    settled = int(r.get("settled") or 0)
+    correct = int(r.get("correct") or 0)
+    acc = float(r["accuracy_pct"]) if r.get("accuracy_pct") is not None else None
+    pnl = float(r["profit_units"]) if r.get("profit_units") is not None else None
+    roi = float(r["roi_pct"])      if r.get("roi_pct")      is not None else None
+    return {"picks_settled": settled, "picks_correct": correct,
+            "accuracy_pct": acc, "profit_units": pnl, "roi_pct": roi}
+
+
+def _predictions_results_inner():
+    today = date.today()
+
+    # ── Model cutover date (earliest settled prediction) ──────────────────────
+    cutover_row = safe_query_one(
+        "SELECT MIN(DATE(settled_at)) AS cutover FROM model_predictions WHERE settled_at IS NOT NULL"
+    )
+    model_cutover = str(cutover_row["cutover"]) if cutover_row and cutover_row.get("cutover") else None
+
+    # ── Stat block helper (reusable SQL fragment) ─────────────────────────────
+    def _fetch_block(extra_where="", params=None):
+        row = safe_query_one(f"""
+            SELECT
+                COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS settled,
+                COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS correct,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51))
+                            / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                                       AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)), 0), 1
+                ) AS accuracy_pct,
+                ROUND(SUM(CASE WHEN mp.is_correct = TRUE
+                               AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                               THEN (1.0 / GREATEST(
+                                   CASE WHEN mp.predicted_winner = m.first_player_name
+                                        THEN mp.prob_first_player
+                                        ELSE mp.prob_second_player END, 0.01)) - 1
+                          WHEN mp.is_correct = FALSE
+                               AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                               THEN -1.0
+                          ELSE 0 END), 2) AS profit_units,
+                ROUND(100.0 * SUM(CASE WHEN mp.is_correct = TRUE
+                               AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                               THEN (1.0 / GREATEST(
+                                   CASE WHEN mp.predicted_winner = m.first_player_name
+                                        THEN mp.prob_first_player
+                                        ELSE mp.prob_second_player END, 0.01)) - 1
+                          WHEN mp.is_correct = FALSE
+                               AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                               THEN -1.0
+                          ELSE 0 END) / NULLIF(COUNT(*) FILTER (
+                              WHERE mp.settled_at IS NOT NULL
+                                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)), 0), 1
+                ) AS roi_pct
+            FROM model_predictions mp
+            JOIN matches m ON m.id = mp.match_id
+            WHERE mp.settled_at IS NOT NULL
+              {extra_where}
+        """, params)
+        return _stat_block_from_rows(row)
+
+    all_time = _fetch_block()
+    last_30d = _fetch_block("AND mp.settled_at >= NOW() - INTERVAL '30 days'")
+    last_7d  = _fetch_block("AND mp.settled_at >= NOW() - INTERVAL '7 days'")
+    today_block = _fetch_block("AND DATE(mp.settled_at) = CURRENT_DATE")
+
+    # ── By surface ────────────────────────────────────────────────────────────
+    def _by_surface(surf):
+        return _fetch_block(
+            "AND s.name ILIKE %s",
+            (f"%{surf}%",)
+        ) if True else _empty_stat_block()
+
+    # We need to join surfaces for surface breakdown
+    def _fetch_block_surface(surf):
+        row = safe_query_one(f"""
+            SELECT
+                COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS settled,
+                COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS correct,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51))
+                            / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                                       AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)), 0), 1
+                ) AS accuracy_pct,
+                NULL::numeric AS profit_units,
+                NULL::numeric AS roi_pct
+            FROM model_predictions mp
+            JOIN matches m ON m.id = mp.match_id
+            JOIN tournaments t ON t.id = m.tournament_id
+            JOIN surfaces s ON s.id = t.surface_id
+            WHERE mp.settled_at IS NOT NULL AND s.name ILIKE %s
+        """, (f"%{surf}%",))
+        return _stat_block_from_rows(row)
+
+    by_surface = {
+        "Clay":   _fetch_block_surface("Clay"),
+        "Hard":   _fetch_block_surface("Hard"),
+        "Grass":  _fetch_block_surface("Grass"),
+        "Indoor": _fetch_block_surface("Indoor"),
+    }
+
+    # ── By tour (ATP/WTA/Challenger/ITF from event_types) ────────────────────
+    def _fetch_block_tour(tour_like):
+        row = safe_query_one("""
+            SELECT
+                COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS settled,
+                COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                   AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS correct,
+                ROUND(100.0 * COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51))
+                            / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL
+                                                       AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)), 0), 1
+                ) AS accuracy_pct,
+                NULL::numeric AS profit_units,
+                NULL::numeric AS roi_pct
+            FROM model_predictions mp
+            JOIN matches m ON m.id = mp.match_id
+            JOIN tournaments t ON t.id = m.tournament_id
+            JOIN event_types et ON et.id = t.event_type_id
+            WHERE mp.settled_at IS NOT NULL AND et.name ILIKE %s
+        """, (f"%{tour_like}%",))
+        return _stat_block_from_rows(row)
+
+    by_tour = {
+        "ATP":        _fetch_block_tour("ATP"),
+        "WTA":        _fetch_block_tour("WTA"),
+        "Challenger": _fetch_block_tour("Challenger"),
+        "ITF":        _fetch_block_tour("ITF"),
+    }
+
+    # ── Recent picks (last 20 settled) ───────────────────────────────────────
+    recent_rows = safe_query("""
+        SELECT mp.match_id,
+               mp.predicted_winner, mp.is_correct,
+               mp.prob_first_player, mp.prob_second_player,
+               mp.confidence, mp.settled_at,
+               m.first_player_name, m.second_player_name,
+               m.event_date, m.final_result,
+               t.name AS tournament_name,
+               s.name AS surface_name
+        FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        WHERE mp.settled_at IS NOT NULL
+          AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+        ORDER BY mp.settled_at DESC
+        LIMIT 20
+    """)
+
+    def _fmt_pick(r):
+        p1p = float(r["prob_first_player"]) if r.get("prob_first_player") is not None else 0.5
+        p2p = float(r["prob_second_player"]) if r.get("prob_second_player") is not None else 0.5
+        prob_pick = p1p if r.get("predicted_winner") == r.get("first_player_name") else p2p
+        return {
+            "match_id": r["match_id"],
+            "predicted_winner": r.get("predicted_winner"),
+            "is_correct": r.get("is_correct"),
+            "confidence": r.get("confidence"),
+            "prob_pick": round(prob_pick, 4),
+            "p1_name": r.get("first_player_name"),
+            "p2_name": r.get("second_player_name"),
+            "score": r.get("final_result"),
+            "event_date": str(r["event_date"]) if r.get("event_date") else None,
+            "tournament": r.get("tournament_name"),
+            "surface": r.get("surface_name"),
+            "settled_at": str(r["settled_at"]) if r.get("settled_at") else None,
+        }
+
+    recent_picks = [_fmt_pick(r) for r in recent_rows]
+
+    # ── Weekly bars (last 12 weeks) ───────────────────────────────────────────
+    weekly_rows = safe_query("""
+        SELECT
+            DATE_TRUNC('week', mp.settled_at)::date AS week_start,
+            COUNT(*) FILTER (WHERE NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS settled,
+            COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                               AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)) AS correct,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE mp.is_correct = TRUE
+                                            AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51))
+                        / NULLIF(COUNT(*) FILTER (WHERE NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)), 0), 1
+            ) AS accuracy_pct
+        FROM model_predictions mp
+        WHERE mp.settled_at >= NOW() - INTERVAL '12 weeks'
+          AND mp.settled_at IS NOT NULL
+        GROUP BY week_start
+        ORDER BY week_start
+    """)
+
+    weekly_bars = [
+        {
+            "week_start": str(r["week_start"]),
+            "settled": int(r["settled"] or 0),
+            "correct": int(r["correct"] or 0),
+            "accuracy_pct": float(r["accuracy_pct"]) if r.get("accuracy_pct") is not None else None,
+        }
+        for r in weekly_rows
+    ]
+
+    # ── Streak ────────────────────────────────────────────────────────────────
+    streak_rows = safe_query("""
+        SELECT is_correct FROM model_predictions
+        WHERE settled_at IS NOT NULL
+          AND is_correct IS NOT NULL
+          AND NOT (prob_first_player BETWEEN 0.49 AND 0.51)
+        ORDER BY settled_at DESC
+        LIMIT 20
+    """)
+    streak = None
+    if streak_rows:
+        streak_type = "W" if streak_rows[0]["is_correct"] else "L"
+        streak_len = 0
+        for r in streak_rows:
+            if (r["is_correct"] and streak_type == "W") or (not r["is_correct"] and streak_type == "L"):
+                streak_len += 1
+            else:
+                break
+        if streak_len >= 2:
+            streak = {"type": streak_type, "len": streak_len}
+
+    # ── Calibration (predicted prob vs actual win rate by bucket) ─────────────
+    calib_rows = safe_query("""
+        SELECT
+            ROUND(GREATEST(mp.prob_first_player, mp.prob_second_player) * 10) / 10 AS prob_bucket,
+            COUNT(*) AS n,
+            ROUND(100.0 * SUM(CASE WHEN mp.is_correct THEN 1 ELSE 0 END) / COUNT(*), 1) AS actual_pct
+        FROM model_predictions mp
+        WHERE mp.settled_at IS NOT NULL
+          AND mp.is_correct IS NOT NULL
+          AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+        GROUP BY prob_bucket
+        HAVING COUNT(*) >= 5
+        ORDER BY prob_bucket
+    """)
+
+    calibration = [
+        {
+            "prob_bucket": float(r["prob_bucket"]) if r.get("prob_bucket") is not None else None,
+            "n": int(r["n"]),
+            "actual_pct": float(r["actual_pct"]) if r.get("actual_pct") is not None else None,
+        }
+        for r in calib_rows
+    ]
+
+    # ── P&L trend (cumulative, last 60 days) ──────────────────────────────────
+    pnl_rows = safe_query("""
+        SELECT
+            DATE(mp.settled_at) AS day,
+            SUM(CASE WHEN mp.is_correct = TRUE
+                     AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                     THEN (1.0 / GREATEST(
+                         CASE WHEN mp.predicted_winner = m.first_player_name
+                              THEN mp.prob_first_player
+                              ELSE mp.prob_second_player END, 0.01)) - 1
+                WHEN mp.is_correct = FALSE
+                     AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
+                     THEN -1.0
+                ELSE 0 END) AS daily_pnl
+        FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        WHERE mp.settled_at >= NOW() - INTERVAL '60 days'
+          AND mp.settled_at IS NOT NULL
+        GROUP BY day
+        ORDER BY day
+    """)
+
+    cumulative = 0.0
+    pnl_trend = []
+    for r in pnl_rows:
+        cumulative += float(r["daily_pnl"] or 0)
+        pnl_trend.append({
+            "day": str(r["day"]),
+            "daily_pnl": round(float(r["daily_pnl"] or 0), 3),
+            "cumulative_pnl": round(cumulative, 3),
+            "roi_pct": None,
+        })
+
+    return {
+        "model_cutover": model_cutover,
+        "today": today_block,
+        "all_time": all_time,
+        "last_30d": last_30d,
+        "last_7d": last_7d,
+        "streak": streak,
+        "best_7d": None,
+        "worst_7d": None,
+        "weekly_bars": weekly_bars,
+        "recent_picks": recent_picks,
+        "by_surface": by_surface,
+        "by_tour": by_tour,
+        "edge_buckets": [],
+        "calibration": calibration,
+        "pnl_trend": pnl_trend,
+    }
