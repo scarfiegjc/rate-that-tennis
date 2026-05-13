@@ -175,24 +175,24 @@ function MiniStatRow({ label, s, mode }) {
   }
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '90px 60px 60px 1fr',
-      padding: '7px 12px', borderBottom: '1px solid var(--border-faint)',
-      fontSize: 12, alignItems: 'center', fontVariantNumeric: 'tabular-nums',
+      display: 'grid', gridTemplateColumns: '60px 1fr 48px 1fr',
+      padding: '6px 10px', borderBottom: '1px solid var(--border-faint)',
+      fontSize: 11, alignItems: 'center', fontVariantNumeric: 'tabular-nums',
     }}>
       <div style={{
-        fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4,
-        fontSize: 10, color: 'var(--text-3)',
+        fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3,
+        fontSize: 9, color: 'var(--text-3)',
       }}>
         {label}
       </div>
-      <div>
+      <div style={{ fontSize: 10 }}>
         {v.wins}/{v.picks}
       </div>
-      <div style={{ color: v.winRate >= 50 ? 'var(--green-text)' : 'var(--text-3)' }}>
-        {fmtPct(v.winRate)}
+      <div style={{ color: v.winRate >= 50 ? 'var(--green-text)' : 'var(--text-3)', fontSize: 10 }}>
+        {fmtPctInt(v.winRate)}%
       </div>
-      <div style={{ textAlign: 'right', color: profitColour(v.pnl), fontWeight: 600 }}>
-        {fmtMoney(v.pnl)} <span style={{ color: 'var(--text-3)', fontWeight: 400, fontSize: 11 }}>({fmtPct(v.roi)})</span>
+      <div style={{ textAlign: 'right', color: profitColour(v.pnl), fontWeight: 600, fontSize: 10 }}>
+        {fmtMoney(v.pnl)} <span style={{ color: 'var(--text-3)', fontWeight: 400, fontSize: 9 }}>({fmtPctInt(v.roi)}%)</span>
       </div>
     </div>
   )
@@ -219,10 +219,10 @@ function BreakdownCard({ title, data, mode, surface }) {
         {title}
       </div>
       <div style={{
-        display: 'grid', gridTemplateColumns: '90px 60px 60px 1fr',
-        padding: '6px 12px', background: 'var(--bg-sunken)',
+        display: 'grid', gridTemplateColumns: '60px 1fr 48px 1fr',
+        padding: '5px 10px', background: 'var(--bg-sunken)',
         borderBottom: '1px solid var(--border-faint)',
-        fontSize: 9, fontWeight: 700, letterSpacing: 0.4,
+        fontSize: 8, fontWeight: 700, letterSpacing: 0.4,
         color: 'var(--text-3)', textTransform: 'uppercase',
       }}>
         <div>Window</div>

@@ -1323,10 +1323,10 @@ def _predictions_results_inner():
         JOIN event_types et2t ON et2t.id = t2t.event_type_id
     """
     by_tour = {
-        "ATP":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%ATP%",),        joins=tour_joins),
-        "WTA":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%WTA%",),        joins=tour_joins),
-        "Challenger": _fetch_breakdown("AND et2t.name ILIKE %s", ("%Challenger%",), joins=tour_joins),
-        "ITF":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%ITF%",),        joins=tour_joins),
+        "ATP":        _fetch_breakdown("AND et2t.tour_category = %s", ("ATP",),        joins=tour_joins),
+        "WTA":        _fetch_breakdown("AND et2t.tour_category = %s", ("WTA",),        joins=tour_joins),
+        "Challenger": _fetch_breakdown("AND et2t.tour_category = %s", ("Challenger",), joins=tour_joins),
+        "ITF":        _fetch_breakdown("AND et2t.tour_category = %s", ("ITF",),        joins=tour_joins),
     }
 
     # ── Recent picks (last 20 settled, individual rows) ───────────────────────
