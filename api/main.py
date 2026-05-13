@@ -40,6 +40,14 @@ try:
     from api.routes.tournaments import router as tournaments_router
 except ImportError:
     tournaments_router = None
+try:
+    from api.routes.account import router as account_router
+except ImportError:
+    account_router = None
+try:
+    from api.routes.admin_marketing import router as admin_marketing_router
+except ImportError:
+    admin_marketing_router = None
 
 log = logging.getLogger("api.main")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -84,7 +92,9 @@ app.include_router(stats_router, prefix="/api/v1")
 if lab_router:         app.include_router(lab_router,         prefix="/api/v1")
 if health_router:      app.include_router(health_router,      prefix="/api/v1")
 if diagnose_router:    app.include_router(diagnose_router,    prefix="/api/v1")
-if tournaments_router: app.include_router(tournaments_router, prefix="/api/v1")
+if tournaments_router:      app.include_router(tournaments_router,      prefix="/api/v1")
+if account_router:         app.include_router(account_router,         prefix="/api/v1")
+if admin_marketing_router: app.include_router(admin_marketing_router, prefix="/api/v1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
