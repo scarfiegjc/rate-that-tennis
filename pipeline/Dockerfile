@@ -32,17 +32,17 @@ COPY pipeline/fill_ratings.py        ./fill_ratings.py
 COPY pipeline/schema_additions.sql      ./schema_additions.sql
 COPY pipeline/predictions_schema.sql    ./predictions_schema.sql
 
-# ML package — all modules needed by the scheduler:
-#   rtt_predictor + systems (legacy / systems engine)
-#   predict + elo + features = LivePredictor (Elo-led match predictions)
-# Heavy train/backtest/ratings modules (scipy, xgboost, lightgbm) are
-# intentionally excluded — load_models() falls back to Elo cleanly when
-# no .pkl files are present, so the image stays slim.
+# ML package — all modules needed by the scheduler plus the trained model
+# pickles so LivePredictor uses the full XGBoost/LightGBM/Logistic ensemble
+# instead of falling back to Elo-only. xgboost + lightgbm are now in
+# requirements.txt so the ensemble pkl files deserialise correctly.
 COPY ml/__init__.py                  ./ml/__init__.py
 COPY ml/rtt_predictor.py             ./ml/rtt_predictor.py
 COPY ml/systems.py                   ./ml/systems.py
 COPY ml/predict.py                   ./ml/predict.py
 COPY ml/elo.py                       ./ml/elo.py
 COPY ml/features.py                  ./ml/features.py
+COPY ml/train.py                     ./ml/train.py
+COPY ml/models/                      ./ml/models/
 
 CMD ["python", "scheduler.py"]

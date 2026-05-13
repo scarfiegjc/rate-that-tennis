@@ -1161,6 +1161,7 @@ export default function PredictionsResults() {
         const hasData = settled > 0
         // P&L from the /results todayStats (bookmaker-aware) — shown as a bonus column
         const v = pickStats(todayStats, oddsMode)
+        const oddsLabel = oddsMode === 'book' ? 'book odds' : 'RTT odds'
         return (
           <div className="card" style={{
             padding: 16, marginBottom: 12,
