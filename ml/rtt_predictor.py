@@ -1162,7 +1162,7 @@ class RttPredictor:
                   AND m.first_player_id IS NOT NULL
                   AND m.second_player_id IS NOT NULL
                   AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
-                  AND (et.tour_category IS NULL OR et.tour_category NOT ILIKE '%ITF%')
+                  AND (et.tour_category IS NULL OR et.tour_category NOT ILIKE '%%ITF%%')
                 """,
                 (str(today), str(cutoff)),
             )

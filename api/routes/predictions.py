@@ -1040,7 +1040,7 @@ def _predictions_results_impl():
           -- "matches played on or after this date use the new model."
           AND m.event_date >= %s::date
           -- Exclude ITF — same as the homepage and prediction pipeline
-          AND (et.tour_category IS NULL OR et.tour_category NOT ILIKE '%ITF%')
+          AND (et.tour_category IS NULL OR et.tour_category NOT ILIKE '%%ITF%%')
         ORDER BY m.event_date DESC, mp.match_id DESC
         """,
         (MODEL_CUTOVER,),
