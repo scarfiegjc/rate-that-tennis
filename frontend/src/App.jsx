@@ -15,6 +15,7 @@ import PlayerDatabase from './pages/PlayerDatabase.jsx'
 import MyPicks from './pages/MyPicks.jsx'
 import StatConflicts from './pages/StatConflicts.jsx'
 import AffiliatesAdmin from './pages/AffiliatesAdmin.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 import rttLogo from './assets/rtt_logo.png'
 
 function Header() {
@@ -142,6 +143,7 @@ function AppRoutes() {
         <Route path="/systems/:code"          element={<SystemDetail />} />
         <Route path="/my-picks"               element={<MyPicks />} />
         <Route path="/stats"                  element={<StatConflicts />} />
+        <Route path="/admin"                   element={<AdminPage />} />
         <Route path="/admin/affiliates"       element={<AffiliatesAdmin />} />
       </Routes>
     </>
