@@ -111,7 +111,7 @@ def match_intelligence(match_id: int):
             mp.prob_first_player, mp.prob_second_player,
             mp.confidence, mp.rtt_gap, mp.surface_gap, mp.form_gap,
             mp.predicted_winner,
-            m.event_date, m.event_time, m.tournament_round,
+            m.event_date, m.event_time, m.tournament_round, m.event_status,
             t.name AS tournament_name,
             s.name AS surface_name,
             p1.id AS p1_id, p1.name AS p1_name, p1.full_name AS p1_full,
@@ -143,7 +143,14 @@ def match_intelligence(match_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    has_intel = bool(row.get("p1_intel") and row.get("p2_intel") and row.get("match_preview"))
+    # For finished matches, suppress stale pre-match intel. The text was
+    # written when the match was upcoming; reading it after the fact is
+    # both confusing (it claims "the model picks X") and embarrassing
+    # if the prose got the pick wrong against the actual winner.
+    finished = (row.get("event_status") or "").lower() == "finished"
+    has_intel = bool(
+        row.get("p1_intel") and row.get("p2_intel") and row.get("match_preview")
+    ) and not finished
 
     # Recent form for both players (last 10 W/L with opponent + score)
     def _form(pid):
@@ -501,11 +508,23 @@ def match_point_analysis(match_id: int):
             for k, v in s.items()
         }
 
+    # Tighten has_data: a row exists in player_point_stats but with every
+    # numeric column NULL/0 should NOT advertise itself as having data —
+    # the frontend will pass the guard then render '—' everywhere. Require
+    # at least one non-null serve metric on either side.
+    def _has_meaningful_data(s):
+        if not s:
+            return False
+        # Look for the canonical "we measured something" fields
+        return any(s.get(k) is not None for k in
+                   ("service_hold_pct", "bp_save_pct", "break_pct",
+                    "bp_conversion_pct", "matches_analyzed"))
+
     return {
         "match_id": match_id,
         "p1": _norm(p1_stats),
         "p2": _norm(p2_stats),
-        "has_data": bool(p1_stats or p2_stats),
+        "has_data": bool(_has_meaningful_data(p1_stats) or _has_meaningful_data(p2_stats)),
     }
 
 
@@ -808,39 +827,56 @@ def predictions_accuracy():
 
 @router.get("/predictions/stats")
 def predictions_stats():
-    """Overall and segmented accuracy."""
+    """Overall and segmented accuracy. Filters:
+    - New-model only: event_date >= 2026-05-10
+    - 50/50 picks excluded (prob between 0.499 and 0.501)
+    - Doubles excluded
+    """
+    MODEL_CUTOVER = "2026-05-10"
+    BASE_FILTER = """
+        JOIN matches m ON m.id = mp.match_id
+        WHERE m.event_date >= %(cutover)s::date
+          AND (mp.prob_first_player < 0.499 OR mp.prob_first_player > 0.501)
+          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+          AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Retired')
+    """
+
     overall = safe_query_one(
-        """
+        f"""
         SELECT
-            COUNT(*) FILTER (WHERE settled_at IS NOT NULL) AS settled,
-            COUNT(*) FILTER (WHERE is_correct)             AS correct,
+            COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL) AS settled,
+            COUNT(*) FILTER (WHERE mp.is_correct)             AS correct,
             ROUND(
-                100.0 * COUNT(*) FILTER (WHERE is_correct)
-                      / NULLIF(COUNT(*) FILTER (WHERE settled_at IS NOT NULL), 0), 2
+                100.0 * COUNT(*) FILTER (WHERE mp.is_correct)
+                      / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL), 0), 2
             ) AS accuracy_pct
-        FROM model_predictions
+        FROM model_predictions mp
+        {BASE_FILTER}
         """,
+        {"cutover": MODEL_CUTOVER},
     ) or {}
 
     by_confidence = safe_query(
-        """
+        f"""
         SELECT
-            confidence,
-            COUNT(*) FILTER (WHERE settled_at IS NOT NULL) AS settled,
-            COUNT(*) FILTER (WHERE is_correct)             AS correct,
+            mp.confidence,
+            COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL) AS settled,
+            COUNT(*) FILTER (WHERE mp.is_correct)             AS correct,
             ROUND(
-                100.0 * COUNT(*) FILTER (WHERE is_correct)
-                      / NULLIF(COUNT(*) FILTER (WHERE settled_at IS NOT NULL), 0), 2
+                100.0 * COUNT(*) FILTER (WHERE mp.is_correct)
+                      / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL), 0), 2
             ) AS accuracy_pct
-        FROM model_predictions
-        WHERE confidence IS NOT NULL
-        GROUP BY confidence
-        ORDER BY CASE confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
-        """
+        FROM model_predictions mp
+        {BASE_FILTER}
+          AND mp.confidence IS NOT NULL
+        GROUP BY mp.confidence
+        ORDER BY CASE mp.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+        """,
+        {"cutover": MODEL_CUTOVER},
     )
 
     by_surface = safe_query(
-        """
+        f"""
         SELECT
             s.name AS surface,
             COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL) AS settled,
@@ -850,13 +886,14 @@ def predictions_stats():
                       / NULLIF(COUNT(*) FILTER (WHERE mp.settled_at IS NOT NULL), 0), 2
             ) AS accuracy_pct
         FROM model_predictions mp
-        JOIN matches m ON m.id = mp.match_id
+        {BASE_FILTER}
         JOIN tournaments t ON t.id = m.tournament_id
         LEFT JOIN surfaces s ON s.id = t.surface_id
-        WHERE s.name IS NOT NULL
+          AND s.name IS NOT NULL
         GROUP BY s.name
         ORDER BY settled DESC
-        """
+        """,
+        {"cutover": MODEL_CUTOVER},
     )
 
     return {
@@ -887,17 +924,479 @@ def predictions_stats():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /predictions/results — full results dashboard data
+#   Powers the redesigned /predictions page (à la ratethat.dog results).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/predictions/results")
+def predictions_results():
+    # Wrap the entire body so the actual exception comes back as JSON
+    # instead of a generic 500 (Railway swallows tracebacks otherwise).
+    import traceback
+    try:
+        return _predictions_results_impl()
+    except Exception as e:
+        log.error(f"predictions_results failed: {e}")
+        log.error(traceback.format_exc())
+        return {
+            "error": str(e),
+            "type":  type(e).__name__,
+            "traceback": traceback.format_exc().splitlines()[-15:],
+        }
+
+
+def _predictions_results_impl():
+    """
+    One-shot payload for the results dashboard:
+      - top stats (all-time / last 30d / last 7d) with picks, wins, win rate,
+        P&L using RTT-implied odds (1/prob_pick), ROI%
+      - streak indicator
+      - best & worst pick of last 7 days
+      - last 15 settled picks (for the scrollable table)
+      - weekly bars (last 7 days, chronological)
+      - surface breakdown (Clay / Hard / Grass / Indoor)
+      - tour breakdown (ATP / WTA / Challenger / ITF)
+      - edge buckets (model prob - market implied prob, where bookmaker odds exist)
+      - calibration buckets (predicted % vs actual win %)
+      - cumulative P&L trend (for the overlay chart)
+
+    Conventions:
+      - £1 flat stake per pick
+      - "P&L using RTT odds" = profit at the model's own implied fair odds (1/prob)
+      - 50/50 picks (49–51%) excluded — those aren't real predictions
+      - Doubles excluded
+      - **Predictions BEFORE 2026-05-10 are excluded** — that's when the new
+        Elo+logistic LivePredictor replaced the additive-logit RttPredictor.
+        Old-model results would mislead the dashboard.
+    """
+    # New-model cutover: filter on predicted_at >= this date.
+    MODEL_CUTOVER = "2026-05-10"
+    # Pre-aggregate bookmaker odds in a CTE (one pass, hash-joined) instead
+    # of a correlated subquery (one round-trip per row). With ~1k+ settled
+    # predictions the correlated form runs ~18s; the CTE version is sub-second.
+    # Pre-aggregate bookmaker odds in a CTE (one pass, hash-joined) instead
+    # of a correlated subquery (one round-trip per row). Restrict the result
+    # set to the last 365 days — we don't need a 5-year cumulative trend on
+    # the dashboard and including very old settled predictions on a small
+    # Railway container makes the Python aggregation pass over hundreds of
+    # rows pointlessly slow.
+    rows = safe_query(
+        """
+        WITH pick_odds AS (
+            SELECT match_id, player_ref, MAX(decimal_odds) AS odds
+            FROM bookmaker_odds
+            GROUP BY match_id, player_ref
+        )
+        SELECT
+            mp.match_id,
+            m.event_date,
+            mp.prob_first_player,
+            mp.prob_second_player,
+            mp.predicted_winner,
+            mp.actual_winner,
+            mp.is_correct,
+            mp.confidence,
+            t.name AS tournament,
+            s.name AS surface,
+            et.tour_category,
+            p1.id   AS p1_id,
+            p1.name AS p1_name,
+            p1.country_code AS p1_country,
+            p2.id   AS p2_id,
+            p2.name AS p2_name,
+            p2.country_code AS p2_country,
+            m.final_result AS score,
+            po.odds AS pick_decimal_odds
+        FROM model_predictions mp
+        JOIN matches m ON m.id = mp.match_id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        LEFT JOIN event_types et ON et.id = m.event_type_id
+        LEFT JOIN players p1 ON p1.id = m.first_player_id
+        LEFT JOIN players p2 ON p2.id = m.second_player_id
+        LEFT JOIN pick_odds po
+            ON po.match_id   = mp.match_id
+           AND po.player_ref = mp.predicted_winner
+        WHERE mp.settled_at IS NOT NULL
+          AND mp.predicted_winner IS NOT NULL
+          AND mp.actual_winner   IS NOT NULL
+          AND mp.is_correct      IS NOT NULL
+          -- Same 50/50 threshold as /predictions/today: exclude only the
+          -- narrow 0.499..0.501 band so the two endpoints agree. The
+          -- previous 0.49/0.51 band silently dropped real low-conviction
+          -- picks and produced a different win rate.
+          -- NB: do not write a literal pct sign here, psycopg2 treats it
+          -- as a parameter placeholder even inside SQL comments.
+          AND (mp.prob_first_player < 0.499 OR mp.prob_first_player > 0.501)
+          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+          -- Match the today endpoint's exclusions: ignore non-played statuses
+          -- (cancelled/walkover/postponed/retired) so the two pages count
+          -- the same set of settled matches.
+          AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Retired')
+          -- New-model cutover: filter on the EVENT date, not predicted_at.
+          -- Some of today's matches were first predicted yesterday and
+          -- weren't re-predicted before they started; filtering on
+          -- predicted_at would drop them. The cutover semantically means
+          -- "matches played on or after this date use the new model."
+          AND m.event_date >= %s::date
+        ORDER BY m.event_date DESC, mp.match_id DESC
+        """,
+        (MODEL_CUTOVER,),
+    )
+
+    today = date.today()
+    d7  = today - timedelta(days=7)
+    d30 = today - timedelta(days=30)
+
+    def _surface_bucket(name: Optional[str]) -> str:
+        s = (name or "").lower()
+        if "indoor" in s or "carpet" in s: return "Indoor"
+        if "clay"  in s: return "Clay"
+        if "grass" in s: return "Grass"
+        if "hard"  in s: return "Hard"
+        return "Other"
+
+    def _tour_bucket(cat: Optional[str]) -> str:
+        c = (cat or "").upper()
+        if "CHALLENGER" in c: return "Challenger"
+        if "ITF"        in c: return "ITF"
+        if "WTA"        in c: return "WTA"
+        if "ATP"        in c: return "ATP"
+        return "Other"
+
+    items: list[dict] = []
+    for r in rows:
+        p1p = float(r["prob_first_player"])  if r.get("prob_first_player")  is not None else None
+        p2p = float(r["prob_second_player"]) if r.get("prob_second_player") is not None else None
+        if p1p is None or p2p is None:
+            continue
+        # Derive pick_side from probabilities directly, NOT from the
+        # predicted_winner column. predicted_winner can be left stale by a
+        # predictor-version swap (the row keeps an old pick while the
+        # probabilities flip). Reading the probabilities is the source of
+        # truth and is always consistent with what the model thinks now.
+        pick_side = "first_player" if p1p >= p2p else "second_player"
+        pick_prob = p1p if pick_side == "first_player" else p2p
+        if pick_prob <= 0:
+            continue
+        pick_name = r["p1_name"] if pick_side == "first_player" else r["p2_name"]
+        opp_name  = r["p2_name"] if pick_side == "first_player" else r["p1_name"]
+        # Re-derive correctness too — actual_winner is fine, but is_correct
+        # was computed against the (possibly stale) predicted_winner. Use
+        # actual_winner == derived pick_side as the source of truth.
+        actual = r.get("actual_winner")
+        won = (actual is not None) and (actual == pick_side)
+
+        # P&L at the model's own implied fair odds (1/prob_pick), £1 stake
+        rtt_odds = 1.0 / pick_prob
+        pl_rtt = round(rtt_odds - 1.0, 4) if won else -1.0
+
+        # P&L at best bookmaker odds (only when we have a price)
+        book_odds = float(r["pick_decimal_odds"]) if r.get("pick_decimal_odds") else None
+        if book_odds and book_odds > 1.0:
+            pl_book = round(book_odds - 1.0, 4) if won else -1.0
+        else:
+            pl_book = None
+
+        # Edge in % points: model prob - market implied prob
+        edge_pp = None
+        if book_odds and book_odds > 1.0:
+            mkt_implied = 1.0 / book_odds
+            edge_pp = (pick_prob - mkt_implied) * 100.0
+
+        items.append({
+            "match_id":   r["match_id"],
+            "event_date": str(r["event_date"]),
+            "tournament": r.get("tournament"),
+            "surface":    r.get("surface"),
+            "surface_bucket": _surface_bucket(r.get("surface")),
+            "tour_bucket":    _tour_bucket(r.get("tour_category")),
+            "p1": {"id": r.get("p1_id"), "name": r.get("p1_name"), "country_code": r.get("p1_country")},
+            "p2": {"id": r.get("p2_id"), "name": r.get("p2_name"), "country_code": r.get("p2_country")},
+            "pick_side":  pick_side,
+            "pick_name":  pick_name,
+            "opp_name":   opp_name,
+            "pick_prob":  pick_prob,
+            "p1_prob":    p1p,
+            "p2_prob":    p2p,
+            "won":        won,
+            "score":      r.get("score"),
+            "rtt_odds":   round(rtt_odds, 3),
+            "book_odds":  round(book_odds, 3) if book_odds else None,
+            "edge_pp":    round(edge_pp, 1) if edge_pp is not None else None,
+            "pl_rtt":     pl_rtt,
+            "pl_book":    pl_book,
+            "confidence": r.get("confidence"),
+        })
+
+    def _agg(picks: list[dict]) -> dict:
+        n = len(picks)
+        wins = sum(1 for p in picks if p["won"])
+
+        # P&L using RTT-implied fair odds — every pick has this.
+        pnl_rtt = sum(p["pl_rtt"] for p in picks)
+
+        # P&L using best bookmaker odds — only the subset where we have a
+        # market price. Denominator for ROI is the priced subset, NOT the
+        # total bucket, otherwise ROI is artificially diluted.
+        priced  = [p for p in picks if p["pl_book"] is not None]
+        n_book  = len(priced)
+        pnl_book = sum(p["pl_book"] for p in priced)
+        wins_book = sum(1 for p in priced if p["won"])
+
+        return {
+            "picks":            n,
+            "wins":             wins,
+            "win_rate_pct":     round(100.0 * wins / n, 1) if n else None,
+            # Default fields use RTT odds for backwards compatibility
+            "pnl":              round(pnl_rtt, 2) if n else None,
+            "roi_pct":          round(100.0 * pnl_rtt / n, 1) if n else None,
+            # Per-mode breakdown for the frontend toggle
+            "pnl_rtt":          round(pnl_rtt, 2) if n else None,
+            "roi_rtt_pct":      round(100.0 * pnl_rtt / n, 1) if n else None,
+            "priced_picks":     n_book,
+            "wins_priced":      wins_book,
+            "pnl_book":         round(pnl_book, 2) if n_book else None,
+            "roi_book_pct":     round(100.0 * pnl_book / n_book, 1) if n_book else None,
+        }
+
+    items_30  = [i for i in items if date.fromisoformat(i["event_date"]) >= d30]
+    items_7   = [i for i in items if date.fromisoformat(i["event_date"]) >= d7]
+    items_tdy = [i for i in items if date.fromisoformat(i["event_date"]) == today]
+
+    by_surface = {}
+    for surf in ("Clay", "Hard", "Grass", "Indoor"):
+        s_all = [i for i in items    if i["surface_bucket"] == surf]
+        s_30  = [i for i in items_30 if i["surface_bucket"] == surf]
+        s_7   = [i for i in items_7  if i["surface_bucket"] == surf]
+        by_surface[surf] = {"all_time": _agg(s_all), "last_30d": _agg(s_30), "last_7d": _agg(s_7)}
+
+    by_tour = {}
+    for tour in ("ATP", "WTA", "Challenger", "ITF"):
+        t_all = [i for i in items    if i["tour_bucket"] == tour]
+        t_30  = [i for i in items_30 if i["tour_bucket"] == tour]
+        t_7   = [i for i in items_7  if i["tour_bucket"] == tour]
+        by_tour[tour] = {"all_time": _agg(t_all), "last_30d": _agg(t_30), "last_7d": _agg(t_7)}
+
+    # Edge buckets — only items with bookmaker odds.
+    # ROI must divide P&L by the count of picks WITH odds (the staked subset),
+    # not the bucket headcount, otherwise ROI is understated.
+    edge_items = [i for i in items if i["edge_pp"] is not None]
+    bucket_defs = [
+        (-999, 0,   "<0%"),    # model less confident than market
+        (0,    3,   "0–3%"),
+        (3,    6,   "3–6%"),
+        (6,    10,  "6–10%"),
+        (10,   999, "10%+"),
+    ]
+    edge_buckets = []
+    for lo, hi, label in bucket_defs:
+        b = [i for i in edge_items if lo <= i["edge_pp"] < hi]
+        n = len(b)
+        wins = sum(1 for i in b if i["won"])
+        priced = [i for i in b if i["pl_book"] is not None]
+        n_priced = len(priced)
+        pnl_book = sum(i["pl_book"] for i in priced)
+        edge_buckets.append({
+            "label":         label,
+            "picks":         n,
+            "wins":          wins,
+            "win_rate_pct":  round(100.0 * wins / n, 1) if n else None,
+            "pnl_book":      round(pnl_book, 2)         if n_priced else None,
+            "roi_pct":       round(100.0 * pnl_book / n_priced, 1) if n_priced else None,
+        })
+
+    # Calibration: bucket by predicted probability for the pick
+    cal_defs = [(0.50, 0.60, "50–60%"), (0.60, 0.70, "60–70%"),
+                (0.70, 0.80, "70–80%"), (0.80, 1.01, "80%+")]
+    calibration = []
+    for lo, hi, label in cal_defs:
+        b = [i for i in items if lo <= i["pick_prob"] < hi]
+        n = len(b)
+        wins = sum(1 for i in b if i["won"])
+        avg_pred = (sum(i["pick_prob"] for i in b) / n) if n else None
+        calibration.append({
+            "label":         label,
+            "picks":         n,
+            "predicted_pct": round(100.0 * avg_pred, 1) if avg_pred is not None else None,
+            "actual_pct":    round(100.0 * wins / n, 1)  if n else None,
+        })
+
+    # Streak — items are already DESC by date
+    streak_type, streak_len = None, 0
+    for i in items:
+        kind = "W" if i["won"] else "L"
+        if streak_type is None:
+            streak_type, streak_len = kind, 1
+        elif kind == streak_type:
+            streak_len += 1
+        else:
+            break
+
+    # Best & worst pick of last 7 days, by realised P&L using RTT odds
+    best_7  = max(items_7, key=lambda i: i["pl_rtt"], default=None)
+    worst_7 = min(items_7, key=lambda i: i["pl_rtt"], default=None)
+
+    # Last 15 settled picks (already DESC)
+    recent_picks = items[:15]
+
+    # Weekly bars — last 7 days, chronological
+    weekly_bars = sorted(items_7, key=lambda i: (i["event_date"], i["match_id"]))
+
+    # Cumulative P&L trend for the overlay chart
+    pnl_trend = []
+    cum_pl = 0.0
+    cum_n  = 0
+    for i in sorted(items, key=lambda x: (x["event_date"], x["match_id"])):
+        cum_pl += i["pl_rtt"]
+        cum_n  += 1
+        pnl_trend.append({
+            "date":              i["event_date"],
+            "cumulative_pnl":    round(cum_pl, 2),
+            "cumulative_picks":  cum_n,
+            "roi_pct":           round(100.0 * cum_pl / cum_n, 1),
+        })
+    # Collapse to per-day endpoints (one point per date) — keeps payload small
+    by_day = {}
+    for p in pnl_trend:
+        by_day[p["date"]] = p
+    pnl_trend = list(by_day.values())
+
+    return {
+        "model_cutover": MODEL_CUTOVER,
+        "today":         _agg(items_tdy),
+        "all_time":      _agg(items),
+        "last_30d":      _agg(items_30),
+        "last_7d":       _agg(items_7),
+        "streak":        {"type": streak_type, "len": streak_len} if streak_type else None,
+        "best_7d":       best_7,
+        "worst_7d":      worst_7,
+        "recent_picks":  recent_picks,
+        "weekly_bars":   weekly_bars,
+        "by_surface":    by_surface,
+        "by_tour":       by_tour,
+        "edge_buckets":  edge_buckets,
+        "calibration":   calibration,
+        "pnl_trend":     pnl_trend,
+        "note":          f"£1 flat stake. P&L at RTT-implied odds. 50/50 picks excluded. New model live from {MODEL_CUTOVER} — earlier predictions not included.",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /systems
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/systems")
-def list_systems():
-    rows = safe_query(
+@router.get("/systems/dashboard")
+def systems_dashboard():
+    """
+    One-shot payload for the systems tracker on the predictions page:
+    every active system with its all-time stats AND its currently-open
+    picks (matches today or in the next 2 days that haven't settled).
+    """
+    systems_rows = safe_query(
         """
         SELECT system_id AS id, code, name, description, icon, accent_colour,
                picks_total, picks_settled, picks_correct, accuracy_pct,
                profit_units, roi_pct
         FROM v_systems_stats
+        WHERE is_active = TRUE
+        ORDER BY picks_total DESC NULLS LAST, name
+        """
+    )
+
+    out = []
+    for s in systems_rows:
+        picks = safe_query(
+            """
+            SELECT
+                sp.id            AS pick_id,
+                sp.match_id,
+                sp.pick,
+                sp.confidence,
+                sp.reason,
+                sp.pick_prob,
+                sp.market_odds,
+                m.event_date, m.event_time, m.event_status,
+                t.name AS tournament,
+                s.name AS surface,
+                m.tournament_round AS round,
+                p1.id AS p1_id, p1.name AS p1_name, p1.country_code AS p1_country,
+                p2.id AS p2_id, p2.name AS p2_name, p2.country_code AS p2_country
+            FROM system_picks sp
+            JOIN matches m       ON m.id = sp.match_id
+            LEFT JOIN tournaments t ON t.id = m.tournament_id
+            LEFT JOIN surfaces s    ON s.id = t.surface_id
+            LEFT JOIN players p1    ON p1.id = m.first_player_id
+            LEFT JOIN players p2    ON p2.id = m.second_player_id
+            WHERE sp.system_id = %s
+              AND sp.settled_at IS NULL
+              AND m.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+            ORDER BY m.event_date, m.event_time NULLS LAST
+            """,
+            (s["id"],),
+        )
+
+        picks_serialised = []
+        for p in picks:
+            pick_side = p["pick"]
+            picked = {
+                "id":           p["p1_id"] if pick_side == "first_player" else p["p2_id"],
+                "name":         p["p1_name"] if pick_side == "first_player" else p["p2_name"],
+                "country_code": p["p1_country"] if pick_side == "first_player" else p["p2_country"],
+            }
+            opp = {
+                "id":           p["p2_id"] if pick_side == "first_player" else p["p1_id"],
+                "name":         p["p2_name"] if pick_side == "first_player" else p["p1_name"],
+                "country_code": p["p2_country"] if pick_side == "first_player" else p["p1_country"],
+            }
+            picks_serialised.append({
+                "pick_id":     p["pick_id"],
+                "match_id":    p["match_id"],
+                "event_date":  str(p["event_date"]) if p.get("event_date") else None,
+                "event_time":  str(p["event_time"]) if p.get("event_time") else None,
+                "event_status": p.get("event_status"),
+                "tournament":  p.get("tournament"),
+                "surface":     p.get("surface"),
+                "round":       p.get("round"),
+                "confidence":  p.get("confidence"),
+                "reason":      p.get("reason"),
+                "pick_prob":   float(p["pick_prob"]) if p.get("pick_prob") is not None else None,
+                "market_odds": float(p["market_odds"]) if p.get("market_odds") is not None else None,
+                "pick":        picked,
+                "opponent":    opp,
+            })
+
+        out.append({
+            "id":            s["id"],
+            "code":          s["code"],
+            "name":          s["name"],
+            "description":   s["description"],
+            "icon":          s["icon"],
+            "accent_colour": s["accent_colour"],
+            "stats": {
+                "picks_total":  s["picks_total"] or 0,
+                "picks_settled": s["picks_settled"] or 0,
+                "picks_correct": s["picks_correct"] or 0,
+                "accuracy_pct":  float(s["accuracy_pct"]) if s.get("accuracy_pct") is not None else None,
+                "profit_units":  float(s["profit_units"]) if s.get("profit_units") is not None else None,
+                "roi_pct":       float(s["roi_pct"])      if s.get("roi_pct")      is not None else None,
+            },
+            "open_picks": picks_serialised,
+        })
+
+    return {"systems": out}
+
+
+@router.get("/systems")
+def list_systems(include_inactive: bool = False):
+    where = "" if include_inactive else "WHERE is_active = TRUE"
+    rows = safe_query(
+        f"""
+        SELECT system_id AS id, code, name, description, icon, accent_colour,
+               picks_total, picks_settled, picks_correct, accuracy_pct,
+               profit_units, roi_pct
+        FROM v_systems_stats
+        {where}
         ORDER BY picks_total DESC NULLS LAST, name
         """
     )

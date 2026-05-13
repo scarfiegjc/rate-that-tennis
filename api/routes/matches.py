@@ -9,8 +9,45 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
 from api.db import query, query_one
+# Reuse the sa_player_id resolver from players.py — the same name-bridging
+# logic is needed to pull career serve averages for the Statistics tab.
+from api.routes.players import _sa_ids_for as _sa_ids_for_player
 
 router = APIRouter(prefix="/matches", tags=["matches"])
+
+
+def _career_serve_for(player_id: int) -> dict:
+    """
+    Pull a player's career serve averages from sa_matches (where the player
+    was the winner — most complete stats). Same query that powers the
+    /players/{id}/stats endpoint, lifted here so the match-detail page
+    Statistics tab can render aces %, 1st serve %, BP save %, etc.
+    without a second API call.
+    """
+    try:
+        sa_ids = _sa_ids_for_player(player_id)
+        if not sa_ids:
+            return {}
+        row = query_one(
+            """
+            SELECT
+                ROUND((AVG(sm.w_ace::float / NULLIF(sm.w_svpt,0)) * 100)::numeric, 1) AS avg_ace_pct,
+                ROUND((AVG(sm.w_df::float  / NULLIF(sm.w_svpt,0)) * 100)::numeric, 1) AS avg_df_pct,
+                ROUND((AVG(sm.w_1st_serve_pct) * 100)::numeric, 1)                     AS avg_1st_serve_pct,
+                ROUND((AVG(sm.w_1st_won_pct)   * 100)::numeric, 1)                     AS avg_1st_won_pct,
+                ROUND((AVG(sm.w_2nd_won_pct)   * 100)::numeric, 1)                     AS avg_2nd_won_pct,
+                ROUND((AVG(sm.w_bp_save_pct)   * 100)::numeric, 1)                     AS avg_bp_save_pct,
+                COUNT(*) AS sample_size
+            FROM sa_matches sm
+            WHERE sm.winner_id = ANY(%s)
+              AND sm.w_svpt IS NOT NULL AND sm.w_svpt > 0
+            """,
+            [sa_ids],
+        )
+        return {k: (float(v) if v is not None and k != "sample_size" else v)
+                for k, v in (row or {}).items()}
+    except Exception:
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,6 +312,11 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
     p1_stats = _surface_stats(p1_id)
     p2_stats = _surface_stats(p2_id)
 
+    # Career serve averages — wires the Statistics tab to real numbers
+    # rather than leaving every serve cell as '—'.
+    p1_career = _career_serve_for(p1_id) if p1_id else {}
+    p2_career = _career_serve_for(p2_id) if p2_id else {}
+
     # Per-player computed metrics: 3 new ratings + 8 statistics each.
     # Wrapped so any failure here can't break the match page.
     p1_metrics = {"ratings": {}, "stats": {}}
@@ -359,6 +401,14 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
             )
         edge = {"p1": e_p1, "p2": e_p2, "best_value": best}
 
+    # Defense-in-depth: the pipeline occasionally leaves is_live=true on
+    # rows whose event_status has already flipped to Finished. The frontend
+    # gates "live score" rendering on is_live, so a stuck flag means a
+    # finished match shows a pulsing IN PLAY indicator and no final score.
+    # Force is_live=false here whenever status is Finished.
+    status_str = (m.get("event_status") or "").lower()
+    is_live_flag = bool(m.get("is_live")) and ("finished" not in status_str)
+
     return {
         "match": {
             "match_id": m["id"],
@@ -368,10 +418,11 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
             "event_date": str(m["event_date"]) if m.get("event_date") else None,
             "event_time": str(m["event_time"]) if m.get("event_time") else None,
             "status": m.get("event_status"),
-            "is_live": bool(m.get("is_live")),
+            "is_live": is_live_flag,
             "set_scores": m.get("set_scores"),
             "game_result": m.get("game_result"),
             "final_result": m.get("final_result"),
+            "serve": m.get("serve"),
             "winner": m.get("winner"),
         },
         "players": {
@@ -381,6 +432,7 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
                 "form_dots": p1_form,
                 "stats": p1_stats,
                 "metrics": p1_metrics["stats"],
+                "career_serve": p1_career,
             },
             "second": {
                 **p2,
@@ -388,6 +440,7 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
                 "form_dots": p2_form,
                 "stats": p2_stats,
                 "metrics": p2_metrics["stats"],
+                "career_serve": p2_career,
             },
         },
         "context": {
@@ -423,9 +476,10 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             m.winner,
             m.final_result,
             m.game_result,
+            m.serve,
             m.is_live,
             t.name AS tournament_name,
-            s.name AS surface_name,
+            COALESCE(NULLIF(s.name, 'Unknown'), 'Hard') AS surface_name,
             p1.name AS p1_name,
             p1.country_code AS p1_country,
             p2.name AS p2_name,
@@ -508,7 +562,10 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             "final_result": m.get("final_result"),
             "game_result": m.get("game_result"),
             "set_scores":   m.get("set_scores"),
-            "is_live": m.get("is_live"),
+            "serve":        m.get("serve"),
+            # Same defense as in /matches/{id}: never claim is_live for a
+            # Finished match even if the DB row still says so.
+            "is_live": bool(m.get("is_live")) and "finished" not in (m.get("event_status") or "").lower(),
             "is_doubles": bool(m.get("is_doubles")),
             "gender": m.get("event_gender"),  # 'Men' | 'Women' | None
             "first_player": {
@@ -565,9 +622,10 @@ def get_match(match_id: int):
             m.winner,
             m.final_result,
             m.game_result,
+            m.serve,
             m.is_live,
             t.name AS tournament_name,
-            s.name AS surface_name,
+            COALESCE(NULLIF(s.name, 'Unknown'), 'Hard') AS surface_name,
             COALESCE(
                 (SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number)
                  FROM match_scores ms WHERE ms.match_id = m.id),
