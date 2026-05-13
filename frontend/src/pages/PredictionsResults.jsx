@@ -908,7 +908,7 @@ function TodayRow({ p }) {
   const p2Pct = p.p2?.prob != null ? Math.round(p.p2.prob * 100) : null
   const isPending = p1Pct == null
   // A 50/50 prob isn't really a pick — show neutral, not red-on-settle.
-  const isFiftyFifty = p.p1?.prob != null && Math.abs(p.p1.prob - 0.5) < 0.01
+  const isFiftyFifty = p.p1?.prob != null && Math.abs(p.p1.prob - 0.5) < 0.05
   const isSettled = !isFiftyFifty && (p.is_correct === true || p.is_correct === false)
   const winnerSide = p.actual_winner === 'first_player' ? 'p1'
                    : p.actual_winner === 'second_player' ? 'p2' : null
@@ -990,7 +990,7 @@ function TodayStrip({ today }) {
       </div>
     )
   }
-  const isNoPick = p => p.p1?.prob != null && Math.abs(p.p1.prob - 0.5) < 0.01
+  const isNoPick = p => p.p1?.prob != null && Math.abs(p.p1.prob - 0.5) < 0.05
   const noPickCount = today.predictions.filter(isNoPick).length
   // Sort: settled first (results), then live, then upcoming
   const sorted = [...today.predictions]
@@ -1152,15 +1152,20 @@ export default function PredictionsResults() {
         </div>
       )}
 
-      {/* TODAY's results — prominent strip at the very top */}
+      {/* TODAY's results — uses today.summary so the numbers match the strip exactly */}
       {(() => {
+        const s = today?.summary || {}
+        const wins    = s.correct  ?? 0
+        const settled = s.settled  ?? 0
+        const winRate = settled > 0 ? Math.round(100 * wins / settled) : null
+        const hasData = settled > 0
+        // P&L from the /results todayStats (bookmaker-aware) — shown as a bonus column
         const v = pickStats(todayStats, oddsMode)
-        const oddsLabel = oddsMode === 'book' ? 'best bookmaker price' : 'RTT-implied fair odds'
         return (
           <div className="card" style={{
             padding: 16, marginBottom: 12,
-            borderTop: '3px solid var(--green)',
-            background: v.hasData ? 'var(--bg-card)' : 'var(--bg-raised)',
+            borderTop: `3px solid ${winRate == null ? 'var(--border)' : winRate >= 55 ? 'var(--green)' : winRate >= 45 ? 'var(--amber)' : 'var(--red)'}`,
+            background: hasData ? 'var(--bg-card)' : 'var(--bg-raised)',
           }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
@@ -1173,32 +1178,28 @@ export default function PredictionsResults() {
                 Today
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                {v.hasData
-                  ? (oddsMode === 'book'
-                       ? `Settled picks from today with bookmaker odds (${v.picks}/${todayStats?.picks ?? 0} priced)`
-                       : 'Settled picks from today')
-                  : (oddsMode === 'book'
-                       ? 'No settled picks today have bookmaker odds yet'
-                       : 'No settled picks today yet')}
+                {hasData
+                  ? `${settled} real picks settled (55%+ confidence) · matches below`
+                  : 'No picks settled yet today'}
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
-                  {v.wins}<span style={{ color: 'var(--text-3)', fontWeight: 500 }}>/{v.picks}</span>
+                  {wins}<span style={{ color: 'var(--text-3)', fontWeight: 500 }}>/{settled}</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 3 }}>
-                  Wins / picks{oddsMode === 'book' ? ' (priced)' : ''}
+                  Wins / picks
                 </div>
               </div>
               <div>
                 <div style={{
                   fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
-                  color: v.winRate == null ? 'var(--text-3)'
-                       : v.winRate >= 55 ? 'var(--green-text)'
-                       : v.winRate >= 50 ? 'var(--text)' : 'var(--text-3)',
+                  color: winRate == null ? 'var(--text-3)'
+                       : winRate >= 55 ? 'var(--green-text)'
+                       : winRate >= 50 ? 'var(--text)' : 'var(--text-3)',
                 }}>
-                  {fmtPct(v.winRate)}
+                  {winRate != null ? `${winRate}%` : '—'}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 3 }}>
                   Win rate

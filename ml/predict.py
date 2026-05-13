@@ -98,7 +98,7 @@ DB_URL = (
 
 MODELS_DIR  = Path(__file__).parent / "models"
 RESULTS_DIR = Path(__file__).parent / "results"
-MODEL_VERSION = "v2-namekey-elo-blend"
+MODEL_VERSION = "v4-full-ensemble"
 
 # ─────────────────────────────────────────────
 # FACTOR DESCRIPTIONS
@@ -125,13 +125,14 @@ FACTOR_LABELS = {
     'age_diff':         "Age/experience differential",
     'level_enc':        "Tournament level importance",
     'round_enc':        "Tournament stage pressure",
+    'home_adv_p1':      "Home crowd / local advantage",
 }
 
 FACTOR_DIRECTION = {
     # For these features, positive value = p1 advantage
     'elo_diff', 'surf_elo_diff', 'form_diff_10', 'form_diff_20',
     'surf_form_diff', 'svpt_won_diff', 'ret_won_diff', 'bp_save_diff',
-    'bp_conv_diff', 'rank_pts_diff',
+    'bp_conv_diff', 'rank_pts_diff', 'home_adv_p1',
 }
 
 FACTOR_NEGATIVE_DIRECTION = {
@@ -195,15 +196,13 @@ class LivePredictor:
     to give the richest possible feature set.
     """
 
-    def __init__(self, db_url: str = DB_URL, neutralise_rtt: bool = True):
+    def __init__(self, db_url: str = DB_URL, neutralise_rtt: bool = False):
         self.db_url = db_url
         self._models: dict[str, object] = {}
         self._elo_engine = None
         self._player_window = None
         self._h2h_tracker = None
-        # See predict_match() — when True, RTT-derived features are forced to
-        # the population median (50). Defaults to True until ml.ratings has
-        # been rerun against the corrected match data.
+        # RTT features enabled by default — run ml.ratings before first use
         self.neutralise_rtt = neutralise_rtt
         # Player keying: normalised-name → synthetic int id used internally
         # by Elo / PlayerWindow / H2HTracker. This unifies Sackmann historical
@@ -474,18 +473,24 @@ class LivePredictor:
             def _f(v):
                 return float(v) if v is not None else None
 
+            _score_str = row.get('score') or ''
+            _is_ret = 'RET' in str(_score_str).upper() or 'W/O' in str(_score_str).upper()
             self._player_window.update(w_id, won=True,  surface=surface, match_date=date,
                                        svpt_won=_f(w_svpt_won), ret_won=_f(w_ret_won),
                                        ace_rate=_f(safe_pct(row.get('w_ace'), row.get('w_sv_gms'))),
                                        df_rate=_f(safe_pct(row.get('w_df'), row.get('w_sv_gms'))),
                                        bp_save=_f(row.get('w_bp_save_pct')),
-                                       bp_conv=_f(w_bp_conv))
+                                       bp_conv=_f(w_bp_conv),
+                                       opponent_rank=int(row['loser_rank']) if row.get('loser_rank') else None,
+                                       score=_score_str, retired=_is_ret)
             self._player_window.update(l_id, won=False, surface=surface, match_date=date,
                                        svpt_won=_f(l_svpt_won), ret_won=_f(l_ret_won),
                                        ace_rate=_f(safe_pct(row.get('l_ace'), row.get('l_sv_gms'))),
                                        df_rate=_f(safe_pct(row.get('l_df'), row.get('l_sv_gms'))),
                                        bp_save=_f(row.get('l_bp_save_pct')),
-                                       bp_conv=_f(l_bp_conv))
+                                       bp_conv=_f(l_bp_conv),
+                                       opponent_rank=int(row['winner_rank']) if row.get('winner_rank') else None,
+                                       score=_score_str, retired=_is_ret)
             self._h2h_tracker.update(w_id, l_id, surface)
 
         log.info("  Player history built")
@@ -541,8 +546,8 @@ class LivePredictor:
         surf_elo_win_prob = expected_score(p1_surf_elo, p2_surf_elo) if surf_key else None
 
         # ── Rolling stats
-        p1_w = self._player_window.get_stats(p1_skey, surface, [10, 20, 50])
-        p2_w = self._player_window.get_stats(p2_skey, surface, [10, 20, 50])
+        p1_w = self._player_window.get_stats(p1_skey, surface, [10, 20, 50], match_date=match_date)
+        p2_w = self._player_window.get_stats(p2_skey, surface, [10, 20, 50], match_date=match_date)
         p1_days = self._player_window.days_since_last(p1_skey, match_date)
         p2_days = self._player_window.days_since_last(p2_skey, match_date)
 
@@ -658,6 +663,19 @@ class LivePredictor:
             'bp_conv_diff':     diff(p1_w.get('bp_conv_20'), p2_w.get('bp_conv_20')),
             'ace_rate_diff':    diff(p1_w.get('ace_rate_20'), p2_w.get('ace_rate_20')),
             'df_rate_diff':     diff(p1_w.get('df_rate_20'), p2_w.get('df_rate_20')),
+            # ── Enhanced momentum / fatigue / upset features
+            'p1_momentum_exp_10':  p1_w.get('momentum_exp_10'),
+            'p2_momentum_exp_10':  p2_w.get('momentum_exp_10'),
+            'momentum_exp_diff':   diff(p1_w.get('momentum_exp_10'), p2_w.get('momentum_exp_10')),
+            'p1_matches_14d':      p1_w.get('matches_14d'),
+            'p2_matches_14d':      p2_w.get('matches_14d'),
+            'fatigue_14d_diff':    diff(p1_w.get('matches_14d'), p2_w.get('matches_14d')),
+            'p1_upset_rate_5':     p1_w.get('upset_rate_5'),
+            'p2_upset_rate_5':     p2_w.get('upset_rate_5'),
+            'upset_momentum_diff': diff(p1_w.get('upset_rate_5'), p2_w.get('upset_rate_5')),
+            'p1_dominance_10':     p1_w.get('dominance_10'),
+            'p2_dominance_10':     p2_w.get('dominance_10'),
+            'dominance_diff':      diff(p1_w.get('dominance_10'), p2_w.get('dominance_10')),
             'p1_days_rest':     p1_days,
             'p2_days_rest':     p2_days,
             'days_rest_diff':   diff(p1_days, p2_days),
@@ -683,6 +701,39 @@ class LivePredictor:
             'p2_form_rtg':      p2_form_rtg,
             'form_rtg_diff':    p1_form_rtg - p2_form_rtg,
         }
+
+        # ── Home advantage (player nationality vs tournament host country)
+        from ml.features import TOURNEY_HOST_COUNTRY, get_tourney_host_country
+        try:
+            _home_conn = psycopg2.connect(self.db_url)
+            _home_conn.cursor_factory = psycopg2.extras.RealDictCursor
+            with _home_conn.cursor() as _hc:
+                _hc.execute("""
+                    SELECT p1n.country AS p1_country, p2n.country AS p2_country,
+                           t.name AS tourney_name
+                    FROM matches m
+                    LEFT JOIN players p1n ON p1n.id = %s
+                    LEFT JOIN players p2n ON p2n.id = %s
+                    LEFT JOIN tournaments t ON t.id = m.tournament_id
+                    WHERE m.id = %s
+                    LIMIT 1
+                """, (p1_id, p2_id, match_id))
+                _hr = _hc.fetchone()
+            _home_conn.close()
+            if _hr:
+                _p1_country = (_hr.get('p1_country') or '').upper()
+                _p2_country = (_hr.get('p2_country') or '').upper()
+                _host_country = get_tourney_host_country(_hr.get('tourney_name')) or ''
+                p1_home = int(_p1_country == _host_country and _host_country != '')
+                p2_home = int(_p2_country == _host_country and _host_country != '')
+            else:
+                p1_home = p2_home = 0
+        except Exception:
+            p1_home = p2_home = 0
+
+        features['p1_home']     = p1_home
+        features['p2_home']     = p2_home
+        features['home_adv_p1'] = p1_home - p2_home
 
         # ── Bookmaker implied probability (high-value signal)
         # bookmaker_odds schema is one row per (match_id, bookmaker, player_ref)
@@ -730,6 +781,38 @@ class LivePredictor:
         # the model output when it agrees with Elo on direction.
         elo_prob = surf_elo_win_prob if surf_elo_win_prob is not None else elo_win_prob
         elo_prob = max(0.02, min(0.98, elo_prob))   # clamp away from 0/1
+
+        # Coverage fallback: when BOTH players are unknown to the Elo system
+        # (e.g. lower-tier Challenger / ITF qualifiers that aren't in the
+        # training history, or name-key mismatches), expected_score collapses
+        # to 0.5 because both sides return the defaultdict starting_elo of
+        # 1500. That was producing 60-70% of today's predictions as 50/50
+        # "no picks". When we detect that case, fall back to production RTT
+        # scores via a calibrated sigmoid: a 12-pt RTT gap → ~65% prob,
+        # a 25-pt gap → ~80%, matching the backtest separation curve.
+        try:
+            elo_collapsed = (
+                abs(elo_prob - 0.5) < 0.005
+                and abs(p1_elo_overall - 1500) < 0.5
+                and abs(p2_elo_overall - 1500) < 0.5
+            )
+        except (TypeError, NameError):
+            elo_collapsed = False
+        if elo_collapsed:
+            # Use the surface RTT when meaningfully different, else overall RTT.
+            # Both p1_rtt_val and p2_rtt_val are already populated above
+            # (default 50.0 when no rating exists, so equal players still 50/50).
+            try:
+                p1_for_fb = p1_surf_rtg_val if abs((p1_surf_rtg_val or 50) - 50) > 5 else p1_rtt_val
+                p2_for_fb = p2_surf_rtg_val if abs((p2_surf_rtg_val or 50) - 50) > 5 else p2_rtt_val
+                rtt_diff = (p1_for_fb or 50) - (p2_for_fb or 50)
+                if abs(rtt_diff) >= 2:   # only override when RTT actually separates them
+                    import math as _math
+                    rtt_prob = 1.0 / (1.0 + _math.exp(-rtt_diff / 18.0))
+                    elo_prob = max(0.02, min(0.98, rtt_prob))
+                    log.debug(f"RTT fallback applied: rtt_diff={rtt_diff:+.1f} → prob_p1={rtt_prob:.3f}")
+            except Exception:
+                pass
         model_prob: Optional[float] = None
         model_key = 'elo'
         if self._models:
@@ -746,14 +829,153 @@ class LivePredictor:
                 model_prob = None
                 model_key = 'elo'
 
-        # Blend only when model and Elo agree on direction. On disagreement,
-        # trust Elo — it's grounded in the corrected name-keyed history.
-        if model_prob is not None and (model_prob - 0.5) * (elo_prob - 0.5) > 0:
-            prob_p1 = 0.7 * elo_prob + 0.3 * model_prob
+        # Full ensemble blend — model and Elo weighted equally.
+        # The direction-agreement gate was a safety valve for a miscalibrated
+        # model; removing it lets the ensemble do its job on upsets/mismatches.
+        if model_prob is not None:
+            prob_p1 = 0.55 * elo_prob + 0.45 * model_prob
         else:
             prob_p1 = elo_prob
-            if model_prob is not None:
-                model_key = f"{model_key}+elo_override"
+
+        # ────────────────────────────────────────────────────────────────────
+        # INJURY / PHYSICAL CONCERN AWARENESS
+        # ────────────────────────────────────────────────────────────────────
+        # Three layers of adjustment applied to prob_p1, in order of strength:
+        #
+        #   L3 (most authoritative): explicit rows in player_injury_status
+        #       — sourced from manual entry, ATP/WTA withdrawals, or the
+        #       "infer from recent matches" job. Severity drives the penalty.
+        #   L2 (latent signal): recent retirements / walkovers from the
+        #       matches table directly, even before they've been written
+        #       into player_injury_status (cheap belt-and-braces).
+        #   L1 (the market knows): if our prob diverges from the bookmaker
+        #       implied probability by 15pp+, the market is signalling
+        #       something we can't see — soften toward the market.
+        #
+        # Every adjustment that fires gets a key_factor entry so the
+        # Intelligence tab surfaces *why* the prediction changed.
+        injury_factors: list = []
+
+        # L3: active injury_status rows (use prefetch when populated)
+        cached_injuries = getattr(self, '_injuries_by_pid', None)
+        def _active_injury(pid):
+            if cached_injuries is not None:
+                return cached_injuries.get(pid)
+            try:
+                _ic = psycopg2.connect(self.db_url)
+                _ic.cursor_factory = psycopg2.extras.RealDictCursor
+                with _ic.cursor() as cur:
+                    cur.execute("""
+                        SELECT severity, status, body_part, notes
+                        FROM v_active_injury_status
+                        WHERE player_id = %s
+                        ORDER BY CASE severity
+                            WHEN 'major' THEN 0 WHEN 'moderate' THEN 1
+                            WHEN 'minor' THEN 2 ELSE 3 END
+                        LIMIT 1
+                    """, (pid,))
+                    row = cur.fetchone()
+                _ic.close()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+        SEVERITY_PENALTY = {  # absolute prob shift away from the affected player
+            'major':    0.40,   # near-cap to 50/50
+            'moderate': 0.10,
+            'minor':    0.04,
+        }
+        for side, pid, sign in (('p1', p1_id, -1), ('p2', p2_id, +1)):
+            inj = _active_injury(pid)
+            if not inj:
+                continue
+            sev = inj.get('severity') or 'minor'
+            penalty = SEVERITY_PENALTY.get(sev, 0.04) * sign
+            prob_p1 = max(0.02, min(0.98, prob_p1 + penalty))
+            label_bits = [sev]
+            if inj.get('body_part'): label_bits.append(inj['body_part'])
+            injury_factors.append({
+                'feature': f'{side}_injury_status',
+                'label':   f'{"P1" if side=="p1" else "P2"} injury concern '
+                           f'({", ".join(label_bits)})',
+                'value':   None,
+                'importance': 0.20 if sev == 'major' else 0.12,
+                'favours': 'p2' if side == 'p1' else 'p1',
+                'impact':  'high' if sev == 'major' else 'medium',
+                'note':    inj.get('notes') or 'Active in player_injury_status',
+            })
+
+        # L2: recent retirements / walkovers (matches table) — only fires if
+        # nothing already came through L3 for this side.
+        cached_recent = getattr(self, '_recent_concern_by_pid', None)
+        def _recent_concern(pid):
+            if cached_recent is not None:
+                return cached_recent.get(pid)
+            try:
+                _ic = psycopg2.connect(self.db_url)
+                _ic.cursor_factory = psycopg2.extras.RealDictCursor
+                with _ic.cursor() as cur:
+                    cur.execute("""
+                        SELECT
+                          SUM(CASE WHEN event_status='Retired' THEN 1 ELSE 0 END) AS retires,
+                          SUM(CASE WHEN event_status='Walkover' THEN 1 ELSE 0 END) AS walkovers
+                        FROM matches
+                        WHERE event_date >= CURRENT_DATE - INTERVAL '14 days'
+                          AND (
+                            (winner = 'First Player'  AND second_player_id = %s) OR
+                            (winner = 'Second Player' AND first_player_id  = %s)
+                          )
+                    """, (pid, pid))
+                    row = cur.fetchone()
+                _ic.close()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+        for side, pid, sign in (('p1', p1_id, -1), ('p2', p2_id, +1)):
+            # Skip if L3 already flagged this side
+            if any(f['feature'] == f'{side}_injury_status' for f in injury_factors):
+                continue
+            rec = _recent_concern(pid) or {}
+            retires = int(rec.get('retires') or 0)
+            walkovers = int(rec.get('walkovers') or 0)
+            if retires == 0 and walkovers == 0:
+                continue
+            penalty = (0.05 * retires + 0.04 * walkovers) * sign
+            penalty = max(-0.12, min(0.12, penalty))
+            prob_p1 = max(0.02, min(0.98, prob_p1 + penalty))
+            injury_factors.append({
+                'feature': f'{side}_recent_concern',
+                'label':   f'{"P1" if side=="p1" else "P2"} recent physical concern '
+                           f'({retires} retired, {walkovers} walkovers in 14d)',
+                'value':   retires + walkovers,
+                'importance': 0.08,
+                'favours': 'p2' if side == 'p1' else 'p1',
+                'impact':  'medium',
+                'note':    'Recent retirements / walkovers in matches table',
+            })
+
+        # L1: market divergence — once everything else is applied, see whether
+        # the bookmaker market disagrees by 15pp+. If so the market knows
+        # something we don't (injury rumour, news, fitness concern).
+        market_p1 = features.get('market_impl_p1')
+        if (market_p1 is not None and 0.0 < market_p1 < 1.0
+                and abs(prob_p1 - market_p1) >= 0.15):
+            divergence = prob_p1 - market_p1
+            blended = 0.5 * prob_p1 + 0.5 * market_p1
+            prob_p1 = max(0.02, min(0.98, blended))
+            injury_factors.append({
+                'feature': 'market_divergence',
+                'label':   f'Market disagrees with model ({market_p1*100:.0f}% vs '
+                           f'{(prob_p1 - 0.5*divergence)*100:.0f}%)',
+                'value':   round(divergence, 3),
+                'importance': 0.15,
+                'favours': 'p2' if divergence > 0 else 'p1',
+                'impact':  'high',
+                'note':    'Market is pricing differently — possible injury / news '
+                           'the model cannot see. Prediction softened toward market.',
+            })
+
         prob_p2 = 1.0 - prob_p1
 
         # ── Confidence tier
@@ -764,6 +986,11 @@ class LivePredictor:
             confidence = 'medium'
         else:
             confidence = 'low'
+        # Active injury concerns lower confidence regardless of edge — there's
+        # genuine uncertainty in the picture.
+        if any(f['feature'].endswith('_injury_status') for f in injury_factors):
+            confidence = 'low' if confidence == 'medium' else \
+                         'medium' if confidence == 'high' else confidence
 
         # ── Key factors for Intelligence tab
         # Use feature value × rough importance proxy (elo gets highest weight)
@@ -776,12 +1003,14 @@ class LivePredictor:
             'form_diff_20': 0.03, 'ace_rate_diff': 0.02, 'age_diff': 0.01,
         }
 
-        key_factors = []
+        # Lead key_factors with any injury / market factors so they stand
+        # out in the Intelligence tab.
+        key_factors = list(injury_factors)
         for feat, imp in sorted(importance_proxy.items(), key=lambda x: -x[1]):
             val = features.get(feat)
             if val is not None and feat in FACTOR_LABELS:
                 key_factors.append(describe_factor(feat, val, imp))
-            if len(key_factors) >= 8:
+            if len(key_factors) >= 10:
                 break
 
         return {
@@ -811,18 +1040,91 @@ class LivePredictor:
             with wconn.cursor() as cur:
                 # Sanitize key_factors: NaN/Inf → None (otherwise jsonb rejects them)
                 clean_factors = _sanitize_json(prediction['key_factors'])
+                # Derive predicted_winner from the CURRENT probabilities so a
+                # re-prediction can't leave a stale pick behind from a previous
+                # predictor version. Without this, the row keeps the old
+                # rtt-v2 predicted_winner even after the new probabilities flip
+                # the favourite, and every downstream check (settle, results,
+                # match detail) reads the wrong pick.
+                p1 = float(prediction['prob_first_player'] or 0)
+                p2 = float(prediction['prob_second_player'] or 0)
+                pred_winner = "first_player" if p1 >= p2 else "second_player"
+
+                # Invalidate stored intel/result tracking when the pick flips
+                # (or moves enough that the narrative is wrong). The intel
+                # text is rendered against frozen rating snapshots; once probs
+                # change materially the prose is stale. NULL-ing the columns
+                # makes /admin/intel/queue re-pick the match up. Same for
+                # is_correct/actual_winner/settled_at — they were settled
+                # against the prior pick, must be re-derived.
                 cur.execute("""
                     INSERT INTO model_predictions
                         (match_id, prob_first_player, prob_second_player, confidence,
-                         key_factors, model_version)
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+                         key_factors, model_version, predicted_winner)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
                     ON CONFLICT (match_id) DO UPDATE SET
                         prob_first_player  = EXCLUDED.prob_first_player,
                         prob_second_player = EXCLUDED.prob_second_player,
                         confidence         = EXCLUDED.confidence,
                         key_factors        = EXCLUDED.key_factors,
                         model_version      = EXCLUDED.model_version,
-                        predicted_at       = NOW()
+                        predicted_winner   = EXCLUDED.predicted_winner,
+                        predicted_at       = NOW(),
+                        -- Bust intel cache and result tracking when the pick
+                        -- flips. ABS prob delta > 0.10 also counts as a flip
+                        -- for cache-busting purposes (the prose will quote
+                        -- numbers that don't match anymore).
+                        p1_intel           = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.p1_intel
+                          END,
+                        p2_intel           = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.p2_intel
+                          END,
+                        match_preview      = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.match_preview
+                          END,
+                        did_you_know       = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.did_you_know
+                          END,
+                        confidence_line    = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.confidence_line
+                          END,
+                        intel_generated_at = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                              OR ABS(COALESCE(model_predictions.prob_first_player, 0) - EXCLUDED.prob_first_player) > 0.10
+                            THEN NULL
+                            ELSE model_predictions.intel_generated_at
+                          END,
+                        actual_winner      = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                            THEN NULL
+                            ELSE model_predictions.actual_winner
+                          END,
+                        is_correct         = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                            THEN NULL
+                            ELSE model_predictions.is_correct
+                          END,
+                        settled_at         = CASE
+                            WHEN model_predictions.predicted_winner IS DISTINCT FROM EXCLUDED.predicted_winner
+                            THEN NULL
+                            ELSE model_predictions.settled_at
+                          END
                 """, (
                     prediction['match_id'],
                     prediction['prob_first_player'],
@@ -830,6 +1132,7 @@ class LivePredictor:
                     prediction['confidence'],
                     json.dumps(clean_factors),
                     prediction['model_version'],
+                    pred_winner,
                 ))
             # Only auto-commit when this call owns the connection. When
             # predict_upcoming holds a persistent self._write_conn, defer
@@ -992,6 +1295,7 @@ class LivePredictor:
                       AND m.first_player_id IS NOT NULL
                       AND m.second_player_id IS NOT NULL
                       AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+                      AND (et.tour_category IS NULL OR et.tour_category NOT ILIKE '%ITF%')
                       {skip_clause}
                 """, tuple(params))
                 upcoming = cur.fetchall()
@@ -1029,23 +1333,74 @@ class LivePredictor:
                     """, (pids,))
                     rtt_by_pid = {r['player_id']: dict(r) for r in cur.fetchall()}
 
-            # Pre-build rank lookups for all players in a single query
+            # Active injury status (L3) — keyed by player_id, pick the most
+            # severe row per player. Falls back to None if the table or view
+            # isn't present yet (e.g. on a fresh DB).
+            injuries_by_pid: dict[int, dict] = {}
+            if pids:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT DISTINCT ON (player_id)
+                                   player_id, severity, status, body_part, notes
+                            FROM v_active_injury_status
+                            WHERE player_id = ANY(%s)
+                            ORDER BY player_id, CASE severity
+                                WHEN 'major' THEN 0 WHEN 'moderate' THEN 1
+                                WHEN 'minor' THEN 2 ELSE 3 END
+                        """, (pids,))
+                        injuries_by_pid = {r['player_id']: dict(r)
+                                           for r in cur.fetchall()}
+                except Exception as _e:
+                    log.debug(f"Skipping injury prefetch (view missing?): {_e}")
+                    injuries_by_pid = {}
+
+            # Recent retirement / walkover counts (L2) — last 14 days, per side.
+            # A retirement / walkover only counts when the player is the loser,
+            # because that's the side carrying the physical concern.
+            recent_concern_by_pid: dict[int, dict] = {}
+            if pids:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT pid,
+                               SUM(CASE WHEN event_status='Retired' THEN 1 ELSE 0 END)  AS retires,
+                               SUM(CASE WHEN event_status='Walkover' THEN 1 ELSE 0 END) AS walkovers
+                        FROM (
+                            SELECT
+                              CASE WHEN winner = 'First Player' THEN second_player_id
+                                   ELSE first_player_id END AS pid,
+                              event_status
+                            FROM matches
+                            WHERE event_date >= CURRENT_DATE - INTERVAL '14 days'
+                              AND event_status IN ('Retired', 'Walkover')
+                        ) t
+                        WHERE pid = ANY(%s)
+                        GROUP BY pid
+                    """, (pids,))
+                    recent_concern_by_pid = {r['pid']: dict(r) for r in cur.fetchall()}
+
+            # Pre-build rank lookups for all players in a single query.
+            # Primary source: Sackmann sa_matches (has ranking_points too).
+            # Fallback: players.current_rank populated by player_sync.py from the
+            # api-tennis get_players stats response — covers ITF / lower-ranked
+            # players who never appear in the Sackmann ATP/WTA dataset.
             rank_by_pid: dict[int, tuple] = {}
             with conn.cursor() as cur:
                 cur.execute("""
                     WITH names AS (
                         SELECT p.id AS pid,
-                               COALESCE(NULLIF(TRIM(p.full_name), ''), p.name) AS name
+                               COALESCE(NULLIF(TRIM(p.full_name), ''), p.name) AS name,
+                               p.current_rank AS live_rank
                         FROM players p WHERE p.id = ANY(%s)
                     ),
                     tokens AS (
-                        SELECT pid, name,
+                        SELECT pid, name, live_rank,
                                SPLIT_PART(REPLACE(name, '.', ''), ' ',
                                    array_length(string_to_array(REPLACE(name,'.',''),' '),1)
                                ) AS last_token
                         FROM names
                     ),
-                    ranks AS (
+                    sa_ranks AS (
                         SELECT
                             t.pid,
                             MIN(sm.winner_rank) FILTER (WHERE sm.winner_id = sp.player_id) AS rank_w,
@@ -1059,8 +1414,13 @@ class LivePredictor:
                           AND sm.tourney_date >= CURRENT_DATE - INTERVAL '2 years'
                         GROUP BY t.pid
                     )
-                    SELECT pid, COALESCE(rank_w, rank_l) AS rank, COALESCE(pts_w, pts_l) AS rank_pts
-                    FROM ranks
+                    SELECT
+                        n.pid,
+                        COALESCE(s.rank_w, s.rank_l, n.live_rank)  AS rank,
+                        COALESCE(s.pts_w,  s.pts_l)                AS rank_pts
+                    FROM names n
+                    LEFT JOIN sa_ranks s ON s.pid = n.pid
+                    WHERE COALESCE(s.rank_w, s.rank_l, n.live_rank) IS NOT NULL
                 """, (pids,))
                 for r in cur.fetchall():
                     rank_by_pid[r['pid']] = (r['rank'], r['rank_pts'])
@@ -1073,10 +1433,12 @@ class LivePredictor:
         predicted = 0
 
         # Stash prefetches on self so predict_match can use them via the
-        # _odds_by_mid / _rtt_by_pid hooks (predict_match falls back to
-        # SQL if a cache isn't populated).
+        # _odds_by_mid / _rtt_by_pid / _injuries_by_pid / _recent_concern_by_pid
+        # hooks (predict_match falls back to SQL if a cache isn't populated).
         self._odds_by_mid = odds_by_mid
         self._rtt_by_pid = rtt_by_pid if rtt_by_pid else None
+        self._injuries_by_pid = injuries_by_pid
+        self._recent_concern_by_pid = recent_concern_by_pid
         # Persistent write connection — eliminates per-match reconnect.
         self._write_conn = psycopg2.connect(self.db_url)
 

@@ -24,10 +24,8 @@ frontend/.vite/
 ml/results/
 ml/__pycache__/
 
-# ML models — commit only the small logistic models; exclude large ensemble/xgboost/lightgbm
-ml/models/*_ensemble.pkl
-ml/models/*_xgboost.pkl
-ml/models/*_lightgbm.pkl
+# ML models — all pkl files now committed so Railway can load the trained ensemble
+# (previously excluded, causing LivePredictor to fall back to Elo-only)
 
 # macOS
 .DS_Store

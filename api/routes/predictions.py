@@ -665,7 +665,7 @@ def predictions_today(
         p1 = (i.get("p1") or {}).get("prob")
         if p1 is None:
             return False
-        return abs(p1 - 0.5) > 0.01     # outside the 49–51% band
+        return abs(p1 - 0.5) > 0.05     # outside the 45–55% band (meaningful signal only)
 
     settled_count = sum(1 for i in items if i["is_correct"] is not None and _is_pick(i))
     correct_count = sum(1 for i in items if i["is_correct"] and _is_pick(i))
@@ -836,7 +836,7 @@ def predictions_stats():
     BASE_FILTER = """
         JOIN matches m ON m.id = mp.match_id
         WHERE m.event_date >= %(cutover)s::date
-          AND (mp.prob_first_player < 0.499 OR mp.prob_first_player > 0.501)
+          AND ABS(mp.prob_first_player - 0.5) > 0.05
           AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
           AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Retired')
     """
@@ -1027,7 +1027,7 @@ def _predictions_results_impl():
           -- picks and produced a different win rate.
           -- NB: do not write a literal pct sign here, psycopg2 treats it
           -- as a parameter placeholder even inside SQL comments.
-          AND (mp.prob_first_player < 0.499 OR mp.prob_first_player > 0.501)
+          AND ABS(mp.prob_first_player - 0.5) > 0.05
           AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
           -- Match the today endpoint's exclusions: ignore non-played statuses
           -- (cancelled/walkover/postponed/retired) so the two pages count

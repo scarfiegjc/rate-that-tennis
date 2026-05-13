@@ -819,7 +819,7 @@ function detectLevel(match) {
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
 const GENDERS  = ['All', 'Men', 'Women']
-const LEVELS   = ['Slam / Masters', 'Challenger', 'ITF']
+const LEVELS   = ['Slam / Masters', 'Challenger']
 const SORTS    = [
   { id: 'time',      label: 'By time' },
   { id: 'winchance', label: 'By win chance' },
@@ -891,7 +891,7 @@ export default function MatchList() {
         if (r1 == null || r2 == null) return false
       }
       if (hideNoPicks && m.prediction?.prob_first_player != null &&
-          Math.abs(m.prediction.prob_first_player - 0.5) < 0.01) return false
+          Math.abs(m.prediction.prob_first_player - 0.5) < 0.05) return false
       return true
     })
   }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified, hideNoPicks])
