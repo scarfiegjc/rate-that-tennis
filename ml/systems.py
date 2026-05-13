@@ -320,14 +320,166 @@ class ClutchInDecider(SystemBase):
         return None
 
 
+class ClassLock(SystemBase):
+    """RTT class gap 20+, surface dominance 10+, model probability 75+."""
+    code = "class_lock"
+
+    def evaluate(self, m: MatchInput) -> Optional[SystemPick]:
+        p1_rtt = _f(m.p1_ratings.get("rtt_score"))
+        p2_rtt = _f(m.p2_ratings.get("rtt_score"))
+        if p1_rtt is None or p2_rtt is None:
+            return None
+        col = _surface_col(m.surface)
+        p1_surf = _f(m.p1_ratings.get(col)) if col else None
+        p2_surf = _f(m.p2_ratings.get(col)) if col else None
+        pred = m.prediction or {}
+        p1_prob = _f(pred.get("prob_first_player"))
+        p2_prob = _f(pred.get("prob_second_player"))
+
+        def _check(fav_rtt, opp_rtt, fav_surf, opp_surf, fav_prob, side):
+            if fav_rtt is None or opp_rtt is None:
+                return None
+            rtt_gap = fav_rtt - opp_rtt
+            if rtt_gap < 20:
+                return None
+            surf_gap = (fav_surf - opp_surf) if (fav_surf is not None and opp_surf is not None) else None
+            if surf_gap is not None and surf_gap < 10:
+                return None
+            if fav_prob is not None and fav_prob < 0.75:
+                return None
+            conf = "high" if rtt_gap >= 30 else "medium"
+            surf_str = f", surface gap {surf_gap:.1f}" if surf_gap is not None else ""
+            prob_str = f", model {fav_prob*100:.0f}%" if fav_prob is not None else ""
+            return SystemPick(
+                self.code, side, conf,
+                f"Class lock: RTT gap {rtt_gap:.1f}{surf_str}{prob_str}.",
+                {"fav_rtt": fav_rtt, "opp_rtt": opp_rtt,
+                 "surf_gap": surf_gap, "prob": fav_prob},
+            )
+
+        return (
+            _check(p1_rtt, p2_rtt, p1_surf, p2_surf, p1_prob, "first_player") or
+            _check(p2_rtt, p1_rtt, p2_surf, p1_surf, p2_prob, "second_player")
+        )
+
+
+class SurfaceSpecialist(SystemBase):
+    """Surface-elite (82+) vs sub-average opponent (62-), surface gap 20+, model 70+."""
+    code = "surface_specialist"
+
+    def evaluate(self, m: MatchInput) -> Optional[SystemPick]:
+        col = _surface_col(m.surface)
+        if not col:
+            return None
+        p1_surf = _f(m.p1_ratings.get(col))
+        p2_surf = _f(m.p2_ratings.get(col))
+        if p1_surf is None or p2_surf is None:
+            return None
+        pred = m.prediction or {}
+        p1_prob = _f(pred.get("prob_first_player"))
+        p2_prob = _f(pred.get("prob_second_player"))
+
+        def _check(fav_surf, opp_surf, fav_prob, side):
+            if fav_surf < 82 or opp_surf > 62:
+                return None
+            gap = fav_surf - opp_surf
+            if gap < 20:
+                return None
+            if fav_prob is not None and fav_prob < 0.70:
+                return None
+            conf = "high" if gap >= 30 else "medium"
+            return SystemPick(
+                self.code, side, conf,
+                f"{m.surface or 'Surface'} specialist ({fav_surf:.1f}) vs weak surface opponent ({opp_surf:.1f}), gap {gap:.1f}.",
+                {"fav_surf": fav_surf, "opp_surf": opp_surf, "gap": gap, "surface": m.surface, "prob": fav_prob},
+            )
+
+        return (
+            _check(p1_surf, p2_surf, p1_prob, "first_player") or
+            _check(p2_surf, p1_surf, p2_prob, "second_player")
+        )
+
+
+class TripleConvergence(SystemBase):
+    """RTT gap 15+, surface gap 10+, form gap 8+ — all three signals favour the same player."""
+    code = "triple_convergence"
+
+    def evaluate(self, m: MatchInput) -> Optional[SystemPick]:
+        p1_rtt  = _f(m.p1_ratings.get("rtt_score"))
+        p2_rtt  = _f(m.p2_ratings.get("rtt_score"))
+        p1_form = _f(m.p1_ratings.get("form_score"))
+        p2_form = _f(m.p2_ratings.get("form_score"))
+        col     = _surface_col(m.surface)
+        p1_surf = _f(m.p1_ratings.get(col)) if col else None
+        p2_surf = _f(m.p2_ratings.get(col)) if col else None
+
+        if None in (p1_rtt, p2_rtt, p1_form, p2_form):
+            return None
+
+        def _check(fav_rtt, opp_rtt, fav_surf, opp_surf, fav_form, opp_form, side):
+            rtt_gap  = fav_rtt - opp_rtt
+            form_gap = fav_form - opp_form
+            if rtt_gap < 15 or form_gap < 8:
+                return None
+            if fav_surf is not None and opp_surf is not None:
+                surf_gap = fav_surf - opp_surf
+                if surf_gap < 10:
+                    return None
+                surf_str = f", surf {surf_gap:.1f}"
+            else:
+                surf_gap = None
+                surf_str = ""
+            conf = "high" if (rtt_gap >= 20 and form_gap >= 12) else "medium"
+            return SystemPick(
+                self.code, side, conf,
+                f"Triple convergence: RTT {rtt_gap:.1f}{surf_str}, form {form_gap:.1f} — all point same way.",
+                {"rtt_gap": rtt_gap, "surf_gap": surf_gap, "form_gap": form_gap},
+            )
+
+        return (
+            _check(p1_rtt, p2_rtt, p1_surf, p2_surf, p1_form, p2_form, "first_player") or
+            _check(p2_rtt, p1_rtt, p2_surf, p1_surf, p2_form, p1_form, "second_player")
+        )
+
+
+class SmartFavourite(SystemBase):
+    """Model probability 70+ AND beats market implied probability by 4+ points."""
+    code = "smart_favourite"
+
+    def evaluate(self, m: MatchInput) -> Optional[SystemPick]:
+        pred   = m.prediction or {}
+        market = m.market or {}
+        p1_prob  = _f(pred.get("prob_first_player"))
+        p2_prob  = _f(pred.get("prob_second_player"))
+        impl_p1  = _f(market.get("impl_p1"))
+        impl_p2  = _f(market.get("impl_p2"))
+
+        def _check(our_prob, impl_prob, odds, side):
+            if our_prob is None or our_prob < 0.70:
+                return None
+            if impl_prob is None:
+                return None
+            edge_pts = (our_prob - impl_prob) * 100  # convert to pct points
+            if edge_pts < 4:
+                return None
+            conf = "high" if edge_pts >= 8 else "medium"
+            return SystemPick(
+                self.code, side, conf,
+                f"Smart favourite: model {our_prob*100:.1f}% vs market {impl_prob*100:.1f}% (+{edge_pts:.1f}pt edge).",
+                {"our_prob": our_prob, "impl_prob": impl_prob, "edge_pts": edge_pts, "odds": odds},
+            )
+
+        return (
+            _check(p1_prob, impl_p1, market.get("odds_p1"), "first_player") or
+            _check(p2_prob, impl_p2, market.get("odds_p2"), "second_player")
+        )
+
+
 SYSTEMS: list[SystemBase] = [
-    SurfaceMonster(),
-    FormSurge(),
-    HandAdvantage(),
-    BigMatchPlayer(),
-    UnderdogValue(),
-    RttMismatch(),
-    ClutchInDecider(),
+    ClassLock(),
+    SurfaceSpecialist(),
+    TripleConvergence(),
+    SmartFavourite(),
 ]
 
 
