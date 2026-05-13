@@ -21,7 +21,7 @@ function MetricChip({ label, value, colour }) {
 export default function SystemsList() {
   useSEO({
     title: 'Tennis Betting Systems & Tipster Trackers | RateThatTennis',
-    description: 'Backtested tennis betting systems with live P&L, ROI and win rate tracking. New systems coming soon.',
+    description: 'Track AI-generated tennis betting systems — Surface Monster, Form Surge and more. Live P&L, ROI and win rate for every system.',
     canonical: 'https://ratethat.tennis/systems',
   })
 
@@ -102,18 +102,8 @@ export default function SystemsList() {
       </div>
 
       {data.systems.length === 0 && (
-        <div style={{
-          padding: '48px 32px', textAlign: 'center',
-          border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
-          background: 'var(--bg-card)',
-        }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
-            Systems coming soon
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 400, margin: '0 auto' }}>
-            We're building a new generation of validated betting systems. Each one will be backtested before it goes live — no guessing.
-          </div>
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}>
+          No systems configured yet. Apply <code>predictions_schema.sql</code> to seed the canonical set.
         </div>
       )}
     </div>

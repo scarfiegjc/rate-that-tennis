@@ -7,3 +7,11 @@ requests>=2.31.0
 bcrypt>=4.0.0
 python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.9
+# Needed by ml/predict.py — the LivePredictor's Elo-fallback path uses
+# pandas DataFrames for feature shaping. We bundle the predictor and
+# its deps so /admin/predict can run an emergency re-prediction without
+# waiting for the pipeline service's scheduled cron. The trained model
+# pickles (sklearn/xgboost/lightgbm) are intentionally NOT bundled —
+# load_models() falls through to Elo when MODELS_DIR is empty.
+numpy>=1.26.0
+pandas>=2.0.0

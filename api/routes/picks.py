@@ -188,7 +188,16 @@ def _enrich_pick(pick: dict) -> dict:
     ms = (match.get("event_status") or "").lower()
     winner = match.get("winner")
     if status in ("pending", "live"):
-        if "finished" in ms and winner:
+        # Settle on Finished, Retired, or Walk Over — all three produce a
+        # legitimate winner. The old filter only on "finished" left
+        # retirement/walkover picks stranded.
+        is_settleable_status = (
+            "finished" in ms
+            or "retired"  in ms
+            or "walk over" in ms
+            or "walkover"  in ms
+        )
+        if is_settleable_status and winner:
             # Settle immediately — write to DB first, only update status if write succeeds
             winner_pid = (
                 match.get("first_player_id")  if winner == "First Player"  else
