@@ -193,53 +193,42 @@ def _sa_ids_for(player_id: int) -> list[int]:
         return []
     sa_ids: set[int] = set()
 
-    # Resolution is layered from most-specific to least, BUT we now stop as
-    # soon as we get any hits — and the last-name-only fallback has been
-    # removed entirely. It was responsible for cross-player contamination:
-    # for "J. Draper" it pulled in Scott Draper's career, dragging older
-    # rankings (1990s/2000s) and inflated win totals onto Jack Draper's
-    # page. Better to return empty for an unrecognised name than to show
-    # the wrong player's history.
+    for field in ("full_name", "name"):
+        name = (player.get(field) or "").strip()
+        if not name:
+            continue
 
-    full = (player.get("full_name") or "").strip()
-    short = (player.get("name") or "").strip()
-
-    # Strategy 1: exact-ish full_name match. Use trailing/leading-space
-    # boundaries so "Jack Draper" matches "Jack Draper" but NOT "Scott
-    # Draper" or "Jack Drapern" (synthetic). substring with the full name
-    # is acceptable for things like "Maria Sakkari" → "Maria Sakkari N.G."
-    # but we cap to a small result set.
-    if full and len(full) > 4 and " " in full:
+        # Strategy 1: substring match on generated full_name column
         rows = query(
-            "SELECT player_id FROM sa_players WHERE full_name ILIKE %s LIMIT 5",
-            (f"%{full}%",),
+            "SELECT player_id FROM sa_players WHERE full_name ILIKE %s LIMIT 10",
+            (f"%{name}%",),
         )
         sa_ids.update(r["player_id"] for r in rows)
-        if sa_ids:
-            return list(sa_ids)
 
-    # Strategy 2: initial + last name (handles api-tennis short form
-    # "A. Zverev" → name_first LIKE 'A%' AND name_last = 'Zverev').
-    # Still has some ambiguity (multiple A. Zverevs exist) but at least
-    # restricts to players whose first initial matches.
-    for src in (full, short):
-        if not src:
-            continue
-        tokens = src.split()
+        tokens = name.split()
         last = tokens[-1] if tokens else None
+
+        # Strategy 2: initial + last name (handles "A. Zverev" → name_first LIKE 'A%' AND name_last = 'Zverev')
         if last and len(last) > 2 and len(tokens) >= 2:
             first_token = tokens[0].rstrip(".")
-            if first_token:
+            if len(first_token) == 1:
                 rows2 = query(
                     """SELECT player_id FROM sa_players
                        WHERE LOWER(name_last) = LOWER(%s)
                          AND LOWER(name_first) LIKE LOWER(%s)
                        LIMIT 5""",
-                    (last, first_token[:1] + "%"),
+                    (last, first_token + "%"),
                 )
                 sa_ids.update(r["player_id"] for r in rows2)
 
-    # Strategy 3 (last-name-only) intentionally removed — see top comment.
+        # Strategy 3: last name only (broadest fallback)
+        if last and len(last) > 3:
+            rows3 = query(
+                "SELECT player_id FROM sa_players WHERE name_last ILIKE %s LIMIT 5",
+                (last,),
+            )
+            sa_ids.update(r["player_id"] for r in rows3)
+
     return list(sa_ids)
 
 
@@ -358,13 +347,6 @@ def get_player(player_id: int):
         # ms_* tables may not exist yet on every environment — keep failing soft.
         pass
 
-    # Fill in missing skill ratings from ms_career when player_ratings is
-    # sparse. Top players whose matches we don't have point-by-point data
-    # for (slam-heavy schedules) end up with NULL skill ratings in
-    # player_ratings — Matchstat has equivalent stats and a high-confidence
-    # player link, so derive a 0-100 scale from those.
-    ratings = _augment_ratings_from_ms_career(ratings, ms_career)
-
     return {
         "player": player,
         "ratings": ratings,
@@ -376,90 +358,6 @@ def get_player(player_id: int):
         "ms_profile": ms_profile,
         "ms_career":  ms_career,
     }
-
-
-def _augment_ratings_from_ms_career(ratings: dict | None, ms: dict | None) -> dict:
-    """
-    When player_ratings is missing skill ratings but ms_career has the raw
-    fields, derive a calibrated 0-100 score so the Overview tab fills in.
-    Only fills NULL fields — never overwrites a real computed rating.
-
-    Calibration ranges come from where elite/avg/below-avg players actually
-    sit on each metric (e.g. 1st-serve-won % at 78 → top tier; at 60 → poor).
-    Each helper clamps to [0, 100] so a single outlier metric can't blow
-    the rating up.
-    """
-    out = dict(ratings or {})
-    if not ms:
-        return out
-
-    def _scale(value, low, high):
-        """Linear map from [low, high] → [0, 100], clamped."""
-        if value is None:
-            return None
-        try:
-            v = float(value)
-        except (TypeError, ValueError):
-            return None
-        if high == low:
-            return None
-        pct = (v - low) / (high - low) * 100.0
-        return max(0.0, min(100.0, pct))
-
-    def _avg(values):
-        clean = [v for v in values if v is not None]
-        return sum(clean) / len(clean) if clean else None
-
-    # SERVE — 1st-won, 2nd-won and aces/match all reward big-serving players.
-    if out.get("serve_rating") is None:
-        ace_component   = _scale(ms.get("all_aces_per_match"),       2,  15)
-        first_component = _scale(ms.get("all_first_serve_won_pct"), 60,  82)
-        second_component= _scale(ms.get("all_second_serve_won_pct"),40,  60)
-        df_component    = _scale(ms.get("all_df_per_match"),         6,   1.5)  # lower is better
-        v = _avg([ace_component, first_component, second_component, df_component])
-        if v is not None:
-            out["serve_rating"] = round(v, 1)
-
-    # RETURN — BP conversion + total pts won/match capture the return side.
-    if out.get("return_rating") is None:
-        bp_conv   = _scale(ms.get("all_bp_conv_pct"),                  30, 50)
-        total_pts = _scale(ms.get("all_total_pts_won_per_match"),      55, 95)
-        v = _avg([bp_conv, total_pts])
-        if v is not None:
-            out["return_rating"] = round(v, 1)
-
-    # PRESSURE — Slam winner/UE ratio is the cleanest proxy for clutch play.
-    if out.get("pressure_rating") is None:
-        wue_ratio = _scale(ms.get("slam_winner_ue_ratio"), 0.6, 1.5)
-        net_pct   = _scale(ms.get("slam_net_won_pct"),       50, 75)
-        v = _avg([wue_ratio, net_pct])
-        if v is not None:
-            out["pressure_rating"] = round(v, 1)
-
-    # CONSISTENCY — low DF/match + low UE/match. Both inversely scaled.
-    if out.get("consistency_rating") is None:
-        df_low = _scale(ms.get("all_df_per_match"),          6,  1.5)
-        ue_low = _scale(ms.get("slam_ue_per_match"),        50, 20)
-        v = _avg([df_low, ue_low])
-        if v is not None:
-            out["consistency_rating"] = round(v, 1)
-
-    # BIG-MATCH — Slam-only stats, the showpiece performance signal.
-    if out.get("big_match_rating") is None:
-        winners_per = _scale(ms.get("slam_winners_per_match"), 25, 45)
-        wue_ratio   = _scale(ms.get("slam_winner_ue_ratio"),  0.6, 1.5)
-        net_pct     = _scale(ms.get("slam_net_won_pct"),       50, 75)
-        v = _avg([winners_per, wue_ratio, net_pct])
-        if v is not None:
-            out["big_match_rating"] = round(v, 1)
-
-    # NET — Slam net points won is exactly the right signal here.
-    if out.get("net_game_rating") is None:
-        v = _scale(ms.get("slam_net_won_pct"), 50, 75)
-        if v is not None:
-            out["net_game_rating"] = round(v, 1)
-
-    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -16,25 +16,6 @@ import { api } from '../api.js'
 import { seedPickedSet } from '../components/StarPick.jsx'
 import AuthModal from '../components/AuthModal.jsx'
 import FormDots from '../components/FormDots.jsx'
-import courtClayImg  from '../assets/court-clay.jpg'
-import courtGrassImg from '../assets/court-grass.jpg'
-import courtHardImg  from '../assets/court-hard.jpg'
-
-function courtBg(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return courtClayImg
-  if (s.includes('grass')) return courtGrassImg
-  return courtHardImg
-}
-
-// Solid overlay colour per surface (matches tournament-header tint)
-function courtOverlay(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return 'rgba(184,72,54,0.72)'
-  if (s.includes('grass')) return 'rgba(16,100,56,0.72)'
-  if (s.includes('indoor') || s.includes('carpet')) return 'rgba(98,38,188,0.88)'
-  return 'rgba(25,65,185,0.72)'
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -198,26 +179,22 @@ function PickCard({ pick, onRemove }) {
   return (
     <div style={{ background: cardBg, border: cardBorder, borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
 
-      {/* ── Header: court photo + tournament + meta ── */}
+      {/* ── Header: tournament + meta ── */}
       <div style={{
         padding: '10px 14px 8px',
-        borderBottom: '1px solid rgba(0,0,0,0.18)',
+        borderBottom: '1px solid var(--border-faint)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8,
-        backgroundImage: `url(${courtBg(surface)})`,
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        backgroundColor: courtOverlay(surface),
-        backgroundBlendMode: 'multiply',
       }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <Link to={`/match/${pick.match?.id}`} style={{
-            fontSize: 12, fontWeight: 700, color: '#fff',
+            fontSize: 12, fontWeight: 600, color: 'var(--text-2)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block',
           }}>
             {pick.match?.tournament_name || 'Unknown tournament'}
           </Link>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{surface}</span>
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: surfaceColor(surface) }}>{surface}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
               {pick.match?.event_date}{pick.match?.event_time ? ` · ${pick.match.event_time.slice(0,5)}` : ''}
             </span>
             {isLive && <InPlayLozenge />}
@@ -226,9 +203,9 @@ function PickCard({ pick, onRemove }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {isPending && (
             <button onClick={() => onRemove(pick.id)} title="Remove pick"
-              style={{ fontSize: 18, color: '#FDE68A', lineHeight: 1, padding: '2px 4px', textShadow: '0 0 4px rgba(0,0,0,0.4)' }}>★</button>
+              style={{ fontSize: 18, color: '#F59E0B', lineHeight: 1, padding: '2px 4px', textShadow: '0 0 2px rgba(245,158,11,0.4)' }}>★</button>
           )}
-          {isLive && <span style={{ fontSize: 16, color: 'rgba(255,255,255,0.5)' }}>★</span>}
+          {isLive && <span style={{ fontSize: 16, opacity: 0.4 }}>★</span>}
         </div>
       </div>
 

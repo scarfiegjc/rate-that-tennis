@@ -152,4 +152,14 @@ VALUES
     ('Unibet',  'Unibet',  'https://www.unibet.com', 20)
 ON CONFLICT (bookmaker_key) DO NOTHING;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Deactivate all v1 betting systems — underperforming, cleared 2026-05-13
+-- The systems infrastructure stays in place for future v2 systems.
+-- ─────────────────────────────────────────────────────────────────────────────
+UPDATE systems SET is_active = FALSE
+WHERE code IN (
+    'surface_monster', 'form_surge', 'hand_advantage',
+    'big_match_player', 'underdog_value', 'rtt_mismatch', 'clutch_in_decider'
+);
+
 SELECT 'Schema additions applied successfully' AS status;

@@ -143,19 +143,9 @@ def fill_missing_ratings(conn) -> int:
         except Exception:
             pass
 
-        # ── Strategy 2: production current_rank (from api-tennis.com player_sync)
+        # ── Strategy 2: production ranking — players table has no rank column,
+        # so this is a no-op. Kept for symmetry with the predictor's fallback.
         rank_est = None
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT current_rank FROM players WHERE id = %s",
-                    (player_id,),
-                )
-                rr = cur.fetchone()
-                if rr and rr[0]:
-                    rank_est = _rank_to_rtt(rr[0])
-        except Exception:
-            pass
 
         # ── Strategy 3: Sackmann/TML rank lookup ─────────────────────────────
         sa_rank_est = None

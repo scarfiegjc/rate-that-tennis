@@ -250,6 +250,43 @@ def render_my_picks_digest(
     return _wrap(body, preheader=f"Your picks: {hit_rate} hit rate, {roi_str} P&L")
 
 
+def render_welcome_email(display_name: str) -> str:
+    """
+    Welcome email — sent immediately on sign-up.
+    Copy written by Gareth.
+    """
+    name = (display_name or "there").split()[0].capitalize()
+    body = f"""
+<h2 style="margin:0 0 20px;font-size:22px;font-weight:800;color:#fff;">
+  Welcome to ratethat.tennis!
+</h2>
+<p style="margin:0 0 16px;font-size:15px;color:#c4c9d4;line-height:1.7;">Hi {name}</p>
+<p style="margin:0 0 16px;font-size:15px;color:#c4c9d4;line-height:1.7;">
+  Thank you so much for signing up. We're a brand new analytics platform, and we're training our model live in public — we're glad to have you with us for the journey.
+</p>
+<p style="margin:0 0 16px;font-size:15px;color:#c4c9d4;line-height:1.7;">
+  You'll see predictions every day for as many tennis matches as we can calculate — along with as many stats as we can present. These numbers will obviously keep building as the data flows in.
+</p>
+<p style="margin:0 0 24px;font-size:15px;color:#c4c9d4;line-height:1.7;">
+  More importantly, we've created a picks section so you can keep track of your own picks and learn where you're doing well, where you're not doing so well — your P&amp;L can be broken down into court, tour and your confidence — and don't forget to keep a track of our results to see where we're doing best.
+</p>
+<p style="margin:0 0 16px;text-align:center;">
+  <a href="{SITE_URL}/predictions"
+     style="display:inline-block;background:{BRAND_GREEN};color:#000;font-weight:700;
+            font-size:14px;padding:12px 32px;border-radius:8px;text-decoration:none;">
+    See today's predictions →
+  </a>
+</p>
+<p style="margin:24px 0 4px;font-size:15px;color:#c4c9d4;line-height:1.7;">
+  Any thoughts, any advice or any upgrades you might like, let us know and we'll get it done!
+</p>
+<p style="margin:0;font-size:15px;color:#c4c9d4;">All the best<br/>
+<strong style="color:#fff;">Gareth</strong>
+</p>
+"""
+    return _wrap(body, preheader="Thanks for joining — here's what to explore first")
+
+
 def render_announcement(subject_line: str, body_html: str, display_name: str = "") -> str:
     """Generic announcement email. body_html is injected directly."""
     name_greeting = f"<p style='margin:0 0 16px;font-size:14px;color:#6b7280;'>Hey {display_name},</p>" if display_name else ""

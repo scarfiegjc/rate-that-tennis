@@ -14,6 +14,7 @@ from typing import Optional
 
 from api.db import query_one, get_conn
 from api.auth import hash_password, verify_password, create_access_token, decode_token
+from api import email as rtt_email
 
 log = logging.getLogger("api.auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -107,6 +108,17 @@ def register(req: RegisterRequest):
             user = dict(cur.fetchone())
 
     token = create_access_token(user["id"], user["email"])
+
+    # Send welcome email (fire-and-forget — failure must not break registration)
+    try:
+        html = rtt_email.render_welcome_email(user.get("display_name") or "")
+        rtt_email.send_email(user["email"], "Welcome to RateThatTennis!", html)
+        with get_conn() as _conn:
+            with _conn.cursor() as _cur:
+                _cur.execute("UPDATE users SET welcome_sent = TRUE WHERE id = %s", (user["id"],))
+    except Exception as _e:
+        log.warning("Welcome email failed for %s: %s", user["email"], _e)
+
     return {"token": token, "user": _fmt_user(user)}
 
 

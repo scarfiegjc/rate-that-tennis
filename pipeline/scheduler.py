@@ -210,6 +210,28 @@ def run_predictions():
         log.error(f"systems eval failed: {e}")
 
 
+def run_email_predictions_digest():
+    """Send the daily top-20 predictions email to all opted-in users."""
+    log.info("Scheduled: daily predictions email digest")
+    try:
+        from email_tasks import send_daily_predictions_digest
+        result = send_daily_predictions_digest()
+        log.info(f"Predictions digest complete: {result}")
+    except Exception as e:
+        log.error(f"Predictions digest failed: {e}")
+
+
+def run_email_picks_summary():
+    """Send personalised picks + P&L update to users with active/recent picks."""
+    log.info("Scheduled: daily picks email summary")
+    try:
+        from email_tasks import send_daily_picks_emails
+        result = send_daily_picks_emails()
+        log.info(f"Picks summary complete: {result}")
+    except Exception as e:
+        log.error(f"Picks summary failed: {e}")
+
+
 def run_ratings():
     """
     Compute player ratings (Elo-based, 0-100) for all players.
@@ -251,7 +273,7 @@ def apply_schema_migrations():
     # locally they're inside pipeline/.
     candidate_dirs = [here, os.path.join(here, "pipeline")]
 
-    migrations = ["schema_additions.sql", "predictions_schema.sql"]
+    migrations = ["schema_additions.sql", "predictions_schema.sql", "picks_schema.sql"]
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = True
@@ -443,6 +465,8 @@ if __name__ == "__main__":
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
     schedule.every().day.at("19:05").do(run_odds_io)          # odds-api.io evening refresh
     schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh
+    schedule.every().day.at("08:00").do(run_email_predictions_digest)  # predictions digest email
+    schedule.every().day.at("08:30").do(run_email_picks_summary)       # personalised picks email
     # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
     def _player_sync_weekly():
         try:

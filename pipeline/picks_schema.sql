@@ -48,3 +48,11 @@ CREATE TABLE IF NOT EXISTS user_picks (
 CREATE INDEX IF NOT EXISTS idx_user_picks_user     ON user_picks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_user_picks_match    ON user_picks(match_id);
 CREATE INDEX IF NOT EXISTS idx_user_picks_settled  ON user_picks(user_id, settled_at DESC NULLS LAST);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3. Email preferences — added when email system was introduced
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email_digest   BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS email_picks    BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS welcome_sent   BOOLEAN NOT NULL DEFAULT FALSE;

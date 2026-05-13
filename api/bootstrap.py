@@ -42,54 +42,13 @@ def _db_url() -> str:
     ).strip()
 
 
-# v1 systems — kept here so we can deactivate them by code (their settled
-# picks history stays in system_picks, but they're hidden from the dashboard).
-LEGACY_SYSTEM_CODES = [
-    "surface_monster", "form_surge", "hand_advantage", "big_match_player",
-    "underdog_value", "rtt_mismatch", "clutch_in_decider",
-]
-
-# v2 systems — multi-signal convergence, designed for 80%+ win rates.
-# Keep in lock-step with ml/systems.py SYSTEMS list.
-CANONICAL_SYSTEMS = [
-    ("class_lock",
-     "Class Lock",
-     "RTT class gap 20+ points, surface dominance 10+, model probability 75+ — the strongest convergence signal.",
-     "🔒", "#DC2626"),
-    ("surface_specialist",
-     "Surface Specialist",
-     "Surface-elite player (82+) faces a sub-average opponent (62-) on this exact surface; surface gap 20+ and model 70+.",
-     "🏆", "#3B6D11"),
-    ("triple_convergence",
-     "Triple Convergence",
-     "RTT, surface and form ratings all favour the same player (gaps 15/10/8+). All three independent signals point one way.",
-     "🎯", "#9333EA"),
-    ("form_rocket",
-     "Form Rocket",
-     "Rising momentum + form gap 15+ + RTT gap 8+ + model 70+. Player is in red-hot form against a weaker opponent.",
-     "🚀", "#F59E0B"),
-    ("smart_favourite",
-     "Smart Favourite",
-     "Model has the player at 70+ AND beats market implied probability by 4+ points. Favourite the bookies have under-priced.",
-     "💎", "#2563EB"),
-]
+# v1 systems removed 2026-05-13 — all underperforming.
+# New systems will be added here once backtested and validated.
+CANONICAL_SYSTEMS: list = []
 
 
 def seed_systems(conn) -> int:
-    """Bake-the-systems-into-Python so we don't depend on the SQL splitter.
-
-    Deactivates v1 legacy systems (preserving their picks history) and
-    upserts the v2 convergence systems as is_active=TRUE.
-    """
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE systems SET is_active = FALSE WHERE code = ANY(%s)",
-                (LEGACY_SYSTEM_CODES,),
-            )
-    except Exception as e:
-        log.warning(f"  deactivate legacy systems: {e}")
-
+    """Bake-the-systems-into-Python so we don't depend on the SQL splitter."""
     written = 0
     for code, name, desc, icon, colour in CANONICAL_SYSTEMS:
         try:
@@ -102,8 +61,7 @@ def seed_systems(conn) -> int:
                         name = EXCLUDED.name,
                         description = EXCLUDED.description,
                         icon = EXCLUDED.icon,
-                        accent_colour = EXCLUDED.accent_colour,
-                        is_active = TRUE
+                        accent_colour = EXCLUDED.accent_colour
                     """,
                     (code, name, desc, icon, colour),
                 )
@@ -114,17 +72,7 @@ def seed_systems(conn) -> int:
 
 
 def apply_schema_migrations() -> dict:
-    """Apply schema_additions.sql + predictions_schema.sql, then seed canonical systems. Idempotent.
-
-    DDL safety: ALTER TABLE needs ACCESS EXCLUSIVE lock. If another long-running
-    query holds a conflicting lock, Postgres queues the ALTER TABLE — and then
-    queues EVERY subsequent SELECT on the same table behind it, poisoning the
-    whole connection pool within seconds. We guard against this with a 1.5-second
-    lock_timeout on every statement. If the lock can't be acquired in time, the
-    statement is logged as 'lock_skipped' and migration continues. On the next
-    boot the columns almost certainly already exist (IF NOT EXISTS) so the ALTER
-    TABLE is a no-op anyway.
-    """
+    """Apply schema_additions.sql + predictions_schema.sql, then seed canonical systems. Idempotent."""
     db_url = _db_url()
     if not db_url:
         log.error("apply_schema_migrations: no DATABASE_URL")
@@ -137,27 +85,6 @@ def apply_schema_migrations() -> dict:
     conn = psycopg2.connect(db_url)
     conn.autocommit = True
     try:
-        # Kill any idle-in-transaction connections older than 5 minutes before
-        # running migrations. These are the root cause of ALTER TABLE lock cascades:
-        # a stuck idle-in-transaction connection holds a RowShare lock, the ALTER
-        # TABLE queues for ACCESS EXCLUSIVE, and every subsequent SELECT queues
-        # behind the ALTER TABLE. Terminating them first breaks the deadlock chain.
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT pg_terminate_backend(pid)
-                    FROM pg_stat_activity
-                    WHERE state = 'idle in transaction'
-                      AND query_start < NOW() - INTERVAL '5 minutes'
-                      AND pid <> pg_backend_pid()
-                      AND datname = current_database()
-                """)
-                n_killed = cur.rowcount
-            if n_killed:
-                log.info(f"  [migration-preflight] terminated {n_killed} idle-in-transaction connections")
-        except Exception as e:
-            log.warning(f"  [migration-preflight] idle-in-tx cleanup failed (non-fatal): {e}")
-
         for fname in files:
             path = migrations_dir / fname
             if not path.exists():
@@ -166,7 +93,7 @@ def apply_schema_migrations() -> dict:
                 continue
 
             sql = path.read_text()
-            ok = errors = skipped = lock_skipped = 0
+            ok = errors = skipped = 0
             for raw in sql.split(";"):
                 lines = [l for l in raw.splitlines() if not l.strip().startswith("--")]
                 stmt = "\n".join(lines).strip()
@@ -174,23 +101,8 @@ def apply_schema_migrations() -> dict:
                     continue
                 try:
                     with conn.cursor() as cur:
-                        # Short lock timeout so DDL statements (ALTER TABLE) never
-                        # queue-poison reads. 1500ms is enough for a quiet DB; on a
-                        # loaded DB we'd rather skip and retry next boot.
-                        cur.execute("SET lock_timeout = '1500ms'")
                         cur.execute(stmt)
-                        cur.execute("SET lock_timeout = 0")
                     ok += 1
-                except psycopg2.errors.LockNotAvailable:
-                    # Could not acquire lock in time — column almost certainly
-                    # already exists (IF NOT EXISTS), so this is safe to skip.
-                    log.warning(f"  {fname}: lock_timeout hit — skipping (columns likely already exist)")
-                    lock_skipped += 1
-                    # Reset connection state after lock error
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
                 except (psycopg2.errors.DuplicateTable,
                         psycopg2.errors.DuplicateObject,
                         psycopg2.errors.DuplicateColumn):
@@ -202,10 +114,8 @@ def apply_schema_migrations() -> dict:
                     else:
                         log.warning(f"  {fname}: {e}")
                         errors += 1
-            summary[fname] = {"applied": ok, "skipped": skipped,
-                              "lock_skipped": lock_skipped, "errors": errors}
-            log.info(f"  {fname}: applied={ok}, skipped={skipped}, "
-                     f"lock_skipped={lock_skipped}, errors={errors}")
+            summary[fname] = {"applied": ok, "skipped": skipped, "errors": errors}
+            log.info(f"  {fname}: applied={ok}, skipped={skipped}, errors={errors}")
 
         # Always seed/update the canonical systems via Python — independent of SQL parsing.
         try:
@@ -410,48 +320,6 @@ def run_fill_ratings() -> dict:
             pass
 
 
-def run_merge_duplicates() -> dict:
-    """
-    Merge duplicate player records that the pipeline creates daily.
-
-    Root cause: api-tennis.com ingestion creates new player rows with the
-    live api_key. Sackmann/TML players already exist with negative api_keys.
-    The ON CONFLICT (api_key) upsert doesn't fire across the two sources, so
-    every daily fixture pull re-creates shadow records for top players like
-    Sinner, Zverev, etc. This function normalises names and merges shadows into
-    their canonical record (most match history wins), moving all FK references.
-    """
-    import traceback
-    db_url = _db_url()
-    if not db_url:
-        return {"error": "no database url"}
-    try:
-        from merge_duplicate_players import merge_all  # noqa
-    except Exception as e:
-        return {"error": f"import: {e}", "traceback": traceback.format_exc().splitlines()[-8:]}
-    try:
-        conn = psycopg2.connect(db_url)
-    except Exception as e:
-        return {"error": f"connect: {e}"}
-    try:
-        result = merge_all(conn, dry_run=False, limit=0)
-        merged = result.get("groups_processed", result.get("merged", 0))
-        log.info(f"  merge_duplicates: {merged} groups processed")
-        # Return a compact summary — full group list can be huge
-        return {
-            "groups_found":     result.get("groups_found", 0),
-            "groups_processed": result.get("groups_processed", 0),
-        }
-    except Exception as e:
-        return {"error": str(e), "type": type(e).__name__,
-                "traceback": traceback.format_exc().splitlines()[-12:]}
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
 def run_hand_splits() -> dict:
     db_url = _db_url()
     if not db_url:
@@ -470,58 +338,19 @@ def run_hand_splits() -> dict:
 
 
 def run_rtt_predictions(days_ahead: int = 7) -> dict:
-    """
-    Run match predictions for the next `days_ahead` days.
-
-    Primary path: LivePredictor (ml.predict) — Elo-led ensemble. Requires
-    numpy/pandas which are NOT in the API image, so this will fail there.
-
-    Fallback: RttPredictor (ml.rtt_predictor) — pure-psycopg2, always
-    importable on the API service. Runs fill_missing_ratings first so every
-    player in an upcoming match gets at least a rank-based RTT score, avoiding
-    blanket 50/50 outputs.
-    """
-    # ── Primary: LivePredictor (Elo + ensemble) ───────────────────────────────
     try:
-        from ml.predict import LivePredictor  # needs numpy/pandas
-        predictor = LivePredictor()
+        from ml.predict import LivePredictor  # noqa
+    except Exception as e:
+        log.error(f"ml.predict import failed: {e}")
+        return {"error": f"import: {e}"}
+    predictor = LivePredictor()
+    try:
         predictor.load_models()
         predictor.load_player_history()
         n = predictor.predict_upcoming(days_ahead=days_ahead)
-        log.info(f"LivePredictor wrote {n} predictions")
-        return {"predictor": "LivePredictor", "predicted": n}
-    except ImportError as e:
-        log.warning(f"LivePredictor not available ({e}), falling back to RttPredictor")
+        return {"predicted": n}
     except Exception as e:
         log.error(f"LivePredictor failed: {e}")
-        return {"error": str(e)}
-
-    # ── Fallback: RttPredictor (psycopg2-only) ────────────────────────────────
-    # Ensure every player in an upcoming match has at least a rank-based RTT
-    # score so RttPredictor produces meaningful probabilities instead of 50/50.
-    db_url = _db_url()
-    try:
-        from fill_ratings import fill_missing_ratings
-        conn = psycopg2.connect(db_url)
-        try:
-            fill_missing_ratings(conn)
-        finally:
-            conn.close()
-        log.info("fill_missing_ratings complete (pre-RttPredictor)")
-    except Exception as e:
-        log.warning(f"fill_missing_ratings pre-step failed (non-fatal): {e}")
-
-    try:
-        from ml.rtt_predictor import RttPredictor
-        predictor = RttPredictor(db_url=db_url)
-        try:
-            n = predictor.predict_upcoming(days_ahead=days_ahead)
-            log.info(f"RttPredictor wrote {n} predictions")
-            return {"predictor": "RttPredictor", "predicted": n}
-        finally:
-            predictor.close()
-    except Exception as e:
-        log.error(f"RttPredictor failed: {e}")
         return {"error": str(e)}
 
 
@@ -537,112 +366,9 @@ def run_settle() -> dict:
     conn = psycopg2.connect(db_url)
     try:
         upd_pred, upd_sys, upd_user = settle_predictions(conn)
-        result = {"settled_predictions": upd_pred,
-                  "settled_system_picks": upd_sys,
-                  "settled_user_picks": upd_user}
+        return {"settled_predictions": upd_pred, "settled_system_picks": upd_sys, "settled_user_picks": upd_user}
     finally:
         conn.close()
-
-    # Sweep up stale user_picks the standard settler can't reach: matches
-    # whose status never made it to 'Finished' (typically because the live
-    # match is recorded under a duplicate-player-ID twin). Look up the twin
-    # by surname + same date and settle against its winner.
-    try:
-        result["stuck_picks_resolved"] = _resolve_stuck_picks(min_age_days=1)
-    except Exception as e:
-        log.error(f"stuck picks sweep failed: {e}")
-        result["stuck_picks_resolved"] = {"error": str(e)}
-
-    return result
-
-
-def _resolve_stuck_picks(min_age_days: int = 1) -> dict:
-    """
-    Find user_picks still in pending/live for matches whose event_date is
-    `min_age_days`+ days in the past, and try to resolve them by finding a
-    finished twin match (same date, fuzzy-matched surnames) under a
-    different match_id. If no twin exists, void the pick.
-    """
-    from api.db import query, query_one, get_conn
-    stale = query(
-        """
-        SELECT up.id AS pick_id, up.player_id, up.confidence_stars,
-               up.our_odds, up.match_id,
-               m.event_date,
-               p1.name AS p1_name, p2.name AS p2_name,
-               pp.name AS picked_name
-        FROM user_picks up
-        JOIN matches m  ON m.id = up.match_id
-        LEFT JOIN players p1 ON p1.id = m.first_player_id
-        LEFT JOIN players p2 ON p2.id = m.second_player_id
-        LEFT JOIN players pp ON pp.id = up.player_id
-        WHERE up.status IN ('pending','live')
-          AND m.event_date < CURRENT_DATE - (%s || ' days')::interval
-        LIMIT 200
-        """,
-        (min_age_days,),
-    )
-
-    def _surname(s):
-        return (s or "").strip().split()[-1] if s else ""
-
-    settled = 0
-    voided  = 0
-    for sp in stale:
-        s1 = _surname(sp["p1_name"])
-        s2 = _surname(sp["p2_name"])
-        twin = None
-        if s1 and s2:
-            twin = query_one(
-                """
-                SELECT m.id, m.winner, m.first_player_id, m.second_player_id,
-                       p1.name AS p1_name, p2.name AS p2_name
-                FROM matches m
-                JOIN players p1 ON p1.id = m.first_player_id
-                JOIN players p2 ON p2.id = m.second_player_id
-                WHERE m.event_date = %s
-                  AND m.id != %s
-                  AND m.winner IN ('First Player','Second Player')
-                  AND m.event_status ILIKE 'Finished'
-                  AND ((p1.name ILIKE %s AND p2.name ILIKE %s)
-                    OR (p1.name ILIKE %s AND p2.name ILIKE %s))
-                LIMIT 1
-                """,
-                (sp["event_date"], sp["match_id"],
-                 f"%{s1}%", f"%{s2}%", f"%{s2}%", f"%{s1}%"),
-            )
-        if twin:
-            picked_surname = _surname(sp["picked_name"]).lower()
-            picked_is_p1 = (
-                picked_surname in (twin["p1_name"] or "").lower()
-                and picked_surname not in (twin["p2_name"] or "").lower()
-            )
-            winner_is_p1 = twin["winner"] == "First Player"
-            won = picked_is_p1 == winner_is_p1
-            stake = float(sp.get("confidence_stars") or 1)
-            new_status = "won" if won else "lost"
-            pl = round((float(sp.get("our_odds") or 2.0) - 1) * stake, 2) if won else round(-stake, 2)
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """UPDATE user_picks
-                           SET status = %s, settled_at = NOW(), profit_loss = %s
-                           WHERE id = %s AND status IN ('pending','live')""",
-                        (new_status, pl, sp["pick_id"]),
-                    )
-            settled += 1
-        else:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """UPDATE user_picks
-                           SET status = 'void', settled_at = NOW(), profit_loss = 0
-                           WHERE id = %s AND status IN ('pending','live')""",
-                        (sp["pick_id"],),
-                    )
-            voided += 1
-
-    return {"considered": len(stale), "settled_via_twin": settled, "voided": voided}
 
 
 def run_systems(days_ahead: int = 7) -> dict:
@@ -660,37 +386,7 @@ def run_systems(days_ahead: int = 7) -> dict:
 
 
 def full_bootstrap() -> dict:
-    """Run every stage in order. Each is wrapped so a single failure doesn't poison the rest.
-
-    Cluster-wide single-flight: we hold a Postgres advisory lock for the
-    duration. If another API container is already running the bootstrap
-    (typically because two redeploys happened back-to-back and the previous
-    container's bootstrap thread is still going), this one skips. The lock
-    is session-scoped and is released when the connection closes — so a
-    crashed container can't strand the lock.
-    """
-    # Lock key chosen arbitrarily but stable. Any 64-bit signed int works.
-    BOOTSTRAP_LOCK_KEY = 4827361092000  # "rttbootstrap"
-
-    from api.db import get_conn
-    lock_conn = None
-    got_lock = False
-    try:
-        # Open a dedicated connection for the lock so it persists for the
-        # duration of the bootstrap and isn't returned to the pool mid-flight.
-        import psycopg2
-        from api.db import DATABASE_URL
-        lock_conn = psycopg2.connect(DATABASE_URL, application_name="rtt-bootstrap-lock")
-        lock_conn.autocommit = True
-        with lock_conn.cursor() as cur:
-            cur.execute("SELECT pg_try_advisory_lock(%s)", (BOOTSTRAP_LOCK_KEY,))
-            got_lock = bool(cur.fetchone()[0])
-        if not got_lock:
-            log.info("[bootstrap] another bootstrap already running on this DB — skipping")
-            return {"skipped": True, "reason": "another bootstrap already holds the advisory lock"}
-    except Exception as e:
-        log.warning(f"[bootstrap] could not acquire advisory lock ({e}); proceeding without it")
-
+    """Run every stage in order. Each is wrapped so a single failure doesn't poison the rest."""
     results: dict = {}
 
     log.info("[bootstrap] 1/7 schema migrations…")
@@ -713,13 +409,6 @@ def full_bootstrap() -> dict:
     except Exception as e:
         log.error(f"  hand backfill failed: {e}")
         results["hand_backfill"] = {"error": str(e)}
-
-    log.info("[bootstrap] 2c/7 merge duplicate players…")
-    try:
-        results["merge_duplicates"] = run_merge_duplicates()
-    except Exception as e:
-        log.error(f"  merge duplicates failed: {e}")
-        results["merge_duplicates"] = {"error": str(e)}
 
     log.info("[bootstrap] 3/7 fill missing ratings…")
     try:
@@ -771,21 +460,4 @@ def full_bootstrap() -> dict:
         results["systems"] = {"error": str(e)}
 
     log.info("[bootstrap] complete")
-
-    # Release the advisory lock so the next bootstrap can acquire it.
-    # Closing the connection is enough (session-scoped lock auto-releases),
-    # but we're explicit so the intent is obvious.
-    if lock_conn is not None:
-        try:
-            if got_lock:
-                with lock_conn.cursor() as cur:
-                    cur.execute("SELECT pg_advisory_unlock(%s)", (BOOTSTRAP_LOCK_KEY,))
-        except Exception as e:
-            log.warning(f"[bootstrap] could not release advisory lock: {e}")
-        finally:
-            try:
-                lock_conn.close()
-            except Exception:
-                pass
-
     return results

@@ -66,7 +66,7 @@ export default function SystemDetail() {
   const { code } = useParams()
   const [stats, setStats] = useState(null)
   const [picks, setPicks] = useState(null)
-  const [filter, setFilter] = useState('open')     // open | all | settled
+  const [filter, setFilter] = useState('all')      // all | open | settled
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -137,7 +137,7 @@ export default function SystemDetail() {
 
       {/* Picks list */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        {['open', 'settled', 'all'].map(f => (
+        {['all', 'open', 'settled'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}

@@ -16,7 +16,7 @@ READ the existing file first, then make the minimum change required.**
 This file has been rebuilt from scratch **five times** after AI sessions destroyed it.
 It contains all of the following — if any are missing after your change, you broke it:
 
-- `FormDots` import and usage in both player rows
+- **NO `FormDots` import or usage** — this was deliberately removed; do NOT add it back
 - `detectLevel(match)` function — classifies matches as Slam/Masters, Challenger, ITF, Tour
 - `Tickbox` component — styled checkbox with colour accent
 - `LEVELS` constant — `['Slam / Masters', 'Challenger', 'ITF']`
@@ -41,6 +41,14 @@ Intelligence, plus the court-image header. Do not replace this file.
 ### `frontend/src/index.css` — EDIT ONLY, NEVER REWRITE
 
 The entire dark-theme design system. Adding styles = append or targeted edit only.
+
+### `ml/predict.py` — ITF EXCLUSION MUST STAY
+
+The `predict_upcoming` SQL **must** contain this filter and must never be removed:
+```sql
+AND (et.tour_category IS NULL OR et.tour_category NOT IN ('ITF', 'Junior'))
+```
+ITF players have no Sackmann historical data → Elo defaults to 1500 for both → 50/50 predictions flood the site. This filter was accidentally removed by an AI session on 2026-05-13.
 
 ---
 

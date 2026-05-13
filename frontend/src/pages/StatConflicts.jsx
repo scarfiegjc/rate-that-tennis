@@ -11,23 +11,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
-import courtClayImg  from '../assets/court-clay.jpg'
-import courtGrassImg from '../assets/court-grass.jpg'
-import courtHardImg  from '../assets/court-hard.jpg'
-
-function courtBg(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return courtClayImg
-  if (s.includes('grass')) return courtGrassImg
-  return courtHardImg
-}
-function courtOverlay(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return 'rgba(184,72,54,0.72)'
-  if (s.includes('grass')) return 'rgba(16,100,56,0.72)'
-  if (s.includes('indoor') || s.includes('carpet')) return 'rgba(98,38,188,0.88)'
-  return 'rgba(25,65,185,0.72)'
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -181,16 +164,12 @@ function ConflictCard({ item }) {
       {/* ── Header ── */}
       <div style={{
         padding: '10px 14px 8px',
-        borderBottom: '1px solid rgba(0,0,0,0.18)',
+        borderBottom: '1px solid var(--border-faint)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        backgroundImage: `url(${courtBg(item.surface)})`,
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        backgroundColor: courtOverlay(item.surface),
-        backgroundBlendMode: 'multiply',
       }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: '#fff',
+            fontSize: 12, fontWeight: 600, color: 'var(--text-2)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {item.tournament || 'Unknown tournament'}
@@ -199,17 +178,17 @@ function ConflictCard({ item }) {
             {item.surface && (
               <span style={{
                 fontSize: 10, fontWeight: 700,
-                color: '#fff',
-                background: 'rgba(255,255,255,0.2)',
+                color: surfaceColor(item.surface),
+                background: surfaceBg(item.surface),
                 borderRadius: 20, padding: '1px 7px',
               }}>
                 {item.surface}
               </span>
             )}
             {item.round && (
-              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.8)' }}>{item.round}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{item.round}</span>
             )}
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
               {item.event_date}{item.event_time ? ` · ${item.event_time}` : ''}
             </span>
           </div>

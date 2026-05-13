@@ -12,7 +12,6 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import { useSEO } from '../hooks/useSEO.js'
-import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
@@ -186,7 +185,6 @@ function MatchRow({ match, showTournament }) {
           </span>
           <RttLozenge score={p1.rtt_score} hideIfMissing />
           <MomentumLozenge momentum={p1.momentum} />
-          <FormDots dots={p1.form_dots || []} max={10} />
         </div>
       </div>
 
@@ -228,7 +226,6 @@ function MatchRow({ match, showTournament }) {
           {p2.name || '—'}
         </div>
         <div className="match-player-sub">
-          <FormDots dots={p2.form_dots || []} max={10} />
           <MomentumLozenge momentum={p2.momentum} />
           <RttLozenge score={p2.rtt_score} hideIfMissing />
           <span className="match-player-country" title={p2.country_code || ''}>
