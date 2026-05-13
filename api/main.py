@@ -12,7 +12,7 @@ import os
 import threading
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from api.routes.matches import router as matches_router
 from api.routes.players import router as players_router
@@ -245,6 +245,103 @@ def diagnostics():
         "tournaments_missing_surface": tournaments_missing_surface,
         "recent_predictions_sample": recent_predictions,
     }
+
+
+@app.get("/sitemap.xml", response_class=Response)
+def sitemap():
+    """Dynamic XML sitemap — static pages + recent/upcoming match pages + player pages."""
+    import datetime
+    from api.db import get_conn
+
+    base = "https://ratethat.tennis"
+    today = datetime.date.today()
+    week_ahead = today + datetime.timedelta(days=7)
+    month_ago  = today - datetime.timedelta(days=30)
+
+    urls = []
+
+    # ── Static pages ──────────────────────────────────────────────────────
+    static = [
+        ("", "1.0",  "daily"),
+        ("/predictions", "0.9", "daily"),
+        ("/in-play",     "0.8", "always"),
+        ("/systems",     "0.8", "weekly"),
+        ("/players",     "0.8", "weekly"),
+    ]
+    for path, priority, freq in static:
+        urls.append(f"""  <url>
+    <loc>{base}{path}</loc>
+    <changefreq>{freq}</changefreq>
+    <priority>{priority}</priority>
+  </url>""")
+
+    # ── Match pages (upcoming + last 30 days) ─────────────────────────────
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT m.id,
+                       COALESCE(p1.player_name,'') AS p1,
+                       COALESCE(p2.player_name,'') AS p2,
+                       m.event_date
+                FROM matches m
+                LEFT JOIN players p1 ON p1.id = m.first_player_id
+                LEFT JOIN players p2 ON p2.id = m.second_player_id
+                WHERE m.event_date BETWEEN %s AND %s
+                  AND m.singles_doubles = 'S'
+                ORDER BY m.event_date DESC, m.id DESC
+                LIMIT 2000
+            """, (str(month_ago), str(week_ahead)))
+            rows = cur.fetchall()
+        conn.close()
+        for row in rows:
+            mid, p1, p2, edate = row
+            # Build SEO slug matching matchUrl() helper in frontend
+            slug_raw = f"{p1}-vs-{p2}".lower()
+            slug = "".join(c if c.isalnum() or c == '-' else '-' for c in slug_raw)
+            slug = "-".join(p for p in slug.split('-') if p)
+            dt_str = str(edate) if edate else str(today)
+            priority = "0.8" if edate and edate >= today else "0.5"
+            urls.append(f"""  <url>
+    <loc>{base}/match/{mid}/{slug}</loc>
+    <lastmod>{dt_str}</lastmod>
+    <changefreq>{"hourly" if edate and edate >= today else "never"}</changefreq>
+    <priority>{priority}</priority>
+  </url>""")
+    except Exception:
+        pass
+
+    # ── Player pages ──────────────────────────────────────────────────────
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.id, p.player_name
+                FROM players p
+                JOIN player_ratings pr ON pr.player_id = p.id
+                ORDER BY pr.rtt_score DESC NULLS LAST
+                LIMIT 500
+            """)
+            players = cur.fetchall()
+        conn.close()
+        for pid, name in players:
+            slug = "".join(c if c.isalnum() or c == '-' else '-' for c in (name or '').lower())
+            slug = "-".join(p for p in slug.split('-') if p)
+            urls.append(f"""  <url>
+    <loc>{base}/player/{pid}</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.6</priority>
+  </url>""")
+    except Exception:
+        pass
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls)
+        + "\n</urlset>"
+    )
+    return Response(content=xml, media_type="application/xml")
 
 
 @app.get("/")

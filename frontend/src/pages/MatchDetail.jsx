@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
-import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
-import { matchUrl } from '../utils/matchUrl.js'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { useSEO } from '../hooks/useSEO.js'
+import { useParams, Link } from 'react-router-dom'
 import { api } from '../api.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
@@ -260,13 +260,8 @@ function MatchMeta({ match }) {
           </div>
         )}
 
-        {/* Live score banner (in-play). Suppressed once the match is
-            Finished — some matches stay stuck on is_live=true after the
-            sync writes winner/final_result, and we'd rather show the
-            final-score banner than a pulsing "IN PLAY" indicator on a
-            match that's already over. */}
-        {match.is_live && !/finished/i.test(match.status || '') &&
-         (match.set_scores || match.game_result) && (
+        {/* Live score banner */}
+        {match.is_live && (match.set_scores || match.game_result) && (
           <div style={{ marginTop: 14 }}>
             {match.set_scores && (
               <div style={{
@@ -294,39 +289,6 @@ function MatchMeta({ match }) {
               <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#FCD34D', animation: 'pulse 1.5s infinite' }} />
               <span style={{ fontSize: 11, fontWeight: 700, color: '#FCD34D', letterSpacing: 0.5 }}>IN PLAY</span>
             </div>
-          </div>
-        )}
-
-        {/* Final-score banner (finished). Renders whenever status is
-            Finished — even if is_live is stuck on (the live banner above
-            already self-suppresses in that case, so there's no double
-            render). Without this, finished matches show no score. */}
-        {/finished/i.test(match.status || '') &&
-         (match.set_scores || match.final_result) && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <div style={{
-              display: 'inline-block',
-              background: 'rgba(0,0,0,0.5)',
-              border: '1px solid rgba(255,255,255,0.25)',
-              borderRadius: 8,
-              padding: '6px 16px',
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
-                Final score
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: '#ffffff', fontVariantNumeric: 'tabular-nums', letterSpacing: 1 }}>
-                {match.set_scores || match.final_result}
-              </div>
-            </div>
-            {match.winner && (
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)', letterSpacing: 0.5 }}>
-                Winner: {match.winner === 'First Player'
-                  ? (match.first_player?.name || 'First player')
-                  : match.winner === 'Second Player'
-                    ? (match.second_player?.name || 'Second player')
-                    : match.winner}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -459,55 +421,21 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
           </div>
         </div>
 
-        {/* Centre probability + pick label */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 110 }}>
+        {/* Centre probability */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 100 }}>
           {pred.prob_first_player != null ? (
-            isFiftyFifty ? (
-              <>
-                <div style={{
-                  fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
-                  textTransform: 'uppercase', color: 'var(--amber)',
-                  padding: '4px 10px', borderRadius: 999,
-                  background: 'var(--amber-bg)', border: '1px solid var(--amber-border)',
-                }}>
-                  Coin flip · no pick
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.3 }}>
-                  Model has both players at 50% — this match is excluded from the pick-tracking accuracy stats.
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-                  <span style={{
-                    fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
-                    color: predictedSide === 1 ? 'var(--green)' : 'var(--text-3)',
-                  }}>
-                    {Math.round(pred.prob_first_player * 100)}%
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>vs</span>
-                  <span style={{
-                    fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
-                    color: predictedSide === 2 ? 'var(--blue)' : 'var(--text-3)',
-                  }}>
-                    {Math.round(pred.prob_second_player * 100)}%
-                  </span>
-                </div>
-                <ProbBar p1={pred.prob_first_player} p2={pred.prob_second_player} name1="" name2="" />
-                <div style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-                  textTransform: 'uppercase', color: 'var(--text-3)',
-                }}>
-                  Pick:{' '}
-                  <span style={{
-                    color: predictedSide === 1 ? 'var(--green-text)' : 'var(--blue)',
-                    fontWeight: 800,
-                  }}>
-                    {predictedSide === 1 ? (p1.name || 'P1') : (p2.name || 'P2')}
-                  </span>
-                </div>
-              </>
-            )
+            <>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--green)', fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(pred.prob_first_player * 100)}%
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>vs</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--blue)', fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(pred.prob_second_player * 100)}%
+                </span>
+              </div>
+              <ProbBar p1={pred.prob_first_player} p2={pred.prob_second_player} name1="" name2="" />
+            </>
           ) : (
             <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-3)' }}>vs</span>
           )}
@@ -796,8 +724,10 @@ function SectionIntelligence({ match }) {
         const bestP2bk = allBk.reduce((best, bk) => (!bk.p2_odds ? best : (!best || bk.p2_odds > best.p2_odds ? bk : best)), null)
         const bestP1   = bestP1bk?.p1_odds ?? mkt.odds_first_player
         const bestP2   = bestP2bk?.p2_odds ?? mkt.odds_second_player
-        const bk1name  = bestP1bk?.bookmaker ?? mkt.bookmaker
-        const bk2name  = bestP2bk?.bookmaker ?? mkt.bookmaker
+        const bk1name  = bestP1bk?.display_name ?? bestP1bk?.bookmaker ?? mkt.display_name_p1 ?? mkt.bookmaker
+        const bk2name  = bestP2bk?.display_name ?? bestP2bk?.bookmaker ?? mkt.display_name_p2 ?? mkt.bookmaker
+        const bk1link  = bestP1bk?.link_url ?? mkt.link_url_p1 ?? null
+        const bk2link  = bestP2bk?.link_url ?? mkt.link_url_p2 ?? null
         const e1       = calcEdge(bestP1, p1prob)
         const e2       = calcEdge(bestP2, p2prob)
         const hasOdds  = bestP1 || bestP2
@@ -867,7 +797,9 @@ function SectionIntelligence({ match }) {
                   </div>
                   <OddsPill odds={bestP1} />
                   {bk1name && (
-                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk1name}</span>
+                    bk1link
+                      ? <a href={bk1link} target="_blank" rel="noopener noreferrer sponsored" style={{ fontSize: 12, color: 'var(--text-3)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{bk1name} ↗</a>
+                      : <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk1name}</span>
                   )}
                   <EdgePill edge={e1} />
                 </div>
@@ -882,7 +814,9 @@ function SectionIntelligence({ match }) {
                   </div>
                   <OddsPill odds={bestP2} />
                   {bk2name && (
-                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk2name}</span>
+                    bk2link
+                      ? <a href={bk2link} target="_blank" rel="noopener noreferrer sponsored" style={{ fontSize: 12, color: 'var(--text-3)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{bk2name} ↗</a>
+                      : <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{bk2name}</span>
                   )}
                   <EdgePill edge={e2} />
                 </div>
@@ -931,7 +865,10 @@ function SectionIntelligence({ match }) {
                       }}>
                         <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: idx === 0 ? 600 : 400 }}>
                           {idx === 0 && <span style={{ fontSize: 9, background: 'var(--green)', color: '#fff', padding: '1px 5px', borderRadius: 4, marginRight: 5, fontWeight: 700 }}>BEST</span>}
-                          {bk.bookmaker}
+                          {bk.link_url
+                            ? <a href={bk.link_url} target="_blank" rel="noopener noreferrer sponsored" style={{ color: 'inherit', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{bk.display_name || bk.bookmaker}</a>
+                            : (bk.display_name || bk.bookmaker)
+                          }
                         </span>
                         <span style={{ minWidth: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{bk.p1_odds?.toFixed(2) ?? '—'}</span>
                         <span style={{ minWidth: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{bk.p2_odds?.toFixed(2) ?? '—'}</span>
@@ -1388,57 +1325,6 @@ function SectionStatistics({ match }) {
 
       <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 16, textAlign: 'center' }}>
         From production matches in the last 24 months. Green = good, amber = average, red = bad.
-      </div>
-
-      {/* Career serve averages — sourced from sa_matches historical data.
-          Wired through /api/v1/matches/{id} → player.career_serve. These
-          numbers were previously available at /players/{id}/stats but had
-          no home on the match page. */}
-      <CareerServePanel p1={p1} p2={p2} />
-    </div>
-  )
-}
-
-
-function CareerServePanel({ p1, p2 }) {
-  const cs1 = p1.career_serve || {}
-  const cs2 = p2.career_serve || {}
-  // Hide if neither side has any career data — common for ITF / Challenger
-  if (!cs1.sample_size && !cs2.sample_size) return null
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div style={{
-        fontSize: 13, fontWeight: 700, color: 'var(--text-2)',
-        marginBottom: 10, borderTop: '1px solid var(--border-faint)',
-        paddingTop: 14, textAlign: 'center',
-      }}>
-        Career serve averages
-      </div>
-
-      {/* Same centred bar/lozenge/label/lozenge/bar layout as the Points
-          Analysis section so the eye reads the comparison consistently. */}
-      <PointsBar label="1st serve in"     v1={cs1.avg_1st_serve_pct} v2={cs2.avg_1st_serve_pct}
-                 good={65} avg={55} betterIsHigher
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-      <PointsBar label="1st serve won"    v1={cs1.avg_1st_won_pct}   v2={cs2.avg_1st_won_pct}
-                 good={75} avg={65} betterIsHigher
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-      <PointsBar label="2nd serve won"    v1={cs1.avg_2nd_won_pct}   v2={cs2.avg_2nd_won_pct}
-                 good={55} avg={45} betterIsHigher
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-      <PointsBar label="Ace rate"         v1={cs1.avg_ace_pct}       v2={cs2.avg_ace_pct}
-                 good={10} avg={5}  betterIsHigher
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-      <PointsBar label="Double-fault rate" v1={cs1.avg_df_pct}        v2={cs2.avg_df_pct}
-                 good={3}  avg={5}  betterIsHigher={false}
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-      <PointsBar label="BP saved"         v1={cs1.avg_bp_save_pct}   v2={cs2.avg_bp_save_pct}
-                 good={65} avg={55} betterIsHigher
-                 sample1={cs1.sample_size} sample2={cs2.sample_size} />
-
-      <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
-        Lifetime averages from our training data ({cs1.sample_size || 0} / {cs2.sample_size || 0} matches respectively).
       </div>
     </div>
   )
@@ -2115,8 +2001,6 @@ const SECTIONS = [
 
 export default function MatchDetail() {
   const { id } = useParams()
-  const navigate = useNavigate()
-  const location = useLocation()
   const [match,   setMatch]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
@@ -2150,35 +2034,18 @@ export default function MatchDetail() {
             edge_second: edge.p2,
           },
           market: {
-            odds_first_player:  mkt.p1?.decimal_odds,
-            odds_second_player: mkt.p2?.decimal_odds,
-            bookmaker:          mkt.p1?.bookmaker || mkt.p2?.bookmaker,
-            all_bookmakers:     mkt.all_bookmakers || [],
+            odds_first_player:   mkt.p1?.decimal_odds,
+            odds_second_player:  mkt.p2?.decimal_odds,
+            bookmaker:           mkt.p1?.bookmaker || mkt.p2?.bookmaker,
+            display_name_p1:     mkt.p1?.display_name || mkt.p1?.bookmaker,
+            display_name_p2:     mkt.p2?.display_name || mkt.p2?.bookmaker,
+            link_url_p1:         mkt.p1?.link_url,
+            link_url_p2:         mkt.p2?.link_url,
+            all_bookmakers:      mkt.all_bookmakers || [],
           },
           edge,
         })
         setLoading(false)
-
-        // SEO: if the URL is just /match/:id (no slug), replace it in
-        // place with /match/:id/:slug so canonical/share/back-button URLs
-        // are descriptive. We use replace (not push) so the user's history
-        // doesn't get a duplicate entry.
-        try {
-          const onlyId = /^\/match\/\d+\/?$/.test(location.pathname)
-          if (onlyId) {
-            const target = matchUrl({
-              match_id:   data.match?.match_id ?? id,
-              event_date: data.match?.event_date,
-              tournament: data.match?.tournament,
-              p1:         { name: p1?.name },
-              p2:         { name: p2?.name },
-            })
-            if (target && target !== location.pathname && target !== '/') {
-              navigate(target + (location.search || '') + (location.hash || ''),
-                       { replace: true })
-            }
-          }
-        } catch { /* non-fatal */ }
       })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [id])
@@ -2193,6 +2060,38 @@ export default function MatchDetail() {
       window.scrollTo({ top, behavior: 'smooth' })
     }
   }
+
+  // ── SEO ──────────────────────────────────────────────────────────────────
+  const _p1Name = match?.first_player?.name  || ''
+  const _p2Name = match?.second_player?.name || ''
+  const _tourn  = match?.tournament || ''
+  const _date   = match?.event_date ? new Date(match.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+  const _seoTitle = _p1Name && _p2Name
+    ? `${_p1Name} vs ${_p2Name} | ${_tourn}${_date ? ' · ' + _date : ''} | RateThatTennis`
+    : 'Match Detail | RateThatTennis'
+  const _seoDesc = _p1Name && _p2Name
+    ? `${_p1Name} vs ${_p2Name} — ML win prediction, RTT ratings, form, H2H and bookmaker odds${_tourn ? ' at ' + _tourn : ''}. Free tennis analytics.`
+    : undefined
+  const _jsonLd = useMemo(() => !_p1Name ? null : ({
+    '@context': 'https://schema.org',
+    '@type': 'SportsEvent',
+    'name': `${_p1Name} vs ${_p2Name}`,
+    'sport': 'Tennis',
+    ...(match?.event_date ? { 'startDate': match.event_date } : {}),
+    ...(match?.surface    ? { 'location': { '@type': 'Place', 'name': _tourn, 'description': match.surface + ' court' } } : {}),
+    'competitor': [
+      { '@type': 'Person', 'name': _p1Name },
+      { '@type': 'Person', 'name': _p2Name },
+    ],
+    'url': window.location.href,
+    'organizer': { '@type': 'Organization', 'name': 'RateThatTennis', 'url': 'https://ratethat.tennis' },
+  }), [_p1Name, _p2Name, _tourn, match?.event_date, match?.surface])  // eslint-disable-line
+  useSEO({
+    title:       _seoTitle,
+    description: _seoDesc,
+    canonical:   window.location.href,
+    jsonLd:      _jsonLd,
+  })
 
   if (loading) return <div className="page"><div className="loading">Loading match…</div></div>
   if (error)   return <div className="page"><div className="error">{error}</div></div>

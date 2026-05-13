@@ -8,24 +8,14 @@
  * Sidebar: prediction win rate · RTT system selections · top 5 win chances
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext.jsx'
 import { api } from '../api.js'
+import { useSEO } from '../hooks/useSEO.js'
 import FormDots from '../components/FormDots.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
-import courtClayImg  from '../assets/court-clay.jpg'
-import courtGrassImg from '../assets/court-grass.jpg'
-import courtHardImg  from '../assets/court-hard.jpg'
-
-function courtBg(surface) {
-  const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))  return courtClayImg
-  if (s.includes('grass')) return courtGrassImg
-  return courtHardImg
-}
 
 // ── SEO URL helpers ───────────────────────────────────────────────────────────
 
@@ -165,24 +155,7 @@ function MatchRow({ match, showTournament }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  // Build a rich live score: "6-4, 3-2 (40-15)"
-  // set_scores comes as "6-4 3-2" (space-separated from SQL string_agg), convert to ", "
-  const liveSetScores = match.set_scores
-    ? match.set_scores.replace(/ /g, ', ')
-    : null
-  // game_result from the API may be "40 - 15" — normalise to "40-15"
-  const liveGameScore = match.game_result
-    ? match.game_result.replace(/\s*-\s*/g, '-').trim()
-    : null
-  // Combined display: sets + game score in parens, or fall back to whatever we have
-  const liveScore = liveSetScores
-    ? liveGameScore
-      ? `${liveSetScores} (${liveGameScore})`
-      : liveSetScores
-    : liveGameScore || match.final_result || ''
-  // Serving indicator: "First Player" | "Second Player"
-  const p1Serving = isLive && match.serve === 'First Player'
-  const p2Serving = isLive && match.serve === 'Second Player'
+  const liveScore = match.game_result || match.final_result || ''
 
   return (
     <button className={rowCls} onClick={() => navigate(matchUrl(match))}>
@@ -205,7 +178,6 @@ function MatchRow({ match, showTournament }) {
           className={`match-player-name ${winner1 ? 'winner' : ''}`}
           style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
-          {p1Serving && <span title="Serving" style={{ marginRight: 4, fontSize: 10 }}>●</span>}
           {p1.name || '—'}
         </div>
         <div className="match-player-sub">
@@ -214,28 +186,19 @@ function MatchRow({ match, showTournament }) {
           </span>
           <RttLozenge score={p1.rtt_score} hideIfMissing />
           <MomentumLozenge momentum={p1.momentum} />
+          <FormDots dots={p1.form_dots || []} max={10} />
         </div>
       </div>
 
       {/* Centre — live lozenge / score / probabilities / vs */}
       <div className="match-centre">
         {isLive ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
             <LiveLozenge />
-            {liveSetScores && (
-              <span className="match-live-score-big">{liveSetScores}</span>
-            )}
-            {liveGameScore && (
-              <span className="match-live-game">({liveGameScore})</span>
-            )}
-            {!liveSetScores && !liveGameScore && match.final_result && (
-              <span className="match-live-score">{match.final_result}</span>
-            )}
+            {liveScore && <span className="match-live-score">{liveScore}</span>}
           </div>
         ) : isFinished && (match.set_scores || match.final_result) ? (
-          <span className="match-final-score">
-            {match.set_scores ? match.set_scores.replace(/ /g, ', ') : match.final_result}
-          </span>
+          <span className="match-final-score">{match.set_scores || match.final_result}</span>
         ) : p1prob != null ? (
           <>
             <div className="match-probs">
@@ -263,9 +226,9 @@ function MatchRow({ match, showTournament }) {
           style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
         >
           {p2.name || '—'}
-          {p2Serving && <span title="Serving" style={{ marginLeft: 4, fontSize: 10 }}>●</span>}
         </div>
         <div className="match-player-sub">
+          <FormDots dots={p2.form_dots || []} max={10} />
           <MomentumLozenge momentum={p2.momentum} />
           <RttLozenge score={p2.rtt_score} hideIfMissing />
           <span className="match-player-country" title={p2.country_code || ''}>
@@ -318,10 +281,7 @@ function TournamentBlock({ name, surface, matches }) {
 
   return (
     <div className="tournament-block">
-      <button
-        className={`tournament-header ${(surface || '').toLowerCase()}`}
-        style={{ backgroundImage: `url(${courtBg(surface)})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
-        onClick={() => setOpen(o => !o)}>
+      <button className="tournament-header" onClick={() => setOpen(o => !o)}>
         <span className={`chevron ${open ? 'open' : ''}`}>›</span>
         <SurfaceDot surface={surface} />
         <span className="tournament-name">{name}</span>
@@ -432,337 +392,200 @@ function WinChanceList({ matches }) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-function StatBox({ label, value, sub, color }) {
+function StatMini({ label, value }) {
   return (
-    <div style={{ textAlign: 'center', flex: 1 }}>
-      <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-        {value ?? '—'}
-      </div>
-      {sub && <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{sub}</div>}
-      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3, fontWeight: 500 }}>{label}</div>
+    <div className="sidebar-stat-mini">
+      <div className="sidebar-stat-value">{value ?? '—'}</div>
+      <div className="sidebar-stat-label">{label}</div>
     </div>
   )
 }
 
-function PickBar({ pick, onClick }) {
-  const isLive    = pick.status === 'live'
-  const isWon     = pick.status === 'won'
-  const isLost    = pick.status === 'lost'
-  const prob      = pick.picked_player?.win_prob
-  const score     = pick.match?.set_scores || pick.match?.game_result || ''
-  const surface   = pick.match?.surface || ''
-  const bg        = isLive ? '#FFFBEB' : isWon ? '#f0fdf4' : isLost ? '#fef2f2' : 'var(--bg-raised)'
-  const border    = isLive ? '1px solid #FDE68A' : isWon ? '1px solid #86efac' : isLost ? '1px solid #fca5a5' : '1px solid var(--border-faint)'
+function Sidebar({ allMatches }) {
+  const navigate = useNavigate()
+  const today = new Date().toISOString().slice(0, 10)
 
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 10px', background: bg, border, borderRadius: 'var(--r)',
-        width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 4,
-      }}
-    >
-      {/* Surface dot */}
-      <span className={`surface-dot ${(surface || '').toLowerCase()}`} style={{ flexShrink: 0 }} />
-
-      {/* Name + opponent */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }}>
-          {pick.picked_player?.name || '—'}
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          vs {pick.opponent?.name || '—'}
-          {isLive && score ? ` · ${score}` : ''}
-        </div>
-      </div>
-
-      {/* Right: prob + status */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-        {prob != null && (
-          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--green)', fontVariantNumeric: 'tabular-nums' }}>
-            {Math.round(prob)}%
-          </span>
-        )}
-        {isLive && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: '#92400E', background: '#FEF3C7', borderRadius: 20, padding: '1px 6px' }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} />
-            LIVE
-          </span>
-        )}
-        {isWon  && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 800 }}>✓ W</span>}
-        {isLost && <span style={{ fontSize: 13, color: 'var(--red)',   fontWeight: 800 }}>✗ L</span>}
-      </div>
-    </button>
-  )
-}
-
-function SystemPickBar({ pick, onClick }) {
-  const isLive = /in play|live|set \d|game/i.test(pick.event_status || '')
-  const surface = pick.surface || ''
-  const prob = pick.pick_prob
-
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '7px 10px',
-        background: isLive ? '#FFFBEB' : 'var(--bg-raised)',
-        border: isLive ? '1px solid #FDE68A' : '1px solid var(--border-faint)',
-        borderRadius: 'var(--r)', width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 3,
-      }}
-    >
-      <span className={`surface-dot ${(surface || '').toLowerCase()}`} style={{ flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {pick.pick?.name || '—'}
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          vs {pick.opponent?.name || '—'} · {pick._system?.name || pick.tournament || ''}
-        </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-        {prob != null && (
-          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)', fontVariantNumeric: 'tabular-nums' }}>
-            {Math.round(prob * 100)}%
-          </span>
-        )}
-        {isLive && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: '#92400E', background: '#FEF3C7', borderRadius: 20, padding: '1px 6px' }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} />
-            LIVE
-          </span>
-        )}
-      </div>
-    </button>
-  )
-}
-
-function Sidebar() {
-  const navigate   = useNavigate()
-  const { isLoggedIn } = useAuth()
-
-  const [activePicks,  setActivePicks]  = useState([])
-  const [resultsStats, setResultsStats] = useState(null)
-  const [systems,      setSystems]      = useState([])
-  const [statConflicts, setStatConflicts] = useState([])
-
-  const loadPicks = useCallback(async () => {
-    if (!isLoggedIn) return
-    try {
-      const [active, results] = await Promise.all([api.picksActive(), api.picksResults()])
-      setActivePicks(active.picks || [])
-      setResultsStats(results.stats || null)
-    } catch (e) { /* silent */ }
-  }, [isLoggedIn])
-
-  const loadSystems = useCallback(async () => {
-    try {
-      const data = await api.systemsDashboard()
-      setSystems(Array.isArray(data) ? data : data.systems || [])
-    } catch (e) { /* silent */ }
-  }, [])
-
-  const loadStatConflicts = useCallback(async () => {
-    try {
-      const data = await api.statConflicts(2)
-      setStatConflicts(data.conflicts || [])
-    } catch (e) { /* silent */ }
-  }, [])
-
-  useEffect(() => { loadPicks() },  [loadPicks])
-  useEffect(() => { loadSystems() }, [loadSystems])
-  useEffect(() => { loadStatConflicts() }, [loadStatConflicts])
-
-  // Derived stats — win_rate comes from API directly; avoid computing ROI from partial data
-  const games   = resultsStats?.total    ?? null
-  const wins    = resultsStats?.wins     ?? null
-  const pl      = resultsStats?.total_pl ?? null
-  const winRate = resultsStats?.win_rate ?? null   // e.g. 62.5 (already %)
-
-  const plColor      = pl == null      ? 'var(--text-3)' : pl      > 0 ? 'var(--green)' : pl      < 0 ? 'var(--red)' : 'var(--text-3)'
-  const winRateColor = winRate == null ? 'var(--text-3)' : winRate >= 55 ? 'var(--green)' : winRate >= 45 ? 'var(--amber)' : 'var(--red)'
-
-  // All open system picks, flattened — API field is open_picks (not picks)
-  const allSystemPicks = useMemo(() =>
-    systems.flatMap(s => (s.open_picks || []).map(p => ({ ...p, _system: s }))),
-    [systems]
+  const todaySingles = useMemo(() =>
+    allMatches.filter(m => !m.is_doubles && (m.event_date || '').slice(0, 10) === today),
+    [allMatches, today]
   )
 
+  const liveNow   = todaySingles.filter(m => /in play|live|set \d|game/i.test(m.event_status || ''))
+  const finished  = todaySingles.filter(m => /finished/i.test(m.event_status || ''))
+  const withPred  = finished.filter(m => m.prediction?.prob_first_player != null && m.winner)
+  const correct   = withPred.filter(m => {
+    const p = m.prediction
+    const pick = p.prob_first_player >= 0.5 ? 'First Player' : 'Second Player'
+    return pick === m.winner
+  })
+  const winRate   = withPred.length > 0 ? Math.round(correct.length / withPred.length * 100) : null
+  const rateColor = winRate == null
+    ? 'var(--text-3)'
+    : winRate >= 60 ? 'var(--green)'
+    : winRate >= 45 ? 'var(--amber)'
+    : 'var(--red)'
+
+  const selections   = todaySingles.filter(m => Math.max(m.edge?.p1 || 0, m.edge?.p2 || 0) > 0.02)
+  const selFinished  = selections.filter(m => /finished/i.test(m.event_status || '') && m.winner)
+  const selWins      = selFinished.filter(m => {
+    const backFirst = (m.edge?.p1 || 0) >= (m.edge?.p2 || 0)
+    return (backFirst && m.winner === 'First Player') || (!backFirst && m.winner === 'Second Player')
+  })
+  const selWinRate   = selFinished.length > 0 ? Math.round(selWins.length / selFinished.length * 100) : null
+
+  const topChances = [...todaySingles]
+    .filter(m => m.prediction?.prob_first_player != null)
+    .sort((a, b) =>
+      Math.max(b.prediction.prob_first_player, b.prediction.prob_second_player) -
+      Math.max(a.prediction.prob_first_player, a.prediction.prob_second_player)
+    )
+    .slice(0, 5)
+
   return (
-    <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 48 }}>
+    <aside className="match-sidebar">
 
-      {/* ── My Picks ── */}
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
-        {/* Header bar — court tint */}
-        <div style={{
-          padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          background: '#15803D', color: '#fff',
-        }}>
-          <span style={{ fontWeight: 700, fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>★ My Picks</span>
-          <button
-            onClick={() => navigate('/my-picks')}
-            style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}
-          >
-            View all →
-          </button>
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>📊</span>
+          <span>Today's prediction rate</span>
         </div>
-
-        {/* Stats row */}
-        {isLoggedIn ? (
-          <div style={{ display: 'flex', padding: '12px 10px 10px', gap: 4, borderBottom: '1px solid var(--border-faint)' }}>
-            <StatBox label="Games"   value={games ?? '—'} />
-            <StatBox label="Wins"    value={wins  ?? '—'} />
-            <StatBox label="P&L"     value={pl   != null ? `${pl > 0 ? '+' : ''}${pl.toFixed(1)}u` : '—'} color={plColor} />
-            <StatBox label="Win Rate" value={winRate != null ? `${winRate.toFixed(0)}%` : '—'} color={winRateColor} />
-          </div>
-        ) : (
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-faint)' }}>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {['Games','Wins','P&L','ROI'].map(l => (
-                <div key={l} style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--border)' }}>—</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>{l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Pick bars */}
-        <div style={{ padding: '8px 10px' }}>
-          {!isLoggedIn ? (
-            <button
-              onClick={() => navigate('/my-picks')}
-              style={{
-                width: '100%', padding: '10px', background: 'var(--bg-raised)',
-                border: '1px dashed var(--border)', borderRadius: 'var(--r)',
-                color: 'var(--text-3)', fontSize: 12, cursor: 'pointer',
-              }}
-            >
-              Log in to track your picks
-            </button>
-          ) : activePicks.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center', padding: '10px 0' }}>
-              No active picks — star a match to add one
-            </div>
-          ) : (
-            activePicks.slice(0, 8).map(pick => (
-              <PickBar
-                key={pick.id}
-                pick={pick}
-                onClick={() => pick.match?.id && navigate(`/match/${pick.match.id}`)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* ── System Picks ── */}
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
-        <div style={{
-          padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          background: '#1e40af', color: '#fff',
-        }}>
-          <span style={{ fontWeight: 700, fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>🎯 System Picks</span>
-          <button
-            onClick={() => navigate('/systems')}
-            style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}
-          >
-            View all →
-          </button>
-        </div>
-
-        {systems.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border-faint)', flexWrap: 'wrap' }}>
-            {systems.map(s => (
-              <div key={s.code} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 50 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>{(s.open_picks || []).length}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.2 }}>{s.name}</div>
+        <div style={{ textAlign: 'center', padding: '14px 0 10px' }}>
+          {winRate != null ? (
+            <>
+              <div style={{ fontSize: 44, fontWeight: 700, color: rateColor, lineHeight: 1, letterSpacing: -2 }}>
+                {winRate}%
               </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ padding: '8px 10px' }}>
-          {allSystemPicks.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center', padding: '10px 0' }}>
-              No system picks for the next 3 days
-            </div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>
+                {correct.length} correct · {withPred.length} rated
+              </div>
+            </>
           ) : (
-            allSystemPicks.slice(0, 10).map((pick, i) => (
-              <SystemPickBar
-                key={`${pick._system.code}-${pick.pick_id || i}`}
-                pick={pick}
-                onClick={() => pick.match_id && navigate(`/match/${pick.match_id}`)}
-              />
-            ))
+            <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '6px 0' }}>
+              {finished.length > 0 ? 'No predictions to score yet' : 'No completed matches yet'}
+            </div>
           )}
+        </div>
+        <div className="sidebar-stats-row" style={{ borderTop: '1px solid var(--border-faint)', paddingTop: 10, marginTop: 4 }}>
+          <StatMini label="Live" value={liveNow.length || '0'} />
+          <StatMini label="Total" value={todaySingles.length} />
+          <StatMini label="Done"  value={finished.length} />
         </div>
       </div>
 
-      {/* ── Stat Picks ── */}
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
-        <div style={{
-          padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          background: '#7c3aed', color: '#fff',
-        }}>
-          <span style={{ fontWeight: 700, fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>📊 Stat Picks</span>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>
-            {statConflicts.length} angles today
-          </span>
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>🎯</span>
+          <span>RTT System Selections</span>
         </div>
-        <div style={{ padding: '8px 10px' }}>
-          {statConflicts.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center', padding: '10px 0' }}>
-              No stat angles today
-            </div>
-          ) : (
-            statConflicts.slice(0, 6).map((m, i) => {
-              const best = m.conflicts.reduce((a, b) => b.strength > a.strength ? b : a)
-              const favPlayer = best.favoured_player === 'first' ? m.first_player : m.second_player
-              const oppPlayer = best.favoured_player === 'first' ? m.second_player : m.first_player
-              const surface = (m.surface || '').toLowerCase().replace(/\s+/g, '-')
+        <div className="sidebar-stats-row">
+          <StatMini label="Selections" value={selections.length} />
+          <StatMini label="Wins"       value={selFinished.length > 0 ? selWins.length : '—'} />
+          <StatMini label="Win rate"   value={selWinRate != null ? `${selWinRate}%` : '—'} />
+        </div>
+        {selections.length === 0 ? (
+          <div className="sidebar-empty">No value selections today</div>
+        ) : (
+          <div className="sidebar-selection-list">
+            {selections.slice(0, 6).map(m => {
+              const p1 = m.first_player || {}
+              const p2 = m.second_player || {}
+              const ep1 = m.edge?.p1 || 0
+              const ep2 = m.edge?.p2 || 0
+              const backFirst  = ep1 >= ep2
+              const pickedName = backFirst ? p1.name : p2.name
+              const prob = backFirst
+                ? m.prediction?.prob_first_player
+                : m.prediction?.prob_second_player
+              const edge = Math.max(ep1, ep2)
               const isLive  = /in play|live|set \d|game/i.test(m.event_status || '')
+              const isDone  = /finished/i.test(m.event_status || '')
+              const won  = isDone && m.winner && (
+                (backFirst && m.winner === 'First Player') || (!backFirst && m.winner === 'Second Player')
+              )
+              const lost = isDone && m.winner && !won
               return (
                 <button
-                  key={m.match_id || i}
-                  onClick={() => m.match_id && navigate(matchUrl(m))}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '7px 10px',
-                    background: isLive ? '#FAF5FF' : 'var(--bg-raised)',
-                    border: isLive ? '1px solid #DDD6FE' : '1px solid var(--border-faint)',
-                    borderRadius: 'var(--r)', width: '100%', textAlign: 'left',
-                    cursor: 'pointer', marginBottom: 3,
-                  }}
+                  key={m.match_id}
+                  className="sidebar-selection-row"
+                  onClick={() => navigate(matchUrl(m))}
                 >
-                  <span className={`surface-dot ${surface}`} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {favPlayer?.name || '—'}
+                    <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {pickedName || '—'}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      vs {oppPlayer?.name || '—'} · {best.label}
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      {m.tournament || ''}{edge > 0 ? ` · +${Math.round(edge * 100)}% edge` : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', background: '#F3E8FF', borderRadius: 10, padding: '1px 6px', whiteSpace: 'nowrap' }}>
-                      {best.favoured_label}
-                    </span>
-                    {isLive && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: '#92400E', background: '#FEF3C7', borderRadius: 20, padding: '1px 6px' }}>
-                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} />
-                        LIVE
+                    {prob != null && (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
+                        {Math.round(prob * 100)}%
                       </span>
                     )}
+                    {isLive && <LiveLozenge small />}
+                    {won  && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 700 }}>✓</span>}
+                    {lost && <span style={{ fontSize: 13, color: 'var(--red)',   fontWeight: 700 }}>✗</span>}
                   </div>
                 </button>
               )
-            })
-          )}
+            })}
+          </div>
+        )}
+        <div style={{
+          fontSize: 10, color: 'var(--text-3)', textAlign: 'center',
+          padding: '6px 12px 2px', borderTop: '1px solid var(--border-faint)', marginTop: 4,
+        }}>
+          Matches where RTT model edge &gt; 2%
         </div>
+      </div>
+
+      <div className="sidebar-box">
+        <div className="sidebar-box-header">
+          <span>🏆</span>
+          <span>Top win chances today</span>
+        </div>
+        {topChances.length === 0 ? (
+          <div className="sidebar-empty">No predictions available</div>
+        ) : (
+          <div className="sidebar-selection-list">
+            {topChances.map((m, i) => {
+              const p1 = m.first_player || {}
+              const p2 = m.second_player || {}
+              const prob1 = m.prediction?.prob_first_player ?? 0
+              const prob2 = m.prediction?.prob_second_player ?? 0
+              const favourite = prob1 >= prob2 ? p1 : p2
+              const underdog  = prob1 >= prob2 ? p2 : p1
+              const favProb   = Math.max(prob1, prob2)
+              const isLive    = /in play|live|set \d|game/i.test(m.event_status || '')
+              return (
+                <button
+                  key={m.match_id}
+                  className="sidebar-selection-row"
+                  onClick={() => navigate(matchUrl(m))}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', width: 20, flexShrink: 0, textAlign: 'left' }}>
+                    #{i + 1}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {favourite.name || '—'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      vs {underdog.name || '—'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>
+                      {Math.round(favProb * 100)}%
+                    </span>
+                    {isLive && <LiveLozenge small />}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
     </aside>
@@ -819,7 +642,7 @@ function detectLevel(match) {
 
 const SURFACES = ['All', 'Hard', 'Clay', 'Grass']
 const GENDERS  = ['All', 'Men', 'Women']
-const LEVELS   = ['Slam / Masters', 'Challenger']
+const LEVELS   = ['Slam / Masters', 'Challenger', 'ITF']
 const SORTS    = [
   { id: 'time',      label: 'By time' },
   { id: 'winchance', label: 'By win chance' },
@@ -837,10 +660,15 @@ export default function MatchList() {
   const [upcomingOnly,     setUpcomingOnly]     = useState(false)
   const [ratedOnly,        setRatedOnly]        = useState(false)
   const [hideUnidentified, setHideUnidentified] = useState(false)
-  const [hideNoPicks,      setHideNoPicks]      = useState(true)
   const [tournament,       setTournament]       = useState('')
   const [sortBy,           setSortBy]           = useState('time')
   const [lastFetch,        setLastFetch]        = useState(null)
+
+  useSEO({
+    title: 'RateThatTennis - Tennis Predictions, Analytics & Tips - Machine Learning for Tennis. Always free.',
+    description: 'Free ML-powered tennis predictions, player ratings and betting intelligence. Win probabilities, RTT ratings, bookmaker odds and edge for every ATP, WTA and Challenger match.',
+    canonical: 'https://ratethat.tennis/',
+  })
 
   function toggleLevel(level) {
     setLevels(prev => {
@@ -890,11 +718,9 @@ export default function MatchList() {
         const r2 = m.second_player?.rtt_score
         if (r1 == null || r2 == null) return false
       }
-      if (hideNoPicks && m.prediction?.prob_first_player != null &&
-          Math.abs(m.prediction.prob_first_player - 0.5) < 0.05) return false
       return true
     })
-  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified, hideNoPicks])
+  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified])
 
   // Clear tournament if filtered away
   useEffect(() => {
@@ -917,6 +743,7 @@ export default function MatchList() {
       <div className="cc-header">
         <div>
           <h1 className="cc-title">Match Centre</h1>
+          <div className="cc-subtitle">{todayLabel()}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <div className="cc-meta-badges">
@@ -1004,12 +831,6 @@ export default function MatchList() {
             checked={hideUnidentified}
             onChange={() => setHideUnidentified(v => !v)}
             accent="var(--accent, #3b82f6)"
-          />
-          <Tickbox
-            label="Hide 50/50 no-picks"
-            checked={hideNoPicks}
-            onChange={() => setHideNoPicks(v => !v)}
-            accent="var(--amber, #f59e0b)"
           />
         </div>
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSEO } from '../hooks/useSEO.js'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 import RttLozenge from '../components/RttLozenge.jsx'
@@ -163,6 +164,12 @@ function PlayerRow({ player, surfaceKey, rank }) {
 
 
 export default function PlayerDatabase() {
+  useSEO({
+    title: 'Tennis Player Database — RTT Ratings & Rankings | RateThatTennis',
+    description: 'Browse ATP and WTA player ratings, form index, surface stats and momentum. Free tennis player analytics powered by machine learning.',
+    canonical: 'https://ratethat.tennis/players',
+  })
+
   const [sort, setSort]         = useState('rtt')      // user choice: rtt | form | momentum
   const [surface, setSurface]   = useState('all')      // all | clay | hard | grass | indoor
   const [search, setSearch]     = useState('')

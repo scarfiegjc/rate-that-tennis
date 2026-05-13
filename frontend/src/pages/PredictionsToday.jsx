@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
+import { useSEO } from '../hooks/useSEO.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 
 function StatCard({ label, value, sub }) {
@@ -122,6 +123,12 @@ function PredictionRow({ p }) {
 }
 
 export default function PredictionsToday() {
+  useSEO({
+    title: 'Tennis Predictions Today — Win Probabilities & Model Edge | RateThatTennis',
+    description: 'Free AI tennis predictions for today\'s matches. ML win probabilities, RTT ratings and bookmaker edge for ATP, WTA and Challenger tennis.',
+    canonical: 'https://ratethat.tennis/predictions',
+  })
+
   const [data, setData] = useState(null)
   const [stats, setStats] = useState(null)
   const [error, setError] = useState(null)

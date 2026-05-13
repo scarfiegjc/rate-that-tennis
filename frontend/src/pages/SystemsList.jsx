@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSEO } from '../hooks/useSEO.js'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 
@@ -18,6 +19,12 @@ function MetricChip({ label, value, colour }) {
 }
 
 export default function SystemsList() {
+  useSEO({
+    title: 'Tennis Betting Systems & Tipster Trackers | RateThatTennis',
+    description: 'Track AI-generated tennis betting systems — Surface Monster, Form Surge and more. Live P&L, ROI and win rate for every system.',
+    canonical: 'https://ratethat.tennis/systems',
+  })
+
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
 

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { api } from '../api.js'
+import { useSEO } from '../hooks/useSEO.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import FormChart from '../components/FormChart.jsx'
-import { playerUrl } from '../utils/playerUrl.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers tied to the site's light theme palette (defined in index.css):
@@ -583,64 +583,26 @@ function OverviewTab({ player, ratings, recent, history, surfaceStats }) {
         </GlanceCard>
       </div>
 
-      {/* Skill ratings — only render rows where we have a value, and hide
-          the whole section if none are populated. Top players sometimes
-          have no per-match point data in our production tables (the data
-          source for these computed ratings) — the Stats tab covers the
-          gap with Matchstat career averages, so we point users there. */}
-      {(() => {
-        const rows = [
-          ['Serve',       ratings.serve_rating],
-          ['Return',      ratings.return_rating],
-          ['Pressure',    ratings.pressure_rating],
-          ['Consistency', ratings.consistency_rating],
-          ['Big match',   ratings.big_match_rating],
-          ['vs Top 10',   ratings.vs_top10_rating],
-        ].filter(([, v]) => v != null)
-        if (rows.length === 0) {
-          return (
-            <div style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--r)',
-              padding: '14px 18px',
-              marginBottom: 14,
-              fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5,
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 6,
-              }}>
-                Skill ratings
-              </div>
-              Detailed skill ratings (Serve / Return / Pressure / Consistency /
-              Big match / vs Top 10) are derived from point-by-point match data
-              we don&apos;t have for this player yet. See the <b>Stats</b> tab
-              above for career serve averages, Slam-level stats and serve speeds
-              from the Matchstat profile.
-            </div>
-          )
-        }
-        return (
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--r)',
-            padding: '14px 18px',
-            marginBottom: 14,
-          }}>
-            <div style={{
-              fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 4,
-            }}>
-              Skill ratings
-            </div>
-            {rows.map(([name, value]) => (
-              <SkillBar key={name} name={name} value={value} />
-            ))}
-          </div>
-        )
-      })()}
+      <div style={{
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r)',
+        padding: '14px 18px',
+        marginBottom: 14,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+          letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 4,
+        }}>
+          Skill ratings
+        </div>
+        <SkillBar name="Serve"        value={ratings.serve_rating} />
+        <SkillBar name="Return"       value={ratings.return_rating} />
+        <SkillBar name="Pressure"     value={ratings.pressure_rating} />
+        <SkillBar name="Consistency"  value={ratings.consistency_rating} />
+        <SkillBar name="Big match"    value={ratings.big_match_rating} />
+        <SkillBar name="vs Top 10"    value={ratings.vs_top10_rating} />
+      </div>
     </>
   )
 }
@@ -929,7 +891,7 @@ function StatRow({ label, value, suffix = '' }) {
   )
 }
 
-function StatsTab({ stats, msCareer, msProfile }) {
+function StatsTab({ stats }) {
   if (!stats) {
     return <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>Loading career stats…</div>
   }
@@ -937,8 +899,6 @@ function StatsTab({ stats, msCareer, msProfile }) {
   const sample = serve.sample_size
   const surfaces = stats.surface_stats || []
   const rankings = stats.rankings_history || []
-  const ms = msCareer || {}
-  const hasMsCareer = ms.all_matches || ms.slam_matches
 
   return (
     <div style={{
@@ -1016,74 +976,6 @@ function StatsTab({ stats, msCareer, msProfile }) {
         })}
       </div>
 
-      {hasMsCareer && (
-        <div style={{
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 'var(--r)', padding: '14px 18px',
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 4,
-          }}>
-            Career averages
-            <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--text-3)', marginLeft: 6 }}>
-              · over {ms.all_matches || 0} pro matches
-            </span>
-          </div>
-          {ms.all_first_serve_pct != null && <StatRow label="1st serve in"          value={ms.all_first_serve_pct} suffix="%" />}
-          {ms.all_first_serve_won_pct != null && <StatRow label="1st serve points won" value={ms.all_first_serve_won_pct} suffix="%" />}
-          {ms.all_second_serve_won_pct != null && <StatRow label="2nd serve points won" value={ms.all_second_serve_won_pct} suffix="%" />}
-          {ms.all_aces_per_match != null && <StatRow label="Aces per match"        value={ms.all_aces_per_match} suffix="" />}
-          {ms.all_df_per_match != null && <StatRow label="Double faults / match"  value={ms.all_df_per_match} suffix="" />}
-          {ms.all_bp_conv_pct != null && <StatRow label="Break-point conversion" value={ms.all_bp_conv_pct} suffix="%" />}
-          {ms.all_total_pts_won_per_match != null && <StatRow label="Total points won / match" value={ms.all_total_pts_won_per_match} suffix="" />}
-        </div>
-      )}
-
-      {(ms.slam_matches || 0) > 0 && (
-        <div style={{
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 'var(--r)', padding: '14px 18px',
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 4,
-          }}>
-            Grand Slam profile
-            <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--text-3)', marginLeft: 6 }}>
-              · over {ms.slam_matches} Slam matches
-            </span>
-          </div>
-          {ms.slam_winners_per_match != null && <StatRow label="Winners / match"       value={ms.slam_winners_per_match} suffix="" />}
-          {ms.slam_ue_per_match != null && <StatRow label="Unforced errors / match" value={ms.slam_ue_per_match} suffix="" />}
-          {ms.slam_winner_ue_ratio != null && <StatRow label="Winner/UE ratio"       value={ms.slam_winner_ue_ratio} suffix="" />}
-          {ms.slam_net_won_pct != null && <StatRow label="Net points won"         value={ms.slam_net_won_pct} suffix="%" />}
-          {ms.slam_avg_first_serve_kmh != null && <StatRow label="Avg 1st serve speed"   value={ms.slam_avg_first_serve_kmh} suffix=" km/h" />}
-          {ms.slam_avg_second_serve_kmh != null && <StatRow label="Avg 2nd serve speed"   value={ms.slam_avg_second_serve_kmh} suffix=" km/h" />}
-          {ms.slam_fastest_serve_kmh != null && <StatRow label="Fastest serve"        value={ms.slam_fastest_serve_kmh} suffix=" km/h" />}
-        </div>
-      )}
-
-      {msProfile && (msProfile.coach || msProfile.birthplace || msProfile.residence || msProfile.weight_kg || msProfile.plays) && (
-        <div style={{
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 'var(--r)', padding: '14px 18px',
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 4,
-          }}>
-            Profile
-          </div>
-          {msProfile.coach      && <StatRow label="Coach"      value={msProfile.coach} />}
-          {msProfile.birthplace && <StatRow label="Birthplace" value={msProfile.birthplace} />}
-          {msProfile.residence  && <StatRow label="Residence"  value={msProfile.residence} />}
-          {msProfile.weight_kg  && <StatRow label="Weight"     value={msProfile.weight_kg} suffix=" kg" />}
-          {msProfile.plays      && <StatRow label="Plays"      value={msProfile.plays} />}
-          {msProfile.ms_turned_pro && <StatRow label="Turned pro" value={msProfile.ms_turned_pro} />}
-        </div>
-      )}
-
       {rankings.length > 0 && (
         <div style={{
           background: 'var(--bg-card)', border: '1px solid var(--border)',
@@ -1128,8 +1020,6 @@ function StatsTab({ stats, msCareer, msProfile }) {
 
 export default function PlayerPage() {
   const { id } = useParams()
-  const navigate = useNavigate()
-  const location = useLocation()
   const [data, setData] = useState(null)
   const [formData, setFormData] = useState(null)
   const [stats, setStats] = useState(null)
@@ -1149,23 +1039,6 @@ export default function PlayerPage() {
       if (!on) return
       setData(p); setFormData(f); setStats(s)
       setLoading(false)
-
-      // SEO: redirect to the slugged URL if loaded with just the numeric ID.
-      // Same pattern as MatchDetail — keeps shared links descriptive without
-      // forcing every internal link site-wide to build the URL upfront.
-      try {
-        const onlyId = /^\/player\/\d+\/?$/.test(location.pathname)
-        if (onlyId && p?.player) {
-          const target = playerUrl(p.player)
-          if (target && target !== location.pathname && target !== '/') {
-            navigate(target + (location.search || '') + (location.hash || ''),
-                     { replace: true })
-            // Also set the document title for SEO + browser tab clarity
-            const name = p.player.full_name || p.player.name
-            if (name) document.title = `${name} — ratethat.tennis`
-          }
-        }
-      } catch { /* non-fatal */ }
     })
     .catch(e => {
       if (!on) return
@@ -1203,6 +1076,26 @@ export default function PlayerPage() {
   const recent = data.recent_form || {}
   const history = formData?.rating_history || []
 
+  const playerName = player.full_name || player.name || ''
+  const playerCountry = player.country || ''
+  useSEO({
+    title: playerName
+      ? `${playerName} — Tennis Stats, Ratings &amp; Form | RateThatTennis`
+      : 'Player Profile | RateThatTennis',
+    description: playerName
+      ? `${playerName}${playerCountry ? ' (' + playerCountry + ')' : ''} tennis stats, RTT ratings, form index and match history. Free analytics on ratethat.tennis.`
+      : undefined,
+    canonical: `https://ratethat.tennis/player/${id}`,
+    jsonLd: playerName ? {
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      'name': playerName,
+      ...(playerCountry ? { 'nationality': playerCountry } : {}),
+      ...(ratings.rtt_score != null ? { 'description': `RTT Rating: ${Math.round(ratings.rtt_score)}/100` } : {}),
+      'url': `https://ratethat.tennis/player/${id}`,
+    } : undefined,
+  })
+
   return (
     <div className="page">
       <div style={{ marginBottom: 14 }}>
@@ -1237,7 +1130,7 @@ export default function PlayerPage() {
         <MatchHistoryTab playerId={id} />
       )}
       {tab === 'Stats' && (
-        <StatsTab stats={stats} msCareer={data.ms_career} msProfile={data.ms_profile} />
+        <StatsTab stats={stats} />
       )}
     </div>
   )
