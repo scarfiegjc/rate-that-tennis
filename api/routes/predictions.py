@@ -1311,10 +1311,10 @@ def _predictions_results_inner():
         JOIN surfaces    s2s ON s2s.id = t2s.surface_id
     """
     by_surface = {
-        "Clay":   _fetch_breakdown("AND s2s.name ILIKE '%Clay%'",   joins=surf_joins),
-        "Hard":   _fetch_breakdown("AND s2s.name ILIKE '%Hard%'",   joins=surf_joins),
-        "Grass":  _fetch_breakdown("AND s2s.name ILIKE '%Grass%'",  joins=surf_joins),
-        "Indoor": _fetch_breakdown("AND s2s.name ILIKE '%Indoor%'", joins=surf_joins),
+        "Clay":   _fetch_breakdown("AND s2s.name ILIKE %s", ("%Clay%",),   joins=surf_joins),
+        "Hard":   _fetch_breakdown("AND s2s.name ILIKE %s", ("%Hard%",),   joins=surf_joins),
+        "Grass":  _fetch_breakdown("AND s2s.name ILIKE %s", ("%Grass%",),  joins=surf_joins),
+        "Indoor": _fetch_breakdown("AND s2s.name ILIKE %s", ("%Indoor%",), joins=surf_joins),
     }
 
     # ── By tour ───────────────────────────────────────────────────────────────
@@ -1323,10 +1323,10 @@ def _predictions_results_inner():
         JOIN event_types et2t ON et2t.id = t2t.event_type_id
     """
     by_tour = {
-        "ATP":        _fetch_breakdown("AND et2t.name ILIKE '%ATP%'",        joins=tour_joins),
-        "WTA":        _fetch_breakdown("AND et2t.name ILIKE '%WTA%'",        joins=tour_joins),
-        "Challenger": _fetch_breakdown("AND et2t.name ILIKE '%Challenger%'", joins=tour_joins),
-        "ITF":        _fetch_breakdown("AND et2t.name ILIKE '%ITF%'",        joins=tour_joins),
+        "ATP":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%ATP%",),        joins=tour_joins),
+        "WTA":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%WTA%",),        joins=tour_joins),
+        "Challenger": _fetch_breakdown("AND et2t.name ILIKE %s", ("%Challenger%",), joins=tour_joins),
+        "ITF":        _fetch_breakdown("AND et2t.name ILIKE %s", ("%ITF%",),        joins=tour_joins),
     }
 
     # ── Recent picks (last 20 settled, individual rows) ───────────────────────
