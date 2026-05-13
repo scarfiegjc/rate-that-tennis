@@ -46,7 +46,7 @@ def _db_url() -> str:
 # picks history stays in system_picks, but they're hidden from the dashboard).
 LEGACY_SYSTEM_CODES = [
     "surface_monster", "form_surge", "hand_advantage", "big_match_player",
-    "underdog_value", "rtt_mismatch", "clutch_in_decider",
+    "underdog_value", "rtt_mismatch", "clutch_in_decider", "form_rocket",
 ]
 
 # v2 systems — multi-signal convergence, designed for 80%+ win rates.
@@ -64,10 +64,6 @@ CANONICAL_SYSTEMS = [
      "Triple Convergence",
      "RTT, surface and form ratings all favour the same player (gaps 15/10/8+). All three independent signals point one way.",
      "🎯", "#9333EA"),
-    ("form_rocket",
-     "Form Rocket",
-     "Rising momentum + form gap 15+ + RTT gap 8+ + model 70+. Player is in red-hot form against a weaker opponent.",
-     "🚀", "#F59E0B"),
     ("smart_favourite",
      "Smart Favourite",
      "Model has the player at 70+ AND beats market implied probability by 4+ points. Favourite the bookies have under-priced.",

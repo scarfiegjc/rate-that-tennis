@@ -314,6 +314,7 @@ SELECT
     )                                           AS roi_pct
 FROM systems sy
 LEFT JOIN system_picks sp ON sp.system_id = sy.id
+WHERE sy.is_active = TRUE
 GROUP BY sy.id, sy.code, sy.name, sy.description, sy.icon, sy.accent_colour;
 
 -- Done.

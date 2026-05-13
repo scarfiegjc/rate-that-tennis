@@ -6,6 +6,7 @@ import MatchList from './pages/MatchList.jsx'
 import MatchDetail from './pages/MatchDetail.jsx'
 import PlayerPage from './pages/PlayerPage.jsx'
 import InPlayPage from './pages/InPlayPage.jsx'
+import PredictionsResults from './pages/PredictionsResults.jsx'
 import PredictionsToday from './pages/PredictionsToday.jsx'
 import PredictionsHistory from './pages/PredictionsHistory.jsx'
 import SystemsList from './pages/SystemsList.jsx'
@@ -134,7 +135,8 @@ function AppRoutes() {
         <Route path="/match/:id/:slug"        element={<MatchDetail />} />
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
-        <Route path="/predictions"            element={<PredictionsToday />} />
+        <Route path="/predictions"            element={<PredictionsResults />} />
+        <Route path="/predictions/today"      element={<PredictionsToday />} />
         <Route path="/predictions/history"    element={<PredictionsHistory />} />
         <Route path="/systems"                element={<SystemsList />} />
         <Route path="/systems/:code"          element={<SystemDetail />} />

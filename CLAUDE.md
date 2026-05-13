@@ -5,6 +5,20 @@
 
 ---
 
+## ⚠️ CRITICAL — GIT COMMIT DISCIPLINE
+
+**Before every commit, always:**
+1. `git fetch origin` — bring remote refs up to date
+2. `git diff HEAD origin/main --stat` — confirm local is not behind/diverged
+3. `git add <specific-file>` only — NEVER `git add .` or `git add -A`
+4. `git diff --cached --stat` — verify exactly what is staged before committing
+
+If `git diff HEAD origin/main` shows files you didn't intend to change, **stop and run `git reset --hard origin/main` first**, then re-apply only the intended edit.
+
+This rule exists because a diverged local repo caused two incidents where 80+ stale files were pushed, overwriting carefully-built frontend work.
+
+---
+
 ## ⚠️ CRITICAL — DO NOT REWRITE THESE FILES
 
 **This project has suffered repeated accidental deletion of carefully-built features when AI
