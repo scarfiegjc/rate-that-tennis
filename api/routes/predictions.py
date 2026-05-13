@@ -1186,10 +1186,7 @@ _BLOCK_SQL = """
             CASE
               WHEN mp.is_correct = TRUE
                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
-               THEN (1.0 / GREATEST(
-                       CASE WHEN mp.predicted_winner = m.first_player_name
-                            THEN mp.prob_first_player
-                            ELSE mp.prob_second_player END, 0.01)) - 1
+               THEN (1.0 / GREATEST(mp.prob_first_player, mp.prob_second_player, 0.01)) - 1
               WHEN mp.is_correct = FALSE
                AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
                THEN -1.0
@@ -1200,10 +1197,7 @@ _BLOCK_SQL = """
             * SUM(CASE
                 WHEN mp.is_correct = TRUE
                  AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
-                 THEN (1.0 / GREATEST(
-                         CASE WHEN mp.predicted_winner = m.first_player_name
-                              THEN mp.prob_first_player
-                              ELSE mp.prob_second_player END, 0.01)) - 1
+                 THEN (1.0 / GREATEST(mp.prob_first_player, mp.prob_second_player, 0.01)) - 1
                 WHEN mp.is_correct = FALSE
                  AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
                  THEN -1.0
@@ -1280,13 +1274,16 @@ _PICK_COLS = """
     mp.predicted_winner, mp.is_correct,
     mp.prob_first_player, mp.prob_second_player,
     mp.confidence, mp.settled_at,
-    m.first_player_name, m.second_player_name,
+    p1.name AS first_player_name,
+    p2.name AS second_player_name,
     m.event_date, m.final_result,
     t.name  AS tournament_name,
     s.name  AS surface_name
 """
 
 _PICK_JOINS = """
+    JOIN players p1 ON p1.id = m.first_player_id
+    JOIN players p2 ON p2.id = m.second_player_id
     LEFT JOIN tournaments t ON t.id = m.tournament_id
     LEFT JOIN surfaces   s ON s.id  = t.surface_id
 """
@@ -1409,10 +1406,7 @@ def _predictions_results_inner():
             SUM(CASE
                   WHEN mp.is_correct = TRUE
                    AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
-                   THEN (1.0 / GREATEST(
-                       CASE WHEN mp.predicted_winner = m.first_player_name
-                            THEN mp.prob_first_player
-                            ELSE mp.prob_second_player END, 0.01)) - 1
+                   THEN (1.0 / GREATEST(mp.prob_first_player, mp.prob_second_player, 0.01)) - 1
                   WHEN mp.is_correct = FALSE
                    AND NOT (mp.prob_first_player BETWEEN 0.49 AND 0.51)
                    THEN -1.0
