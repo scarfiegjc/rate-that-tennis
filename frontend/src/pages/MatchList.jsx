@@ -837,6 +837,7 @@ export default function MatchList() {
   const [upcomingOnly,     setUpcomingOnly]     = useState(false)
   const [ratedOnly,        setRatedOnly]        = useState(false)
   const [hideUnidentified, setHideUnidentified] = useState(false)
+  const [hideNoPicks,      setHideNoPicks]      = useState(true)
   const [tournament,       setTournament]       = useState('')
   const [sortBy,           setSortBy]           = useState('time')
   const [lastFetch,        setLastFetch]        = useState(null)
@@ -889,9 +890,11 @@ export default function MatchList() {
         const r2 = m.second_player?.rtt_score
         if (r1 == null || r2 == null) return false
       }
+      if (hideNoPicks && m.prediction?.prob_first_player != null &&
+          Math.abs(m.prediction.prob_first_player - 0.5) < 0.01) return false
       return true
     })
-  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified])
+  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified, hideNoPicks])
 
   // Clear tournament if filtered away
   useEffect(() => {
@@ -1001,6 +1004,12 @@ export default function MatchList() {
             checked={hideUnidentified}
             onChange={() => setHideUnidentified(v => !v)}
             accent="var(--accent, #3b82f6)"
+          />
+          <Tickbox
+            label="Hide 50/50 no-picks"
+            checked={hideNoPicks}
+            onChange={() => setHideNoPicks(v => !v)}
+            accent="var(--amber, #f59e0b)"
           />
         </div>
 

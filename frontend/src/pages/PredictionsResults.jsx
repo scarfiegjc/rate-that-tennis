@@ -936,6 +936,7 @@ function TodayRow({ p }) {
 }
 
 function TodayStrip({ today }) {
+  const [showNoPicks, setShowNoPicks] = useState(false)
   if (!today) return null
   if (!today.predictions || today.predictions.length === 0) {
     return (
@@ -944,15 +945,19 @@ function TodayStrip({ today }) {
       </div>
     )
   }
+  const isNoPick = p => p.p1?.prob != null && Math.abs(p.p1.prob - 0.5) < 0.01
+  const noPickCount = today.predictions.filter(isNoPick).length
   // Sort: settled first (results), then live, then upcoming
-  const sorted = [...today.predictions].sort((a, b) => {
-    const aSettled = a.actual_winner ? 0 : 1
-    const bSettled = b.actual_winner ? 0 : 1
-    if (aSettled !== bSettled) return aSettled - bSettled
-    const ta = a.event_time || '99:99'
-    const tb = b.event_time || '99:99'
-    return ta < tb ? -1 : 1
-  })
+  const sorted = [...today.predictions]
+    .filter(p => showNoPicks || !isNoPick(p))
+    .sort((a, b) => {
+      const aSettled = a.actual_winner ? 0 : 1
+      const bSettled = b.actual_winner ? 0 : 1
+      if (aSettled !== bSettled) return aSettled - bSettled
+      const ta = a.event_time || '99:99'
+      const tb = b.event_time || '99:99'
+      return ta < tb ? -1 : 1
+    })
 
   return (
     <div className="card" style={{ overflow: 'hidden', maxHeight: 360, overflowY: 'auto' }}>
@@ -968,7 +973,21 @@ function TodayStrip({ today }) {
         <div style={{ textAlign: 'center' }}>Probability</div>
         <div>Player 2</div>
         <div></div>
-        <div></div>
+        <div style={{ textAlign: 'right' }}>
+          {noPickCount > 0 && (
+            <button
+              onClick={() => setShowNoPicks(v => !v)}
+              title={showNoPicks ? 'Hide 50/50 no-picks' : `Show ${noPickCount} 50/50 no-picks`}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                fontSize: 9, color: showNoPicks ? 'var(--amber)' : 'var(--text-3)',
+                fontWeight: 700, letterSpacing: 0.3,
+              }}
+            >
+              {showNoPicks ? '50/50 ✕' : `+${noPickCount}`}
+            </button>
+          )}
+        </div>
       </div>
       {sorted.map(p => <TodayRow key={p.match_id} p={p} />)}
     </div>
