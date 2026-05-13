@@ -1067,6 +1067,16 @@ export default function PredictionsResults() {
 
   if (error) return <div className="page"><div className="error">{error}</div></div>
   if (!data) return <div className="page"><div className="loading">Loading results…</div></div>
+  // If the API error-wrapper returned {"error": "..."} as HTTP 200, catch it here
+  // before the destructuring below causes a render crash on undefined all_time etc.
+  if (data.error) return (
+    <div className="page">
+      <div className="card" style={{ padding: 20, margin: 20 }}>
+        <div style={{ color: 'var(--red)', fontWeight: 700, marginBottom: 8 }}>Results API error</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>{data.error}</div>
+      </div>
+    </div>
+  )
 
   const { model_cutover, today: todayStats, all_time, last_30d, last_7d,
           streak, best_7d, worst_7d, weekly_bars, recent_picks,
@@ -1259,7 +1269,7 @@ export default function PredictionsResults() {
         Historic results
       </h3>
 
-      {(all_time.picks ?? 0) === 0 && (
+      {(all_time?.picks ?? 0) === 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 12,
           background: 'var(--bg-raised)',
