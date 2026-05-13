@@ -121,9 +121,12 @@ export default function PredictionsToday() {
 
   useEffect(() => {
     let on = true
-    Promise.all([api.predictionsToday(2), api.predictionsStats()])
-      .then(([t, s]) => { if (on) { setData(t); setStats(s) } })
+    api.predictionsToday(2)
+      .then(t => { if (on) setData(t) })
       .catch(e => { if (on) setError(e.message) })
+    api.predictionsStats()
+      .then(s => { if (on) setStats(s) })
+      .catch(() => {/* stats panel optional — don't block the page */})
     return () => { on = false }
   }, [])
 
