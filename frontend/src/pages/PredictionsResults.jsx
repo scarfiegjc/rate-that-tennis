@@ -671,7 +671,7 @@ function SystemCard({ sys }) {
         </div>
       </div>
 
-      {/* Open picks list */}
+      {/* Recent settled results */}
       <div>
         <div style={{
           padding: '6px 14px',
@@ -679,85 +679,79 @@ function SystemCard({ sys }) {
           color: 'var(--text-3)', textTransform: 'uppercase',
           background: 'var(--bg-sunken)',
           borderBottom: '1px solid var(--border-faint)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          {sys.open_picks.length > 0
-            ? `${sys.open_picks.length} open pick${sys.open_picks.length > 1 ? 's' : ''}`
-            : 'No open picks today'}
+          <span>Recent results</span>
+          <Link
+            to={`/systems/${sys.code}`}
+            style={{ fontSize: 9, color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            View all →
+          </Link>
         </div>
-        {sys.open_picks.length === 0 ? (
+        {(!sys.recent_picks || sys.recent_picks.length === 0) ? (
           <div style={{
             padding: '12px 14px', fontSize: 11,
             color: 'var(--text-3)', textAlign: 'center',
           }}>
-            Conditions don&apos;t match any upcoming match. Check back tomorrow.
+            No settled picks yet.
           </div>
         ) : (
-          sys.open_picks.map(p => (
-            <Link
-              key={p.pick_id}
-              to={matchUrl({
-                match_id: p.match_id,
-                event_date: p.event_date,
-                tournament: p.tournament,
-                p1: p.pick.name === p.opponent.name ? null : p.pick,  // sort the pair
-                p2: p.opponent,
-              })}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '50px 1fr auto',
-                padding: '9px 14px',
-                borderBottom: '1px solid var(--border-faint)',
-                fontSize: 12, alignItems: 'center',
-                textDecoration: 'none', color: 'inherit',
-              }}
-            >
-              <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-                {p.event_date?.slice(5)}
-                {p.event_time && (
-                  <div style={{ fontSize: 10 }}>{p.event_time.slice(0, 5)}</div>
-                )}
-              </div>
-              <div>
-                <div style={{ fontWeight: 600 }}>
-                  {p.pick.name}
-                  <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> vs {p.opponent.name}</span>
+          sys.recent_picks.map(p => {
+            const correct = p.is_correct === true
+            const wrong   = p.is_correct === false
+            const colour  = correct ? 'var(--green)' : wrong ? 'var(--red)' : 'var(--text-3)'
+            return (
+              <Link
+                key={p.pick_id}
+                to={matchUrl({
+                  match_id: p.match_id,
+                  event_date: p.event_date,
+                  tournament: p.tournament,
+                  p1: p.pick,
+                  p2: p.opponent,
+                })}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '22px 1fr auto',
+                  padding: '8px 14px',
+                  borderBottom: '1px solid var(--border-faint)',
+                  fontSize: 12, alignItems: 'center',
+                  textDecoration: 'none', color: 'inherit',
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: colour }}>
+                  {correct ? '✓' : wrong ? '✗' : '·'}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
-                  {p.tournament || '—'}{p.surface ? ` · ${p.surface}` : ''}{p.round ? ` · ${p.round}` : ''}
-                </div>
-                {p.reason && (
-                  <div style={{
-                    fontSize: 10, color: 'var(--text-2)', marginTop: 3,
-                    fontStyle: 'italic',
-                  }}>
-                    {p.reason}
+                <div>
+                  <div style={{ fontWeight: 600 }}>
+                    {p.pick.name}
+                    <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> vs {p.opponent.name}</span>
                   </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                {p.pick_prob != null && (
-                  <span style={{ fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                    {Math.round(p.pick_prob * 100)}%
-                  </span>
-                )}
-                {p.market_odds != null && (
-                  <span style={{ fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
-                    @{p.market_odds.toFixed(2)}
-                  </span>
-                )}
-                {p.confidence && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, letterSpacing: 0.3,
-                    textTransform: 'uppercase',
-                    color: p.confidence === 'high' ? 'var(--green-text)'
-                         : p.confidence === 'medium' ? 'var(--amber)' : 'var(--text-3)',
-                  }}>
-                    {p.confidence}
-                  </span>
-                )}
-              </div>
-            </Link>
-          ))
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
+                    {p.event_date?.slice(5)}{p.tournament ? ` · ${p.tournament}` : ''}
+                    {p.surface ? ` · ${p.surface}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                  {p.pick_prob != null && (
+                    <span style={{ fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      {Math.round(p.pick_prob * 100)}%
+                    </span>
+                  )}
+                  {p.profit_loss != null && (
+                    <span style={{
+                      fontSize: 10, fontVariantNumeric: 'tabular-nums',
+                      color: p.profit_loss > 0 ? 'var(--green)' : p.profit_loss < 0 ? 'var(--red)' : 'var(--text-3)',
+                    }}>
+                      {p.profit_loss > 0 ? '+' : ''}{p.profit_loss.toFixed(2)}u
+                    </span>
+                  )}
+                </div>
+              </Link>
+            )
+          })
         )}
       </div>
     </div>

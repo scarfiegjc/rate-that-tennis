@@ -1366,6 +1366,69 @@ def systems_dashboard():
                 "opponent":    opp,
             })
 
+        # Recent settled picks (last 8) — for the history view on the predictions page
+        recent_rows = safe_query(
+            """
+            SELECT
+                sp.id            AS pick_id,
+                sp.match_id,
+                sp.pick,
+                sp.confidence,
+                sp.reason,
+                sp.pick_prob,
+                sp.market_odds,
+                sp.is_correct,
+                sp.profit_loss,
+                m.event_date, m.event_status,
+                t.name AS tournament,
+                s.name AS surface,
+                m.tournament_round AS round,
+                p1.id AS p1_id, p1.name AS p1_name, p1.country_code AS p1_country,
+                p2.id AS p2_id, p2.name AS p2_name, p2.country_code AS p2_country
+            FROM system_picks sp
+            JOIN matches m       ON m.id = sp.match_id
+            LEFT JOIN tournaments t ON t.id = m.tournament_id
+            LEFT JOIN surfaces s    ON s.id = t.surface_id
+            LEFT JOIN players p1    ON p1.id = m.first_player_id
+            LEFT JOIN players p2    ON p2.id = m.second_player_id
+            WHERE sp.system_id = %s
+              AND sp.settled_at IS NOT NULL
+            ORDER BY sp.settled_at DESC
+            LIMIT 8
+            """,
+            (s["id"],),
+        )
+
+        recent_serialised = []
+        for p in recent_rows:
+            pick_side = p["pick"]
+            picked = {
+                "id":           p["p1_id"] if pick_side == "first_player" else p["p2_id"],
+                "name":         p["p1_name"] if pick_side == "first_player" else p["p2_name"],
+                "country_code": p["p1_country"] if pick_side == "first_player" else p["p2_country"],
+            }
+            opp = {
+                "id":           p["p2_id"] if pick_side == "first_player" else p["p1_id"],
+                "name":         p["p2_name"] if pick_side == "first_player" else p["p1_name"],
+                "country_code": p["p2_country"] if pick_side == "first_player" else p["p1_country"],
+            }
+            recent_serialised.append({
+                "pick_id":     p["pick_id"],
+                "match_id":    p["match_id"],
+                "event_date":  str(p["event_date"]) if p.get("event_date") else None,
+                "tournament":  p.get("tournament"),
+                "surface":     p.get("surface"),
+                "round":       p.get("round"),
+                "confidence":  p.get("confidence"),
+                "reason":      p.get("reason"),
+                "pick_prob":   float(p["pick_prob"]) if p.get("pick_prob") is not None else None,
+                "market_odds": float(p["market_odds"]) if p.get("market_odds") is not None else None,
+                "is_correct":  p.get("is_correct"),
+                "profit_loss": float(p["profit_loss"]) if p.get("profit_loss") is not None else None,
+                "pick":        picked,
+                "opponent":    opp,
+            })
+
         out.append({
             "id":            s["id"],
             "code":          s["code"],
@@ -1381,7 +1444,8 @@ def systems_dashboard():
                 "profit_units":  float(s["profit_units"]) if s.get("profit_units") is not None else None,
                 "roi_pct":       float(s["roi_pct"])      if s.get("roi_pct")      is not None else None,
             },
-            "open_picks": picks_serialised,
+            "open_picks":    picks_serialised,
+            "recent_picks":  recent_serialised,
         })
 
     return {"systems": out}
