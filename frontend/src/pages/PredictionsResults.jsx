@@ -107,7 +107,7 @@ function StatBlock({ label, picks, wins, winRate, pnl, roi, accent }) {
     textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2,
   }
   const cellValue = {
-    fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+    fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
     lineHeight: 1.1,
   }
   return (
@@ -1164,29 +1164,29 @@ export default function PredictionsResults() {
         const oddsLabel = oddsMode === 'book' ? 'book odds' : 'RTT odds'
         return (
           <div className="card" style={{
-            padding: 16, marginBottom: 12,
+            padding: '10px 14px', marginBottom: 12,
             borderTop: `3px solid ${winRate == null ? 'var(--border)' : winRate >= 55 ? 'var(--green)' : winRate >= 45 ? 'var(--amber)' : 'var(--red)'}`,
             background: hasData ? 'var(--bg-card)' : 'var(--bg-raised)',
           }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-              marginBottom: 10,
+              marginBottom: 8,
             }}>
               <div style={{
-                fontSize: 12, fontWeight: 700, color: 'var(--text-3)',
+                fontSize: 11, fontWeight: 700, color: 'var(--text-3)',
                 textTransform: 'uppercase', letterSpacing: 0.5,
               }}>
                 Today
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
                 {hasData
                   ? `${settled} real picks settled (55%+ confidence) · matches below`
                   : 'No picks settled yet today'}
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
               <div>
-                <div style={{ fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
                   {wins}<span style={{ color: 'var(--text-3)', fontWeight: 500 }}>/{settled}</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 3 }}>
@@ -1195,7 +1195,7 @@ export default function PredictionsResults() {
               </div>
               <div>
                 <div style={{
-                  fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
+                  fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
                   color: winRate == null ? 'var(--text-3)'
                        : winRate >= 55 ? 'var(--green-text)'
                        : winRate >= 50 ? 'var(--text)' : 'var(--text-3)',
@@ -1208,7 +1208,7 @@ export default function PredictionsResults() {
               </div>
               <div>
                 <div style={{
-                  fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
+                  fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
                   color: profitColour(v.pnl),
                 }}>
                   {fmtMoney(v.pnl)}
@@ -1219,7 +1219,7 @@ export default function PredictionsResults() {
               </div>
               <div>
                 <div style={{
-                  fontSize: 28, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
+                  fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1,
                   color: profitColour(v.pnl),
                 }}>
                   {fmtPct(v.roi)}
