@@ -62,7 +62,6 @@ def settle_predictions(conn, since: Optional[date] = None) -> tuple[int, int, in
             WHERE m.event_status = 'Finished'
               AND m.winner IN ('First Player', 'Second Player')
               AND m.event_date >= %s
-              AND (mp.actual_winner IS NULL OR mp.is_correct IS NULL)
             """,
             (cutoff,),
         )
@@ -75,21 +74,25 @@ def settle_predictions(conn, since: Optional[date] = None) -> tuple[int, int, in
         actual = _winner_to_player_ref(r["winner"])
         if not actual:
             continue
-        # If predicted_winner missing, derive from probability after the fact —
-        # but it should be filled. Treat None as 'unknown' (mark settled with
-        # is_correct=False to avoid double-counting). Belt-and-braces: re-pull.
-        pred_winner = r["predicted_winner"]
-        if not pred_winner:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur2:
-                cur2.execute(
-                    "SELECT prob_first_player, prob_second_player FROM model_predictions WHERE match_id = %s",
-                    (r["match_id"],),
-                )
-                pr = cur2.fetchone() or {}
-            p1 = float(pr.get("prob_first_player") or 0)
-            p2 = float(pr.get("prob_second_player") or 0)
-            pred_winner = "first_player" if p1 >= p2 else "second_player"
-        is_correct = (pred_winner == actual)
+        # Always derive predicted_winner from probabilities — never trust the
+        # stored value, which may be stale if predictions were re-run after
+        # settlement. The probability is the ground truth for what the model
+        # actually said; predicted_winner is just a convenience column.
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur2:
+            cur2.execute(
+                "SELECT prob_first_player, prob_second_player FROM model_predictions WHERE match_id = %s",
+                (r["match_id"],),
+            )
+            pr = cur2.fetchone() or {}
+        p1 = float(pr.get("prob_first_player") or 0)
+        p2 = float(pr.get("prob_second_player") or 0)
+        if p1 > 0.51:
+            pred_winner = "first_player"
+        elif p2 > 0.51:
+            pred_winner = "second_player"
+        else:
+            pred_winner = None  # genuine 50/50 — no pick, don't score
+        is_correct = (pred_winner == actual) if pred_winner else None
         with conn.cursor() as cur3:
             cur3.execute(
                 """

@@ -17,10 +17,17 @@ function PredictionRow({ p }) {
   const p1Pct = p.p1?.prob != null ? Math.round(p.p1.prob * 100) : null
   const p2Pct = p.p2?.prob != null ? Math.round(p.p2.prob * 100) : null
   const isPending = p1Pct == null
-  const isSettled = p.is_correct !== null && p.is_correct !== undefined
+  // A 50/50 prediction is not a real pick — exclude from outcome display to
+  // keep visible ✓/✗ markers consistent with the header count.
+  const isFiftyFifty = p1Pct != null && Math.abs(p1Pct - 50) <= 1
+  const isSettled = p.is_correct !== null && p.is_correct !== undefined && !isFiftyFifty
   const winnerSide = p.actual_winner === 'first_player' ? 'p1'
                    : p.actual_winner === 'second_player' ? 'p2' : null
-  const predictedSide = p.predicted_winner === 'first_player' ? 'p1' : 'p2'
+  // Derive the predicted side from probability directly — same logic as
+  // MatchDetail — so the pick indicator is always consistent with the bar.
+  const predictedSide = p1Pct != null && !isFiftyFifty
+    ? (p1Pct > 50 ? 'p1' : 'p2')
+    : null
 
   // colour coding for the row outcome
   let outcomeStyle = {}
@@ -54,7 +61,7 @@ function PredictionRow({ p }) {
         </div>
         <div className="match-player-sub">
           <span className="match-player-country">{p.p1?.country_code}</span>
-          {predictedSide === 'p1' && (
+          {predictedSide === 'p1' && !isFiftyFifty && (
             <span style={{ fontSize: 10, color: 'var(--text-3)' }}>· pick</span>
           )}
         </div>
@@ -90,7 +97,7 @@ function PredictionRow({ p }) {
           {p.p2?.name}
         </div>
         <div className="match-player-sub">
-          {predictedSide === 'p2' && (
+          {predictedSide === 'p2' && !isFiftyFifty && (
             <span style={{ fontSize: 10, color: 'var(--text-3)' }}>pick ·</span>
           )}
           <span className="match-player-country">{p.p2?.country_code}</span>
