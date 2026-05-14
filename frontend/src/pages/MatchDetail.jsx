@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useSEO } from '../hooks/useSEO.js'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
@@ -2026,8 +2026,13 @@ const SECTIONS = [
   { id: 'h2h',          label: 'Head to head'  },
 ]
 
+function _toSlug(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 export default function MatchDetail() {
-  const { id } = useParams()
+  const { id, slug } = useParams()
+  const navigate = useNavigate()
   const [match,   setMatch]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
@@ -2077,6 +2082,19 @@ export default function MatchDetail() {
       })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [id])
+
+  // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
+  useEffect(() => {
+    if (!match) return
+    const p1   = match.first_player?.name  || ''
+    const p2   = match.second_player?.name || ''
+    const date = (match.event_date || '').slice(0, 10)
+    const tourn = match.tournament || ''
+    const expectedSlug = [date, _toSlug(tourn), `${_toSlug(p1)}-vs-${_toSlug(p2)}`].filter(Boolean).join('-')
+    if (expectedSlug && slug !== expectedSlug) {
+      navigate(`/match/${id}/${expectedSlug}`, { replace: true })
+    }
+  }, [match, id, slug, navigate])
 
   function handleTabClick(tabId) {
     setActiveTab(tabId)

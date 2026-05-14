@@ -16,6 +16,8 @@ import { api } from '../api.js'
 import { seedPickedSet } from '../components/StarPick.jsx'
 import AuthModal from '../components/AuthModal.jsx'
 import FormDots from '../components/FormDots.jsx'
+import { matchUrl } from '../utils/matchUrl.js'
+import { playerUrl } from '../utils/playerUrl.js'
 import courtClayImg  from '../assets/court-clay.jpg'
 import courtGrassImg from '../assets/court-grass.jpg'
 import courtHardImg  from '../assets/court-hard.jpg'
@@ -156,6 +158,15 @@ function PickCard({ pick, onRemove }) {
   const [useOurs, setUseOurs] = useState(true)
   const [intel, setIntel]     = useState(null)
   const matchId = pick.match?.id
+  const p1name = pick.is_first_player ? pick.picked_player?.name : pick.opponent?.name
+  const p2name = pick.is_first_player ? pick.opponent?.name : pick.picked_player?.name
+  const matchLink = matchUrl({
+    id: matchId,
+    event_date: pick.match?.event_date,
+    tournament: pick.match?.tournament_name,
+    p1: { name: p1name },
+    p2: { name: p2name },
+  })
   useEffect(() => {
     if (!matchId) return
     let on = true
@@ -209,7 +220,7 @@ function PickCard({ pick, onRemove }) {
         backgroundBlendMode: 'multiply',
       }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <Link to={`/match/${pick.match?.id}`} style={{
+          <Link to={matchLink} style={{
             fontSize: 12, fontWeight: 700, color: '#fff',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block',
           }}>
@@ -413,7 +424,7 @@ function PickCard({ pick, onRemove }) {
               </span>
             </div>
             {matchId && (
-              <Link to={`/match/${matchId}`} style={{
+              <Link to={matchLink} style={{
                 fontSize: 11, fontWeight: 600, color: 'var(--text-3)',
                 padding: '3px 8px', borderRadius: 20,
                 border: '1px solid var(--border)',
@@ -636,7 +647,7 @@ function ResultsTab({ data, loading }) {
                   <tr key={p.id} style={{ borderTop: i > 0 ? '1px solid var(--border-faint)' : 'none' }}>
                     <td style={{ padding: '8px 12px', color: 'var(--text-3)' }}>{p.match?.event_date}</td>
                     <td style={{ padding: '8px 12px', fontWeight: 600 }}>
-                      <Link to={`/player/${p.player_id}`} style={{ color: 'var(--text)' }}>
+                      <Link to={playerUrl({ id: p.player_id, name: p.picked_player?.name })} style={{ color: 'var(--text)' }}>
                         {p.picked_player?.name || '—'}
                       </Link>
                     </td>
