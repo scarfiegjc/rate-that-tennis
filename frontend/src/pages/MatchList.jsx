@@ -449,11 +449,7 @@ function MyPicksSidebar() {
 
   return (
     <div className="sidebar-box">
-      {/* green header */}
-      <div className="sidebar-box-header" style={{
-        background: 'var(--green)', color: '#fff',
-        borderBottom: '1px solid rgba(255,255,255,0.15)',
-      }}>
+      <div className="sidebar-box-header">
         <span>★</span>
         <span>My Picks</span>
         <button
@@ -553,7 +549,7 @@ function StatPicksSidebar({ navigate }) {
         <span>Stat Picks</span>
         <button
           onClick={() => navigate('/stats')}
-          style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', background: 'none', padding: 0 }}
+          style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.75)', background: 'none', padding: 0 }}
         >
           View all →
         </button>

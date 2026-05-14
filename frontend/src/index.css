@@ -1556,7 +1556,7 @@ gap: 12px;
 position: sticky;
 top: 72px;
 padding-top: 46px;
-max-height: calc(100vh - 80px);
+max-height: calc(100vh - 96px);
 overflow-y: auto;
 padding-bottom: 24px;
 }
@@ -1566,6 +1566,7 @@ background: var(--bg-card);
 border: 1px solid var(--border);
 border-radius: var(--r);
 overflow: hidden;
+flex-shrink: 0;
 }
 
 .sidebar-box-header {
@@ -1575,9 +1576,9 @@ gap: 7px;
 padding: 9px 12px;
 font-size: 12px;
 font-weight: 700;
-color: var(--text-2);
-background: var(--bg-raised);
-border-bottom: 1px solid var(--border-faint);
+color: #fff;
+background: var(--green);
+border-bottom: 1px solid rgba(255,255,255,0.15);
 letter-spacing: 0.1px;
 }
 
