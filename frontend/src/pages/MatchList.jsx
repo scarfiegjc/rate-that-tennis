@@ -8,10 +8,11 @@
  * Sidebar: prediction win rate · RTT system selections · top 5 win chances
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import { useSEO } from '../hooks/useSEO.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
@@ -418,6 +419,174 @@ function StatMini({ label, value }) {
   )
 }
 
+function MyPicksSidebar() {
+  const { isLoggedIn } = useAuth()
+  const navigate = useNavigate()
+  const [stats, setStats]   = useState(null)
+  const [picks, setPicks]   = useState([])
+
+  const load = useCallback(async () => {
+    if (!isLoggedIn) return
+    try {
+      const [resData, actData] = await Promise.all([
+        api.picksResults(),
+        api.picksActive(),
+      ])
+      setStats(resData?.stats || null)
+      setPicks(actData?.picks || [])
+    } catch {}
+  }, [isLoggedIn])
+
+  useEffect(() => { load() }, [load])
+
+  if (!isLoggedIn) return null
+
+  const plColor = (n) => n == null ? 'var(--text-3)' : n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--text-3)'
+  const fmtPL = (n) => {
+    if (n == null) return '—'
+    return (n >= 0 ? `+£${Math.abs(n).toFixed(2)}` : `-£${Math.abs(n).toFixed(2)}`)
+  }
+
+  return (
+    <div className="sidebar-box">
+      {/* green header */}
+      <div className="sidebar-box-header" style={{
+        background: 'var(--green)', color: '#fff',
+        borderBottom: '1px solid rgba(255,255,255,0.15)',
+      }}>
+        <span>★</span>
+        <span>My Picks</span>
+        <button
+          onClick={() => navigate('/my-picks')}
+          style={{
+            marginLeft: 'auto', fontSize: 10, fontWeight: 600,
+            color: 'rgba(255,255,255,0.8)', background: 'none', padding: 0,
+          }}
+        >
+          View all →
+        </button>
+      </div>
+
+      {/* stats row */}
+      {stats ? (
+        <div className="sidebar-stats-row">
+          <StatMini label="Picks"    value={stats.total} />
+          <StatMini label="Wins"     value={stats.wins} />
+          <StatMini label="Win rate" value={stats.win_rate != null ? `${stats.win_rate}%` : '—'} />
+          <StatMini label="P&L"      value={fmtPL(stats.total_pl)} />
+        </div>
+      ) : (
+        <div className="sidebar-empty">No settled picks yet</div>
+      )}
+
+      {/* active picks as bars */}
+      {picks.length > 0 && (
+        <div className="sidebar-selection-list" style={{ borderTop: '1px solid var(--border-faint)' }}>
+          {picks.slice(0, 5).map(pick => {
+            const prob  = pick.picked_player?.win_prob
+            const name  = pick.picked_player?.name || '—'
+            const isLive = pick.status === 'live'
+            const won    = pick.status === 'won'
+            const lost   = pick.status === 'lost'
+            const pct    = prob != null ? Math.round(prob * 100) : null
+            const barW   = pct != null ? pct : 50
+            const barCol = won ? 'var(--green)' : lost ? 'var(--red)' : isLive ? '#D97706' : 'var(--text-2)'
+            return (
+              <button
+                key={pick.id}
+                className="sidebar-selection-row"
+                onClick={() => navigate(`/match/${pick.match?.id}`)}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {name}
+                  </div>
+                  <div style={{ marginTop: 4, height: 4, background: 'var(--bg-sunken)', borderRadius: 99 }}>
+                    <div style={{ width: `${barW}%`, height: '100%', background: barCol, borderRadius: 99 }} />
+                  </div>
+                </div>
+                <div style={{ flexShrink: 0, marginLeft: 8, fontSize: 12, fontWeight: 700, color: barCol }}>
+                  {won ? '✓' : lost ? '✗' : pct != null ? `${pct}%` : '—'}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {picks.length === 0 && !stats && (
+        <div className="sidebar-empty">Star a pick on any match card</div>
+      )}
+    </div>
+  )
+}
+
+function StatPicksSidebar({ navigate }) {
+  const [items, setItems] = useState([])
+
+  useEffect(() => {
+    api.statConflicts(1)
+      .then(d => setItems((d?.conflicts || d || []).slice(0, 5)))
+      .catch(() => {})
+  }, [])
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="sidebar-box">
+      <div className="sidebar-box-header">
+        <span>📐</span>
+        <span>Stat Picks</span>
+        <button
+          onClick={() => navigate('/stats')}
+          style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', background: 'none', padding: 0 }}
+        >
+          View all →
+        </button>
+      </div>
+      <div className="sidebar-selection-list">
+        {items.map((item, i) => {
+          const topConflict = (item.conflicts || [])[0]
+          if (!topConflict) return null
+          const favIsFirst = topConflict.favoured_player === 'first'
+          const favPlayer  = favIsFirst ? item.first_player : item.second_player
+          const prob       = favPlayer?.win_prob
+          const barW       = prob != null ? Math.round(prob) : 50
+          const label      = topConflict.label || ''
+          return (
+            <button
+              key={item.match_id || i}
+              className="sidebar-selection-row"
+              onClick={() => navigate(item.match_url || `/match/${item.match_id}`)}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {favPlayer?.name || '—'}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {label}
+                </div>
+                <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 99 }}>
+                  <div style={{ width: `${barW}%`, height: '100%', background: 'var(--green)', borderRadius: 99 }} />
+                </div>
+              </div>
+              <div style={{ flexShrink: 0, marginLeft: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
+                {prob != null ? `${Math.round(prob)}%` : '—'}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <div style={{
+        fontSize: 10, color: 'var(--text-3)', textAlign: 'center',
+        padding: '6px 12px 2px', borderTop: '1px solid var(--border-faint)', marginTop: 4,
+      }}>
+        Matches with clear statistical advantages
+      </div>
+    </div>
+  )
+}
+
 function Sidebar({ allMatches }) {
   const navigate = useNavigate()
   const today = new Date().toISOString().slice(0, 10)
@@ -460,6 +629,8 @@ function Sidebar({ allMatches }) {
 
   return (
     <aside className="match-sidebar">
+
+      <MyPicksSidebar />
 
       <div className="sidebar-box">
         <div className="sidebar-box-header">
@@ -556,6 +727,8 @@ function Sidebar({ allMatches }) {
           Matches where RTT model edge &gt; 2%
         </div>
       </div>
+
+      <StatPicksSidebar navigate={navigate} />
 
       <div className="sidebar-box">
         <div className="sidebar-box-header">
