@@ -481,32 +481,46 @@ function MyPicksSidebar() {
 
       {/* active picks as bars */}
       {picks.length > 0 && (
-        <div className="sidebar-selection-list" style={{ borderTop: '1px solid var(--border-faint)' }}>
-          {picks.slice(0, 5).map(pick => {
-            const prob  = pick.picked_player?.win_prob
-            const name  = pick.picked_player?.name || '—'
+        <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-faint)' }}>
+          {picks.slice(0, 5).map((pick, i) => {
+            const prob   = pick.picked_player?.win_prob ?? 50
+            const name   = pick.picked_player?.name || '—'
+            const opp    = pick.opponent?.name || ''
             const isLive = pick.status === 'live'
             const won    = pick.status === 'won'
             const lost   = pick.status === 'lost'
-            const pct    = prob != null ? Math.round(prob * 100) : null
-            const barW   = pct != null ? pct : 50
-            const barCol = won ? 'var(--green)' : lost ? 'var(--red)' : isLive ? '#D97706' : 'var(--text-2)'
+            const barW   = Math.min(Math.max(Math.round(prob), 5), 95)
+            const barCol = won ? 'var(--green)' : lost ? 'var(--red)' : isLive ? '#D97706' : 'var(--green)'
             return (
               <button
                 key={pick.id}
-                className="sidebar-selection-row"
                 onClick={() => navigate(`/match/${pick.match?.id}`)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 12px', background: 'transparent',
+                  borderTop: i === 0 ? 'none' : '1px solid var(--border-faint)',
+                  cursor: 'pointer', fontFamily: 'var(--font)',
+                }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {name}
-                  </div>
-                  <div style={{ marginTop: 4, height: 4, background: 'var(--bg-sunken)', borderRadius: 99 }}>
-                    <div style={{ width: `${barW}%`, height: '100%', background: barCol, borderRadius: 99 }} />
-                  </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2, marginBottom: 1 }}>
+                  {name}
                 </div>
-                <div style={{ flexShrink: 0, marginLeft: 8, fontSize: 12, fontWeight: 700, color: barCol }}>
-                  {won ? '✓' : lost ? '✗' : pct != null ? `${pct}%` : '—'}
+                {opp && (
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 5 }}>vs {opp}</div>
+                )}
+                <div style={{ position: 'relative', height: 20, background: 'var(--bg-sunken)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{
+                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                    width: `${barW}%`, background: barCol, borderRadius: 4, opacity: 0.85,
+                  }} />
+                  <div style={{
+                    position: 'absolute', left: 8, top: 0, bottom: 0,
+                    display: 'flex', alignItems: 'center',
+                    fontSize: 11, fontWeight: 700,
+                    color: barW > 30 ? '#fff' : 'var(--green-text)',
+                  }}>
+                    {won ? '✓ Won' : lost ? '✗ Lost' : isLive ? '● Live' : `${Math.round(prob)}%`}
+                  </div>
                 </div>
               </button>
             )
@@ -526,7 +540,7 @@ function StatPicksSidebar({ navigate }) {
 
   useEffect(() => {
     api.statConflicts(1)
-      .then(d => setItems((d?.conflicts || d || []).slice(0, 5)))
+      .then(d => setItems((d?.conflicts || d || []).slice(0, 6)))
       .catch(() => {})
   }, [])
 
@@ -544,44 +558,53 @@ function StatPicksSidebar({ navigate }) {
           View all →
         </button>
       </div>
-      <div className="sidebar-selection-list">
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {items.map((item, i) => {
           const topConflict = (item.conflicts || [])[0]
           if (!topConflict) return null
           const favIsFirst = topConflict.favoured_player === 'first'
           const favPlayer  = favIsFirst ? item.first_player : item.second_player
-          const prob       = favPlayer?.win_prob
-          const barW       = prob != null ? Math.round(prob) : 50
+          const oppPlayer  = favIsFirst ? item.second_player : item.first_player
+          const prob       = favPlayer?.win_prob ?? 50
+          const barW       = Math.min(Math.max(Math.round(prob), 5), 95)
           const label      = topConflict.label || ''
           return (
             <button
               key={item.match_id || i}
-              className="sidebar-selection-row"
               onClick={() => navigate(item.match_url || `/match/${item.match_id}`)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '9px 12px', background: 'transparent',
+                borderTop: i === 0 ? 'none' : '1px solid var(--border-faint)',
+                cursor: 'pointer', fontFamily: 'var(--font)',
+              }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {favPlayer?.name || '—'}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {label}
-                </div>
-                <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 99 }}>
-                  <div style={{ width: `${barW}%`, height: '100%', background: 'var(--green)', borderRadius: 99 }} />
-                </div>
+              {/* Player name + reason */}
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2, marginBottom: 1 }}>
+                {favPlayer?.name || '—'}
               </div>
-              <div style={{ flexShrink: 0, marginLeft: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
-                {prob != null ? `${Math.round(prob)}%` : '—'}
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 5 }}>
+                vs {oppPlayer?.name || '—'} · <span style={{ color: 'var(--green-text)', fontWeight: 600 }}>{label}</span>
+              </div>
+              {/* Probability bar */}
+              <div style={{ position: 'relative', height: 20, background: 'var(--bg-sunken)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${barW}%`, background: 'var(--green)', borderRadius: 4,
+                  opacity: 0.85,
+                }} />
+                <div style={{
+                  position: 'absolute', left: 8, top: 0, bottom: 0,
+                  display: 'flex', alignItems: 'center',
+                  fontSize: 11, fontWeight: 700,
+                  color: barW > 30 ? '#fff' : 'var(--green-text)',
+                }}>
+                  {Math.round(prob)}%
+                </div>
               </div>
             </button>
           )
         })}
-      </div>
-      <div style={{
-        fontSize: 10, color: 'var(--text-3)', textAlign: 'center',
-        padding: '6px 12px 2px', borderTop: '1px solid var(--border-faint)', marginTop: 4,
-      }}>
-        Matches with clear statistical advantages
       </div>
     </div>
   )
@@ -595,21 +618,6 @@ function Sidebar({ allMatches }) {
     allMatches.filter(m => !m.is_doubles && (m.event_date || '').slice(0, 10) === today),
     [allMatches, today]
   )
-
-  const liveNow   = todaySingles.filter(m => /in play|live|set \d|game/i.test(m.event_status || ''))
-  const finished  = todaySingles.filter(m => /finished/i.test(m.event_status || ''))
-  const withPred  = finished.filter(m => m.prediction?.prob_first_player != null && m.winner)
-  const correct   = withPred.filter(m => {
-    const p = m.prediction
-    const pick = p.prob_first_player >= 0.5 ? 'First Player' : 'Second Player'
-    return pick === m.winner
-  })
-  const winRate   = withPred.length > 0 ? Math.round(correct.length / withPred.length * 100) : null
-  const rateColor = winRate == null
-    ? 'var(--text-3)'
-    : winRate >= 60 ? 'var(--green)'
-    : winRate >= 45 ? 'var(--amber)'
-    : 'var(--red)'
 
   const selections   = todaySingles.filter(m => Math.max(m.edge?.p1 || 0, m.edge?.p2 || 0) > 0.02)
   const selFinished  = selections.filter(m => /finished/i.test(m.event_status || '') && m.winner)
@@ -631,34 +639,6 @@ function Sidebar({ allMatches }) {
     <aside className="match-sidebar">
 
       <MyPicksSidebar />
-
-      <div className="sidebar-box">
-        <div className="sidebar-box-header">
-          <span>📊</span>
-          <span>Today's prediction rate</span>
-        </div>
-        <div style={{ textAlign: 'center', padding: '14px 0 10px' }}>
-          {winRate != null ? (
-            <>
-              <div style={{ fontSize: 44, fontWeight: 700, color: rateColor, lineHeight: 1, letterSpacing: -2 }}>
-                {winRate}%
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>
-                {correct.length} correct · {withPred.length} rated
-              </div>
-            </>
-          ) : (
-            <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '6px 0' }}>
-              {finished.length > 0 ? 'No predictions to score yet' : 'No completed matches yet'}
-            </div>
-          )}
-        </div>
-        <div className="sidebar-stats-row" style={{ borderTop: '1px solid var(--border-faint)', paddingTop: 10, marginTop: 4 }}>
-          <StatMini label="Live" value={liveNow.length || '0'} />
-          <StatMini label="Total" value={todaySingles.length} />
-          <StatMini label="Done"  value={finished.length} />
-        </div>
-      </div>
 
       <div className="sidebar-box">
         <div className="sidebar-box-header">

@@ -1556,6 +1556,9 @@ gap: 12px;
 position: sticky;
 top: 72px;
 padding-top: 46px;
+max-height: calc(100vh - 80px);
+overflow-y: auto;
+padding-bottom: 24px;
 }
 
 .sidebar-box {
