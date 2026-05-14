@@ -183,49 +183,53 @@ def _enrich_pick(pick: dict) -> dict:
     picked_player  = _player(pid)
     opp_player     = _player(opp_id)
 
-    # Status: override pick status based on live match state
+    # Status: derive correct settlement from match result, then sync DB if needed.
+    # This runs regardless of current pick status so that race-condition mis-settlements
+    # (pipeline writes wrong winner briefly, pick gets settled wrong, pipeline corrects
+    # winner later) are self-healing on the next API call.
     status = pick["status"]
     ms = (match.get("event_status") or "").lower()
     winner = match.get("winner")
-    if status in ("pending", "live"):
-        # Settle on Finished, Retired, or Walk Over — all three produce a
-        # legitimate winner. The old filter only on "finished" left
-        # retirement/walkover picks stranded.
-        is_settleable_status = (
-            "finished" in ms
-            or "retired"  in ms
-            or "walk over" in ms
-            or "walkover"  in ms
+
+    is_settleable_status = (
+        "finished" in ms
+        or "retired"  in ms
+        or "walk over" in ms
+        or "walkover"  in ms
+    )
+
+    if is_settleable_status and winner:
+        winner_pid = (
+            match.get("first_player_id")  if winner == "First Player"  else
+            match.get("second_player_id") if winner == "Second Player" else
+            None
         )
-        if is_settleable_status and winner:
-            # Settle immediately — write to DB first, only update status if write succeeds
-            winner_pid = (
-                match.get("first_player_id")  if winner == "First Player"  else
-                match.get("second_player_id") if winner == "Second Player" else
-                None
-            )
-            if winner_pid is not None:
-                new_status = "won" if pid == winner_pid else "lost"
-                stake = float(pick.get("confidence_stars") or 1)
-                if new_status == "won":
-                    odds = float(pick.get("our_odds") or 2.0)
-                    pl = round((odds - 1) * stake, 2)
-                else:
-                    pl = round(-stake, 2)
+        if winner_pid is not None:
+            correct_status = "won" if pid == winner_pid else "lost"
+            stake = float(pick.get("confidence_stars") or 1)
+            if correct_status == "won":
+                odds = float(pick.get("our_odds") or 2.0)
+                pl = round((odds - 1) * stake, 2)
+            else:
+                pl = round(-stake, 2)
+            # Only write to DB when the stored status is wrong or unsettled —
+            # avoids unnecessary writes for already-correct picks.
+            if status != correct_status and status not in ("void",):
                 try:
                     with get_conn() as _conn:
                         with _conn.cursor() as _cur:
                             _cur.execute(
                                 """UPDATE user_picks
                                    SET status = %s, settled_at = NOW(), profit_loss = %s
-                                   WHERE id = %s AND status IN ('pending','live')""",
-                                (new_status, pl, pick["id"]),
+                                   WHERE id = %s AND status != %s AND status != 'void'""",
+                                (correct_status, pl, pick["id"], correct_status),
                             )
-                    status = new_status  # only update in-memory status if DB write succeeded
+                    log.info(f"Re-settled pick {pick['id']}: {status} → {correct_status}")
                 except Exception as _e:
                     log.warning(f"inline settle failed for pick {pick['id']}: {_e}")
-                    # Leave status as-is so pick stays visible in active tab
-        elif any(k in ms for k in ("in play", "live", "set ", "game", "1st", "2nd", "3rd")):
+            status = correct_status
+    elif status in ("pending", "live"):
+        if any(k in ms for k in ("in play", "live", "set ", "game", "1st", "2nd", "3rd")):
             status = "live"
 
     return {
