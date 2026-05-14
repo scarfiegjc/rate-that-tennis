@@ -795,6 +795,18 @@ def admin_run_odds_io():
     return _safe_admin(_run)
 
 
+@app.get("/admin/run-bresbet-links")
+def admin_run_bresbet_links():
+    """Scrape Bresbet tennis page and store affiliate deep links for matched upcoming matches."""
+    def _run():
+        try:
+            from pipeline.bresbet_links import run as bresbet_run
+        except ImportError:
+            from bresbet_links import run as bresbet_run
+        return bresbet_run()
+    return _safe_admin(_run)
+
+
 # ─── Affiliate link management ───────────────────────────────────────────────
 
 @app.get("/admin/affiliates")

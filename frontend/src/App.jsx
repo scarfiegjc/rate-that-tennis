@@ -115,6 +115,12 @@ function Header() {
                         Admin
                       </Link>
                     )}
+                    {user?.is_admin && (
+                      <Link to="/admin/affiliates" onClick={() => setShowUserMenu(false)}
+                        style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500, color:'var(--amber)' }}>
+                        Affiliates
+                      </Link>
+                    )}
                     <button onClick={() => { logout(); setShowUserMenu(false) }}
                       style={{ display:'block', width:'100%', textAlign:'left',
                                padding:'7px 12px', fontSize:13, color:'var(--red)' }}>

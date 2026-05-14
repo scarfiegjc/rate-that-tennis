@@ -110,11 +110,12 @@ def _affiliate_map() -> dict:
 
 def _latest_odds(match_id: int) -> dict:
     """
-    Returns best (highest decimal) odds per player + full bookmaker table.
+    Returns best (highest decimal) odds per player + full bookmaker table + Bresbet deep link.
     Shape: {
       'p1': {bookmaker, display_name, decimal_odds, implied_prob, link_url},
       'p2': {bookmaker, display_name, decimal_odds, implied_prob, link_url},
       'all_bookmakers': [{bookmaker, display_name, p1_odds, p2_odds, link_url}, ...]
+      'bresbet_link': <affiliate deep-link URL or None>
     }
     link_url is the affiliate URL if set, else homepage_url, else None.
     """
@@ -169,7 +170,23 @@ def _latest_odds(match_id: int) -> dict:
         reverse=True,
     )
 
-    return {**best, "all_bookmakers": all_bk}
+    # Bresbet deep link — stored per-match by bresbet_links pipeline
+    bresbet_link = None
+    try:
+        bbl = query_one(
+            """
+            SELECT affiliate_url, event_url
+            FROM bookmaker_match_links
+            WHERE match_id = %s AND bookmaker_key = 'bresbet'
+            """,
+            (match_id,),
+        )
+        if bbl:
+            bresbet_link = bbl.get("affiliate_url") or bbl.get("event_url")
+    except Exception:
+        pass  # table may not exist yet on first deploy
+
+    return {**best, "all_bookmakers": all_bk, "bresbet_link": bresbet_link}
 
 
 def _edge(model_prob: float | None, implied_prob: float | None) -> float | None:

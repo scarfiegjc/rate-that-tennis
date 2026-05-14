@@ -711,8 +711,9 @@ function SectionIntelligence({ match }) {
 
       {/* Bookmaker odds — split panel */}
       {(() => {
-        const mkt    = match.market || {}
-        const allBk  = mkt.all_bookmakers || []
+        const mkt         = match.market || {}
+        const allBk       = mkt.all_bookmakers || []
+        const bresbetLink = mkt.bresbet_link || null
         const p1prob = pred.prob_first_player
         const p2prob = pred.prob_second_player
 
@@ -880,6 +881,32 @@ function SectionIntelligence({ match }) {
                   })}
                 </div>
               </details>
+            )}
+
+            {/* Bresbet affiliate strip */}
+            {bresbetLink && (
+              <div style={{
+                borderTop: '1px solid var(--border-faint)',
+                padding: '10px 16px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                background: 'var(--bg-raised)',
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  Bet on this match at BresBet
+                </span>
+                <a
+                  href={bresbetLink}
+                  target="_blank"
+                  rel="noopener noreferrer sponsored"
+                  style={{
+                    padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+                    background: 'var(--green)', color: '#fff', textDecoration: 'none',
+                    whiteSpace: 'nowrap', flexShrink: 0,
+                  }}
+                >
+                  Bet at BresBet ↗
+                </a>
+              </div>
             )}
 
             <div style={{ padding: '6px 16px', borderTop: '1px solid var(--border-faint)', fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>
@@ -2042,6 +2069,7 @@ export default function MatchDetail() {
             link_url_p1:         mkt.p1?.link_url,
             link_url_p2:         mkt.p2?.link_url,
             all_bookmakers:      mkt.all_bookmakers || [],
+            bresbet_link:        mkt.bresbet_link || null,
           },
           edge,
         })

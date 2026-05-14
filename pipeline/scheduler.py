@@ -76,6 +76,19 @@ def run_odds_io():
         log.error(f"odds-api.io sync failed: {e}")
 
 
+def run_bresbet_links():
+    """Scrape Bresbet tennis page and store affiliate deep links."""
+    log.info("Scheduled: Bresbet deep-link scrape")
+    try:
+        try:
+            from pipeline.bresbet_links import run as bresbet_run
+        except ImportError:
+            from bresbet_links import run as bresbet_run
+        bresbet_run()
+    except Exception as e:
+        log.error(f"Bresbet links failed: {e}")
+
+
 # ─────────────────────────────────────────────
 # Import shim — works both as a `pipeline.*` package locally and as flat
 # files inside the Docker image (Dockerfile copies pipeline/*.py into /app).
@@ -400,6 +413,7 @@ if __name__ == "__main__":
     log.info("Running startup: odds...")
     run_odds()
     run_odds_io()
+    run_bresbet_links()
 
     # ── Scheduled jobs ──────────────────────────────────────────────────────
     schedule.every().day.at("06:00").do(run_daily_fixtures)   # 06:00 UTC
@@ -462,8 +476,10 @@ if __name__ == "__main__":
     schedule.every(15).minutes.do(_settle_only)
     schedule.every().day.at("07:00").do(run_odds)             # odds after fixtures
     schedule.every().day.at("07:05").do(run_odds_io)          # odds-api.io (Challengers/ITF)
+    schedule.every().day.at("07:10").do(run_bresbet_links)    # Bresbet affiliate deep links
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
     schedule.every().day.at("19:05").do(run_odds_io)          # odds-api.io evening refresh
+    schedule.every().day.at("19:10").do(run_bresbet_links)    # Bresbet evening refresh
     schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh
     schedule.every().day.at("08:00").do(run_email_predictions_digest)  # predictions digest email
     schedule.every().day.at("08:30").do(run_email_picks_summary)       # personalised picks email
