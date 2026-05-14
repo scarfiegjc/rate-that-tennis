@@ -105,6 +105,16 @@ function Header() {
                       style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500 }}>
                       My Picks
                     </Link>
+                    <Link to="/account" onClick={() => setShowUserMenu(false)}
+                      style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500 }}>
+                      Account
+                    </Link>
+                    {user?.is_admin && (
+                      <Link to="/admin" onClick={() => setShowUserMenu(false)}
+                        style={{ display:'block', padding:'7px 12px', fontSize:13, fontWeight:500, color:'var(--amber)' }}>
+                        Admin
+                      </Link>
+                    )}
                     <button onClick={() => { logout(); setShowUserMenu(false) }}
                       style={{ display:'block', width:'100%', textAlign:'left',
                                padding:'7px 12px', fontSize:13, color:'var(--red)' }}>
