@@ -161,6 +161,7 @@ function AppRoutes() {
         <Route path="/match/:id/:slug"        element={<MatchDetail />} />
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
+        <Route path="/player/:id/:slug"       element={<PlayerPage />} />
         <Route path="/predictions"            element={<PredictionsResults />} />
         <Route path="/predictions/today"      element={<PredictionsToday />} />
         <Route path="/predictions/history"    element={<PredictionsHistory />} />
