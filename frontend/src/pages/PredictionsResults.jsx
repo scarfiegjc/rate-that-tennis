@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSEO } from '../hooks/useSEO.js'
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -1042,6 +1043,11 @@ function TodayStrip({ today }) {
 // ─── main page ───────────────────────────────────────────────────────────
 
 export default function PredictionsResults() {
+  useSEO({
+    title: 'Tennis Predictions — P&L Tracker, ROI & Win Rate | RateThatTennis',
+    description: 'Track AI tennis prediction performance: surface breakdown, P&L, ROI and accuracy by tour, confidence and edge. Free ML-powered predictions for ATP, WTA and Challenger.',
+    canonical: 'https://ratethat.tennis/predictions',
+  })
   const [data, setData]    = useState(null)
   const [today, setToday]  = useState(null)
   const [error, setError]  = useState(null)

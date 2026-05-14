@@ -15,6 +15,9 @@ import { useSEO } from '../hooks/useSEO.js'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
 import RttLozenge from '../components/RttLozenge.jsx'
+import courtClay  from '../assets/court-clay.jpg'
+import courtHard  from '../assets/court-hard.jpg'
+import courtGrass from '../assets/court-grass.jpg'
 
 // ── SEO URL helpers ───────────────────────────────────────────────────────────
 
@@ -262,6 +265,17 @@ function MatchRow({ match, showTournament }) {
   )
 }
 
+// ── Court background helper ───────────────────────────────────────────────────
+
+function courtStyle(surface) {
+  const s = (surface || '').toLowerCase()
+  if (s.includes('clay'))                        return { cls: 'clay',   img: courtClay }
+  if (s.includes('grass'))                       return { cls: 'grass',  img: courtGrass }
+  if (s.includes('hard'))                        return { cls: 'hard',   img: courtHard }
+  if (s.includes('indoor') || s.includes('carpet')) return { cls: 'indoor', img: null }
+  return { cls: '', img: null }
+}
+
 // ── Tournament block ──────────────────────────────────────────────────────────
 
 function TournamentBlock({ name, surface, matches }) {
@@ -276,9 +290,15 @@ function TournamentBlock({ name, surface, matches }) {
     /in play|live/i.test(m.event_status || '')
   ).length
 
+  const { cls, img } = courtStyle(surface)
+
   return (
     <div className="tournament-block">
-      <button className="tournament-header" onClick={() => setOpen(o => !o)}>
+      <button
+        className={`tournament-header${cls ? ` ${cls}` : ''}`}
+        style={img ? { backgroundImage: `url(${img})` } : undefined}
+        onClick={() => setOpen(o => !o)}
+      >
         <span className={`chevron ${open ? 'open' : ''}`}>›</span>
         <SurfaceDot surface={surface} />
         <span className="tournament-name">{name}</span>

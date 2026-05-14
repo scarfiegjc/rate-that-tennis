@@ -16,6 +16,9 @@ import MyPicks from './pages/MyPicks.jsx'
 import StatConflicts from './pages/StatConflicts.jsx'
 import AffiliatesAdmin from './pages/AffiliatesAdmin.jsx'
 import AdminPage from './pages/AdminPage.jsx'
+import JoinPage from './pages/JoinPage.jsx'
+import AccountPage from './pages/AccountPage.jsx'
+import LivePage from './pages/LivePage.jsx'
 import rttLogo from './assets/rtt_logo.png'
 
 function Header() {
@@ -61,6 +64,12 @@ function Header() {
                   style={{ display:'flex', alignItems:'center', gap:5 }}>
               ★ My Picks
             </Link>
+            {!isLoggedIn && (
+              <Link to="/join" className={`nav-link ${is('/join') ? 'active' : ''}`}
+                    style={{ color:'var(--green)', fontWeight:700 }}>
+                Join free
+              </Link>
+            )}
           </nav>
 
           {/* User area */}
@@ -143,6 +152,9 @@ function AppRoutes() {
         <Route path="/systems/:code"          element={<SystemDetail />} />
         <Route path="/my-picks"               element={<MyPicks />} />
         <Route path="/stats"                  element={<StatConflicts />} />
+        <Route path="/join"                   element={<JoinPage />} />
+        <Route path="/account"               element={<AccountPage />} />
+        <Route path="/live"                  element={<LivePage />} />
         <Route path="/admin"                   element={<AdminPage />} />
         <Route path="/admin/affiliates"       element={<AffiliatesAdmin />} />
       </Routes>

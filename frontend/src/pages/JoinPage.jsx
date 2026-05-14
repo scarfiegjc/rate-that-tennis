@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import AuthModal from '../components/AuthModal.jsx'
+import { useSEO } from '../hooks/useSEO.js'
 import courtHardImg from '../assets/court-hard.jpg'
 import courtClayImg from '../assets/court-clay.jpg'
 
@@ -171,6 +172,11 @@ function FeatureSection({ title, sub, children, mockup, flip = false, accent = f
 }
 
 export default function JoinPage() {
+  useSEO({
+    title: 'Join Free — ML Tennis Predictions & Picks Tracker | RateThatTennis',
+    description: 'Create your free account to track your tennis picks, follow AI predictions and get daily match previews for ATP, WTA and Challenger tennis.',
+    canonical: 'https://ratethat.tennis/join',
+  })
   const { isLoggedIn } = useAuth()
   const [showAuth, setShowAuth] = useState(false)
 
