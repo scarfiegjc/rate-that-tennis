@@ -141,10 +141,9 @@ export default function StarPick({
         style={{
           fontSize: sz,
           lineHeight: 1,
-          color: isPicked ? '#F59E0B' : '#ffffff',
-          WebkitTextStroke: 'none',
+          color: isPicked ? '#F59E0B' : 'transparent',
+          WebkitTextStroke: isPicked ? 'none' : `1.5px var(--text-3)`,
           textShadow: isPicked ? '0 0 2px rgba(245,158,11,0.4)' : 'none',
-          opacity: isPicked ? 1 : 0.55,
           transition: 'color 0.15s, text-shadow 0.15s',
           opacity: busy ? 0.5 : 1,
           padding: '1px 3px',
