@@ -910,6 +910,7 @@ def list_systems():
                picks_total, picks_settled, picks_correct, accuracy_pct,
                profit_units, roi_pct
         FROM v_systems_stats
+        WHERE is_active = TRUE
         ORDER BY picks_total DESC NULLS LAST, name
         """
     )
