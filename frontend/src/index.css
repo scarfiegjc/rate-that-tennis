@@ -127,17 +127,25 @@ gap: 16px;
 .app-logo {
 display: inline-flex;
 align-items: center;
-font-size: 15px;
-font-weight: 600;
-letter-spacing: -0.3px;
-color: var(--text);
 flex-shrink: 0;
+text-decoration: none;
 }
 
-.app-logo-img {
-height: 42px;
-width: auto;
-display: block;
+.app-logo-text {
+display: inline-flex;
+align-items: baseline;
+font-size: 19px;
+font-weight: 800;
+letter-spacing: -0.5px;
+line-height: 1;
+}
+
+.app-logo-ratethat {
+color: var(--text);
+}
+
+.app-logo-sport {
+color: var(--green-text);
 }
 
 .app-logo-dot {

@@ -38,7 +38,9 @@ function Header() {
       <header className="app-header">
         <div className="app-header-inner">
           <Link to="/" className="app-logo" aria-label="ratethat.tennis home">
-            <img src={rttLogo} alt="ratethat.tennis" className="app-logo-img" />
+            <span className="app-logo-text">
+              <span className="app-logo-ratethat">ratethat.</span><span className="app-logo-sport">tennis</span>
+            </span>
           </Link>
           <nav className="app-nav">
             <Link to="/" className={`nav-link ${matchesActive ? 'active' : ''}`}>
