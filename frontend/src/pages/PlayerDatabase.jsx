@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSEO } from '../hooks/useSEO.js'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
+import { playerUrl } from '../utils/playerUrl.js'
 import RttLozenge from '../components/RttLozenge.jsx'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ function PlayerRow({ player, surfaceKey, rank }) {
   const showDelta = Math.abs(delta) >= 0.5
 
   return (
-    <Link to={`/player/${player.id}`} style={{
+    <Link to={playerUrl(player)} style={{
       display: 'grid',
       gridTemplateColumns: '28px 36px 1fr auto',
       alignItems: 'center',

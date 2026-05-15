@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../api.js'
 import { useSEO } from '../hooks/useSEO.js'
+import { playerUrl } from '../utils/playerUrl.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import FormChart from '../components/FormChart.jsx'
+
+// Build a URL-friendly slug from a player name (matches utils/playerUrl.js).
+function _toPlayerSlug(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour helpers tied to the site's light theme palette (defined in index.css):
@@ -1019,7 +1028,8 @@ function StatsTab({ stats }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlayerPage() {
-  const { id } = useParams()
+  const { id, slug } = useParams()
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [formData, setFormData] = useState(null)
   const [stats, setStats] = useState(null)
@@ -1048,6 +1058,43 @@ export default function PlayerPage() {
     return () => { on = false }
   }, [id])
 
+  // Derive name/country for SEO + slug redirect (safe defaults when data isn't loaded yet)
+  const player = data?.player || {}
+  const ratings = data?.ratings || {}
+  const recent = data?.recent_form || {}
+  const history = formData?.rating_history || []
+  const playerName = player.full_name || player.name || ''
+  const playerCountry = player.country || ''
+  const expectedSlug = _toPlayerSlug(playerName)
+  const canonicalPath = expectedSlug ? `/player/${id}/${expectedSlug}` : `/player/${id}`
+
+  // Redirect bare /player/<id> → /player/<id>/<name-slug> when we know the name
+  useEffect(() => {
+    if (!expectedSlug) return
+    if (slug !== expectedSlug) {
+      navigate(canonicalPath, { replace: true })
+    }
+  }, [expectedSlug, slug, canonicalPath, navigate])
+
+  // SEO must be called unconditionally to keep React hook order stable.
+  useSEO({
+    title: playerName
+      ? `${playerName} — Tennis Stats, Ratings & Form | RateThatTennis`
+      : 'Player Profile | RateThatTennis',
+    description: playerName
+      ? `${playerName}${playerCountry ? ' (' + playerCountry + ')' : ''} tennis stats, RTT ratings, form index and match history. Free analytics on ratethat.tennis.`
+      : undefined,
+    canonical: `https://ratethat.tennis${canonicalPath}`,
+    jsonLd: playerName ? {
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      'name': playerName,
+      ...(playerCountry ? { 'nationality': playerCountry } : {}),
+      ...(ratings.rtt_score != null ? { 'description': `RTT Rating: ${Math.round(ratings.rtt_score)}/100` } : {}),
+      'url': `https://ratethat.tennis${canonicalPath}`,
+    } : undefined,
+  })
+
   if (loading) {
     return (
       <div className="page">
@@ -1070,31 +1117,6 @@ export default function PlayerPage() {
     )
   }
   if (!data) return null
-
-  const player = data.player || {}
-  const ratings = data.ratings || {}
-  const recent = data.recent_form || {}
-  const history = formData?.rating_history || []
-
-  const playerName = player.full_name || player.name || ''
-  const playerCountry = player.country || ''
-  useSEO({
-    title: playerName
-      ? `${playerName} — Tennis Stats, Ratings &amp; Form | RateThatTennis`
-      : 'Player Profile | RateThatTennis',
-    description: playerName
-      ? `${playerName}${playerCountry ? ' (' + playerCountry + ')' : ''} tennis stats, RTT ratings, form index and match history. Free analytics on ratethat.tennis.`
-      : undefined,
-    canonical: `https://ratethat.tennis/player/${id}`,
-    jsonLd: playerName ? {
-      '@context': 'https://schema.org',
-      '@type': 'Person',
-      'name': playerName,
-      ...(playerCountry ? { 'nationality': playerCountry } : {}),
-      ...(ratings.rtt_score != null ? { 'description': `RTT Rating: ${Math.round(ratings.rtt_score)}/100` } : {}),
-      'url': `https://ratethat.tennis/player/${id}`,
-    } : undefined,
-  })
 
   return (
     <div className="page">

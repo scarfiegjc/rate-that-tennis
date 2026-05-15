@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useSEO } from '../hooks/useSEO.js'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
+import { playerUrl } from '../utils/playerUrl.js'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 import EdgeBadge from '../components/EdgeBadge.jsx'
 import ProbBar from '../components/ProbBar.jsx'
@@ -383,7 +384,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <HandLozenge hand={p1.hand} />
-            <Link to={`/player/${p1.player_id}`} style={{
+            <Link to={playerUrl({ id: p1.player_id, name: p1.name })} style={{
               fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px',
               color: 'var(--text)', textDecoration: 'none',
             }}>
@@ -454,7 +455,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
                 size="md"
               />
             )}
-            <Link to={`/player/${p2.player_id}`} style={{
+            <Link to={playerUrl({ id: p2.player_id, name: p2.name })} style={{
               fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px',
               color: 'var(--text)', textDecoration: 'none',
             }}>
