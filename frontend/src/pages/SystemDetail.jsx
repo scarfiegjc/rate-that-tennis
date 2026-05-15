@@ -3,60 +3,106 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import SurfaceBadge from '../components/SurfaceBadge.jsx'
 
+function statusInfo(status) {
+  if (!status) return { label: 'Upcoming', colour: 'var(--text-3)', bg: 'var(--bg-raised)' }
+  const s = status.toLowerCase()
+  if (s === 'finished' || s === 'ft' || s === 'awd' || s === 'retired')
+    return { label: 'Finished', colour: 'var(--text-3)', bg: 'var(--bg-raised)' }
+  if (s === 'not started' || s === 'ns' || s === 'scheduled')
+    return { label: 'Upcoming', colour: 'var(--text-3)', bg: 'var(--bg-raised)' }
+  // Anything else (Set 1, Set 2, Tiebreak, etc.) = live
+  return { label: '● LIVE', colour: '#fff', bg: '#dc2626' }
+}
+
 function PickRow({ pick }) {
   const isSettled = pick.is_correct !== null && pick.is_correct !== undefined
-  const sideName = pick.pick === 'first_player' ? pick.p1?.name : pick.p2?.name
-  const oppName  = pick.pick === 'first_player' ? pick.p2?.name : pick.p1?.name
-  const colour = !isSettled ? 'var(--text-3)'
-               : pick.is_correct ? 'var(--green)' : 'var(--red)'
+  const pickedName = pick.pick === 'first_player' ? pick.p1?.name : pick.p2?.name
+  const oppName    = pick.pick === 'first_player' ? pick.p2?.name : pick.p1?.name
+  const resultColour = !isSettled ? 'var(--text-3)'
+                     : pick.is_correct ? 'var(--green)' : 'var(--red)'
+  const { label: statusLabel, colour: statusColour, bg: statusBg } = statusInfo(pick.event_status)
+  const isLive = statusLabel === '● LIVE'
 
   return (
     <Link
       to={`/match/${pick.match_id}`}
       style={{
         display: 'grid',
-        gridTemplateColumns: '40px 1fr 90px 70px',
-        padding: '11px 16px',
+        gridTemplateColumns: '1fr auto',
+        padding: '12px 16px',
         borderBottom: '1px solid var(--border-faint)',
-        alignItems: 'center',
+        alignItems: 'start',
+        gap: 12,
         cursor: 'pointer',
       }}
     >
-      <div style={{ color: colour, fontSize: 16, fontWeight: 700 }}>
-        {!isSettled ? '·' : (pick.is_correct ? '✓' : '✗')}
-      </div>
+      {/* Left: pick info */}
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {sideName} <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>vs</span> {oppName}
+        {/* Status + tournament row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+            padding: '2px 6px', borderRadius: 4,
+            background: statusBg, color: statusColour,
+            border: isLive ? 'none' : '1px solid var(--border)',
+          }}>
+            {statusLabel}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            {pick.tournament || ''}
+            {pick.surface && <> · <SurfaceBadge surface={pick.surface} /></>}
+          </span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-          {pick.event_date} · {pick.tournament || ''}
-          {pick.surface && <> · <SurfaceBadge surface={pick.surface} /></>}
-          {pick.confidence && <> · <span className="confidence">
-            <span className={`confidence-dot ${pick.confidence}`} /> {pick.confidence}
-          </span></>}
+
+        {/* Pick player — prominent */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5,
+            color: 'var(--green-text)', background: 'var(--green-bg)',
+            border: '1px solid var(--green-border)',
+            padding: '1px 5px', borderRadius: 3,
+          }}>Pick</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+            {pickedName}
+          </span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4, fontStyle: 'italic' }}>
-          {pick.reason}
+
+        {/* Opponent */}
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>
+          vs {oppName}
         </div>
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
-        {pick.pick_prob != null && `${Math.round(pick.pick_prob * 100)}%`}
-        {pick.market_odds != null && (
-          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-            @ {pick.market_odds.toFixed(2)}
+
+        {/* Reason */}
+        {pick.reason && (
+          <div style={{ fontSize: 11, color: 'var(--text-2)', fontStyle: 'italic' }}>
+            {pick.reason}
           </div>
         )}
       </div>
-      <div style={{
-        fontSize: 13, fontWeight: 700, textAlign: 'right',
-        color: pick.profit_loss == null ? 'var(--text-3)'
-              : pick.profit_loss > 0 ? 'var(--green)'
-              : 'var(--red)',
-      }}>
-        {pick.profit_loss == null ? '—'
-          : pick.profit_loss > 0 ? `+${pick.profit_loss.toFixed(2)}u`
-          : `${pick.profit_loss.toFixed(2)}u`}
+
+      {/* Right: result + prob + P/L */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 70 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: resultColour }}>
+          {!isSettled ? '·' : (pick.is_correct ? '✓' : '✗')}
+        </div>
+        {pick.pick_prob != null && (
+          <div style={{ fontSize: 12, color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
+            {Math.round(pick.pick_prob * 100)}%
+            {pick.market_odds != null && (
+              <span style={{ color: 'var(--text-3)', marginLeft: 4 }}>@ {pick.market_odds.toFixed(2)}</span>
+            )}
+          </div>
+        )}
+        <div style={{
+          fontSize: 13, fontWeight: 700,
+          color: pick.profit_loss == null ? 'var(--text-3)'
+                : pick.profit_loss > 0 ? 'var(--green)'
+                : 'var(--red)',
+        }}>
+          {pick.profit_loss == null ? '—'
+            : pick.profit_loss > 0 ? `+${pick.profit_loss.toFixed(2)}u`
+            : `${pick.profit_loss.toFixed(2)}u`}
+        </div>
       </div>
     </Link>
   )
@@ -151,7 +197,7 @@ export default function SystemDetail() {
       <div className="card" style={{ overflow: 'hidden' }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '40px 1fr 90px 70px',
+          gridTemplateColumns: '1fr auto',
           padding: '8px 16px',
           borderBottom: '1px solid var(--border)',
           fontSize: 11,
@@ -161,10 +207,8 @@ export default function SystemDetail() {
           letterSpacing: 0.4,
           background: 'var(--bg-raised)',
         }}>
-          <div></div>
-          <div>Pick</div>
-          <div>Prob / Odds</div>
-          <div style={{ textAlign: 'right' }}>P/L</div>
+          <div>Match / Pick</div>
+          <div style={{ textAlign: 'right' }}>Result / Prob / P&L</div>
         </div>
         {picks?.picks?.length ? picks.picks.map(p => <PickRow key={p.pick_id} pick={p} />) : (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}>
