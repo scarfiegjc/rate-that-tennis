@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
 import AuthModal from './components/AuthModal.jsx'
@@ -153,6 +153,26 @@ function Header() {
 }
 
 function AppRoutes() {
+  const loc = useLocation()
+  const isFirstNav = useRef(true)
+
+  // Fire a Google Analytics page_view on every React Router navigation.
+  // Skip the first run: gtag('config', ...) in index.html already counts the
+  // initial page load, so we'd otherwise double-count it.
+  useEffect(() => {
+    if (isFirstNav.current) {
+      isFirstNav.current = false
+      return
+    }
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'page_view', {
+        page_path:     loc.pathname + loc.search,
+        page_location: window.location.href,
+        page_title:    document.title,
+      })
+    }
+  }, [loc.pathname, loc.search])
+
   return (
     <>
       <Header />
