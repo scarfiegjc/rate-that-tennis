@@ -5,17 +5,58 @@
 
 ---
 
+## ⚠️ STEP ZERO — START EVERY SESSION WITH THIS
+
+**Before you make ANY edit, run these commands. Every. Single. Session.**
+
+```bash
+cd /path/to/repo
+
+# 1. Move any stale lock files out of the way (virtiofs/Cowork quirk: rm fails, mv works)
+mkdir -p .git/_trash
+for f in .git/HEAD.lock .git/index.lock .git/refs/heads/main.lock .git/ORIG_HEAD.lock .git/FETCH_HEAD.lock; do
+  [ -e "$f" ] && mv "$f" ".git/_trash/$(basename $f).$(date +%s).bak" 2>/dev/null
+done
+
+# 2. Sync with the canonical remote
+git fetch origin
+
+# 3. Check for divergence
+git diff HEAD refs/remotes/origin/main --stat
+
+# 4. If ANYTHING appears in the diff that you did not intend to change in THIS session,
+#    you are on stale local state. Reset:
+git reset --hard refs/remotes/origin/main
+```
+
+The Cowork local working copy regularly ends up on a divergent branch that contains
+half-finished work from prior sessions. Committing from that state has wiped large amounts
+of work multiple times. **Never trust the local working copy. Always reset to
+`refs/remotes/origin/main` before starting.**
+
+Use `refs/remotes/origin/main` (the fully qualified ref) — not just `origin/main` —
+because stale `.lock.*.bak` files in `.git/refs/heads/` make plain `origin/main`
+ambiguous in this repo.
+
+---
+
 ## ⚠️ CRITICAL — GIT COMMIT DISCIPLINE
 
 **Before every commit, always:**
 1. `git fetch origin` — bring remote refs up to date
-2. `git diff HEAD origin/main --stat` — confirm local is not behind/diverged
+2. `git diff HEAD refs/remotes/origin/main --stat` — confirm local is not behind/diverged
 3. `git add <specific-file>` only — NEVER `git add .` or `git add -A`
 4. `git diff --cached --stat` — verify exactly what is staged before committing
 
-If `git diff HEAD origin/main` shows files you didn't intend to change, **stop and run `git reset --hard origin/main` first**, then re-apply only the intended edit.
+If `git diff HEAD refs/remotes/origin/main` shows files you didn't intend to change, **stop and run `git reset --hard refs/remotes/origin/main` first**, then re-apply only the intended edit.
 
 This rule exists because a diverged local repo caused two incidents where 80+ stale files were pushed, overwriting carefully-built frontend work.
+
+**Lock files keep coming back.** Every `git` command may leave `.git/*.lock` files behind
+that the filesystem refuses to delete (`rm` returns "Operation not permitted" but `mv`
+succeeds — a virtiofs/Cowork quirk). Wrap every git invocation with the lock-clearing
+loop from Step Zero above, or expect intermittent "Unable to create '.git/index.lock'"
+failures.
 
 **Pushing from a Cowork session:**
 

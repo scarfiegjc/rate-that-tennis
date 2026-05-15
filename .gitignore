@@ -18,7 +18,11 @@ env/
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
+frontend/dist-check/
 frontend/.vite/
+# Vite writes temporary timestamped configs while it's running — never commit them
+frontend/vite.config.js.timestamp-*.mjs
+frontend/vite.config.ts.timestamp-*.mjs
 
 # ML results (large files — regenerated locally)
 ml/results/
