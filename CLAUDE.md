@@ -17,6 +17,18 @@ If `git diff HEAD origin/main` shows files you didn't intend to change, **stop a
 
 This rule exists because a diverged local repo caused two incidents where 80+ stale files were pushed, overwriting carefully-built frontend work.
 
+**Pushing from a Cowork session:**
+
+The git remote URL has the GitHub token embedded for passwordless push. The token is stored in `.env` as `GITHUB_TOKEN` and in the remote URL in `.git/config`. If push fails with "could not read Username", re-run:
+
+```bash
+TOKEN=$(grep GITHUB_TOKEN .env | cut -d= -f2)
+git remote set-url origin "https://scarfiegjc:${TOKEN}@github.com/scarfiegjc/rate-that-tennis.git"
+git push origin main
+```
+
+If the local branch is behind remote, rebase first: `git pull --rebase origin main && git push origin main`
+
 ---
 
 ## ⚠️ CRITICAL — DO NOT REWRITE THESE FILES
