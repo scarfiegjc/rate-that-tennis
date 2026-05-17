@@ -98,7 +98,7 @@ DB_URL = (
 
 MODELS_DIR  = Path(__file__).parent / "models"
 RESULTS_DIR = Path(__file__).parent / "results"
-MODEL_VERSION = "v2-namekey-elo-blend"
+MODEL_VERSION = "v3-ml-primary"
 
 # ─────────────────────────────────────────────
 # FACTOR DESCRIPTIONS
@@ -717,17 +717,12 @@ class LivePredictor:
         else:
             features['market_impl_p1'] = 0.5
 
-        # ── Predict — surface-Elo-led with optional model refinement.
+        # ── Predict — ML model-led, with surface Elo as a stabilising blend.
         #
-        # The trained logistic / XGBoost / LightGBM models in ml/models/ were
-        # fit on features built BEFORE the name-keyed Elo fix (when modern top
-        # players had NULL winner_id in sa_matches and were skipped). Their
-        # response surface is miscalibrated for the corrected Elo distribution
-        # and inverts on some moderate-favourite matches (Rublev/Tiafoe-style).
-        #
-        # Until the models are retrained on corrected features, take the
-        # surface-Elo expected score as the primary signal and only blend in
-        # the model output when it agrees with Elo on direction.
+        # The trained XGBoost / LightGBM / Logistic ensemble is the primary
+        # signal. Surface Elo is blended in at 30% weight to smooth out noise
+        # on matches where the model has thin feature coverage. If no models
+        # are loaded, fall back to pure surface Elo.
         elo_prob = surf_elo_win_prob if surf_elo_win_prob is not None else elo_win_prob
         elo_prob = max(0.02, min(0.98, elo_prob))   # clamp away from 0/1
         model_prob: Optional[float] = None
@@ -741,19 +736,18 @@ class LivePredictor:
                     feat_names = CORE_FEATURES
                 X = pd.DataFrame([{k: features.get(k) for k in feat_names}])
                 model_prob = float(model.predict_proba(X)[0, 1])
+                model_prob = max(0.02, min(0.98, model_prob))
             except Exception as e:
                 log.debug(f"Model prediction failed ({e}), falling back to Elo")
                 model_prob = None
                 model_key = 'elo'
 
-        # Blend only when model and Elo agree on direction. On disagreement,
-        # trust Elo — it's grounded in the corrected name-keyed history.
-        if model_prob is not None and (model_prob - 0.5) * (elo_prob - 0.5) > 0:
-            prob_p1 = 0.7 * elo_prob + 0.3 * model_prob
+        # ML model is primary (70%); Elo adds stability (30%).
+        # Fall back to pure Elo only if the model couldn't run.
+        if model_prob is not None:
+            prob_p1 = 0.7 * model_prob + 0.3 * elo_prob
         else:
             prob_p1 = elo_prob
-            if model_prob is not None:
-                model_key = f"{model_key}+elo_override"
         prob_p2 = 1.0 - prob_p1
 
         # ── Confidence tier
