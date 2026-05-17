@@ -828,6 +828,7 @@ export default function MatchList() {
   const [hideUnidentified, setHideUnidentified] = useState(false)
   const [tournament,       setTournament]       = useState('')
   const [sortBy,           setSortBy]           = useState('time')
+  const [dateFilter,       setDateFilter]       = useState('All')
   const [lastFetch,        setLastFetch]        = useState(null)
 
   useSEO({
@@ -869,8 +870,12 @@ export default function MatchList() {
 
   // Filter — doubles always excluded
   const filtered = useMemo(() => {
+    const todayStr    = new Date().toISOString().slice(0, 10)
+    const tomorrowStr = new Date(Date.now() + 864e5).toISOString().slice(0, 10)
     return matches.filter(m => {
       if (m.is_doubles) return false
+      if (dateFilter === 'Today'    && (m.event_date || '').slice(0, 10) !== todayStr)    return false
+      if (dateFilter === 'Tomorrow' && (m.event_date || '').slice(0, 10) !== tomorrowStr) return false
       if (surface !== 'All' && (m.surface || '').toLowerCase() !== surface.toLowerCase()) return false
       if (gender === 'Men'   && m.gender !== 'Men')   return false
       if (gender === 'Women' && m.gender !== 'Women') return false
@@ -886,7 +891,7 @@ export default function MatchList() {
       }
       return true
     })
-  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified])
+  }, [matches, surface, gender, tournament, levels, upcomingOnly, ratedOnly, hideUnidentified, dateFilter])
 
   // Clear tournament if filtered away
   useEffect(() => {
@@ -944,6 +949,16 @@ export default function MatchList() {
         alignItems: 'center', marginBottom: 20,
         paddingBottom: 14, borderBottom: '1px solid var(--border-faint)',
       }}>
+
+        {/* Date */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Date</span>
+          {['All', 'Today', 'Tomorrow'].map(d => (
+            <button key={d} className={`surface-pill ${dateFilter === d ? 'active' : ''}`} onClick={() => setDateFilter(d)}>
+              {d}
+            </button>
+          ))}
+        </div>
 
         {/* Surface */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
