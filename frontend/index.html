@@ -12,14 +12,22 @@
     <title>RateThatTennis - Tennis Predictions, Analytics &amp; Tips - Machine Learning for Tennis. Always free.</title>
     <meta name="description" content="Free ML-powered tennis predictions, player ratings and betting intelligence. Win probabilities, RTT ratings, bookmaker odds and edge for every ATP, WTA and Challenger match." />
     <meta name="keywords" content="tennis predictions, tennis analytics, tennis betting tips, ATP predictions, WTA predictions, tennis AI, tennis machine learning, tennis odds" />
-    <link rel="canonical" href="https://ratethat.tennis/" />
+    <!-- Canonical set immediately per-URL so crawlers see it before JS loads -->
+    <script>
+      (function() {
+        var el = document.createElement('link');
+        el.rel = 'canonical';
+        el.href = window.location.origin + window.location.pathname;
+        document.currentScript.parentNode.insertBefore(el, document.currentScript);
+      })();
+    </script>
 
     <!-- Open Graph -->
     <meta property="og:type"        content="website" />
     <meta property="og:site_name"   content="RateThatTennis" />
     <meta property="og:title"       content="RateThatTennis — Free ML Tennis Predictions &amp; Analytics" />
     <meta property="og:description" content="Win probabilities, RTT player ratings, bookmaker odds and model edge for every ATP, WTA and Challenger match. Always free." />
-    <meta property="og:url"         content="https://ratethat.tennis/" />
+    <meta property="og:url"         content="https://ratethat.tennis/" id="og-url" />
     <meta property="og:image"       content="https://ratethat.tennis/og-image.png" />
 
     <!-- Twitter / X card -->

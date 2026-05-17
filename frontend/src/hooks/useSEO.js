@@ -5,7 +5,7 @@ const DEFAULT_DESC  = 'Free ML-powered tennis predictions, player ratings and be
 
 /**
  * useSEO — lightweight hook for per-page SEO signals.
- * Sets document.title, meta description, canonical URL, and injects
+ * Sets document.title, meta description, canonical URL, og:url, and injects
  * a page-specific JSON-LD <script> that is cleaned up on unmount.
  *
  * @param {Object} opts
@@ -41,6 +41,19 @@ export function useSEO({ title, description, canonical, jsonLd } = {}) {
     if (title && ogTitle)       ogTitle.content = title
     if (description && ogDesc)  ogDesc.content  = description
 
+    // ── OG URL ───────────────────────────────────────────────────────────
+    let ogUrl = document.querySelector('meta[property="og:url"]')
+    const prevOgUrl = ogUrl?.content || ''
+    if (canonical && ogUrl) ogUrl.content = canonical
+
+    // ── Twitter title / description ───────────────────────────────────────
+    let twTitle = document.querySelector('meta[name="twitter:title"]')
+    let twDesc  = document.querySelector('meta[name="twitter:description"]')
+    const prevTwTitle = twTitle?.content || ''
+    const prevTwDesc  = twDesc?.content  || ''
+    if (title && twTitle)       twTitle.content = title
+    if (description && twDesc)  twDesc.content  = description
+
     // ── Canonical ─────────────────────────────────────────────────────────
     let canonEl = document.querySelector('link[rel="canonical"]')
     const prevCanon = canonEl?.href || ''
@@ -73,7 +86,10 @@ export function useSEO({ title, description, canonical, jsonLd } = {}) {
       if (descEl && !prevDesc)    descEl.content = DEFAULT_DESC
       if (ogTitle && prevOgTitle) ogTitle.content = prevOgTitle
       if (ogDesc  && prevOgDesc)  ogDesc.content  = prevOgDesc
-      if (canonEl) canonEl.href = prevCanon || 'https://ratethat.tennis/'
+      if (ogUrl   && prevOgUrl)   ogUrl.content   = prevOgUrl
+      if (twTitle && prevTwTitle) twTitle.content  = prevTwTitle
+      if (twDesc  && prevTwDesc)  twDesc.content   = prevTwDesc
+      if (canonEl) canonEl.href = prevCanon || window.location.origin + window.location.pathname
       const ldScript = document.getElementById(ldId)
       if (ldScript) ldScript.remove()
     }

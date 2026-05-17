@@ -327,8 +327,9 @@ def sitemap():
         for pid, name in players:
             slug = "".join(c if c.isalnum() or c == '-' else '-' for c in (name or '').lower())
             slug = "-".join(p for p in slug.split('-') if p)
+            slug_part = f"/{slug}" if slug else ""
             urls.append(f"""  <url>
-    <loc>{base}/player/{pid}</loc>
+    <loc>{base}/player/{pid}{slug_part}</loc>
     <changefreq>daily</changefreq>
     <priority>0.6</priority>
   </url>""")
@@ -342,6 +343,234 @@ def sitemap():
         + "\n</urlset>"
     )
     return Response(content=xml, media_type="application/xml")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEO / Dynamic rendering endpoints
+# Served to crawlers (Googlebot etc.) by nginx bot-detection.
+# Returns lightweight HTML with full meta tags so Google indexes real content
+# rather than an empty React shell.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _slug(name: str) -> str:
+    """Convert a player name or match title into a URL slug."""
+    s = (name or "").lower()
+    s = "".join(c if c.isalnum() or c == "-" else "-" for c in s)
+    return "-".join(p for p in s.split("-") if p)
+
+
+def _esc(text) -> str:
+    """Minimal HTML escaping for meta attribute values."""
+    return str(text or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@app.get("/seo/match/{match_id}", response_class=HTMLResponse)
+def seo_match(match_id: int):
+    """
+    Server-side rendered HTML for Googlebot crawling match pages.
+    Returns a lightweight HTML page with proper title, meta description,
+    canonical URL, Open Graph tags and JSON-LD structured data.
+    Nginx routes crawler User-Agents here; humans get the React SPA.
+    """
+    from api.db import get_conn
+
+    row = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT m.id,
+                       COALESCE(p1.player_name,'') AS p1,
+                       COALESCE(p2.player_name,'') AS p2,
+                       COALESCE(t.name,'')         AS tournament,
+                       COALESCE(s.surface_name,'') AS surface,
+                       m.event_date,
+                       mp.p1_win_probability,
+                       mp.p2_win_probability,
+                       mp.narrative
+                FROM matches m
+                LEFT JOIN players p1         ON p1.id = m.first_player_id
+                LEFT JOIN players p2         ON p2.id = m.second_player_id
+                LEFT JOIN tournaments t      ON t.id  = m.tournament_id
+                LEFT JOIN surfaces s         ON s.id  = m.surface_id
+                LEFT JOIN model_predictions mp ON mp.match_id = m.id
+                WHERE m.id = %s
+                LIMIT 1
+            """, (match_id,))
+            row = cur.fetchone()
+        conn.close()
+    except Exception as exc:
+        logging.warning("seo_match DB error: %s", exc)
+
+    if not row:
+        return HTMLResponse(status_code=404, content="<html><body><p>Match not found.</p></body></html>")
+
+    mid, p1, p2, tournament, surface, event_date, p1_prob, p2_prob, narrative = row
+
+    slug = _slug(f"{p1}-vs-{p2}")
+    canonical = f"https://ratethat.tennis/match/{mid}/{slug}"
+    title = _esc(f"{p1} vs {p2} | {tournament} | RateThatTennis")
+
+    desc_parts = [f"{p1} vs {p2}"]
+    if tournament:
+        desc_parts.append(f"at {tournament}")
+    if surface:
+        desc_parts.append(f"on {surface}")
+    if p1_prob is not None and p2_prob is not None:
+        desc_parts.append(
+            f"ML win probability: {p1} {round(float(p1_prob) * 100)}% — {p2} {round(float(p2_prob) * 100)}%"
+        )
+    desc_parts.append("Free tennis analytics and predictions on RateThatTennis.")
+    description = _esc(". ".join(desc_parts))
+
+    prob_row = ""
+    if p1_prob is not None and p2_prob is not None:
+        prob_row = f"<p><strong>ML Win Probability:</strong> {_esc(p1)} {round(float(p1_prob)*100)}% | {_esc(p2)} {round(float(p2_prob)*100)}%</p>"
+
+    narrative_block = f"<p>{_esc(narrative)}</p>" if narrative else ""
+
+    json_ld = f"""{{
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    "name": "{_esc(f'{p1} vs {p2}')}",
+    "description": "{description}",
+    "url": "{_esc(canonical)}",
+    "startDate": "{_esc(str(event_date) if event_date else '')}",
+    "location": {{"@type": "Place", "name": "{_esc(tournament)}"}},
+    "sport": "Tennis",
+    "competitor": [
+      {{"@type": "Person", "name": "{_esc(p1)}"}},
+      {{"@type": "Person", "name": "{_esc(p2)}"}}
+    ]
+  }}"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <meta name="description" content="{description}">
+  <link rel="canonical" href="{_esc(canonical)}">
+  <meta name="robots" content="index, follow">
+  <meta property="og:type"        content="article">
+  <meta property="og:site_name"   content="RateThatTennis">
+  <meta property="og:title"       content="{title}">
+  <meta property="og:description" content="{description}">
+  <meta property="og:url"         content="{_esc(canonical)}">
+  <meta property="og:image"       content="https://ratethat.tennis/og-image.png">
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:site"        content="@ratethattennis">
+  <meta name="twitter:title"       content="{title}">
+  <meta name="twitter:description" content="{description}">
+  <meta name="twitter:image"       content="https://ratethat.tennis/og-image.png">
+  <script type="application/ld+json">{json_ld}</script>
+</head>
+<body>
+  <header><a href="https://ratethat.tennis">RateThatTennis</a></header>
+  <main>
+    <h1>{_esc(p1)} vs {_esc(p2)}</h1>
+    <p><strong>Tournament:</strong> {_esc(tournament) or 'TBC'}</p>
+    <p><strong>Surface:</strong> {_esc(surface) or 'TBC'}</p>
+    <p><strong>Date:</strong> {_esc(str(event_date)) if event_date else 'TBC'}</p>
+    {prob_row}
+    {narrative_block}
+    <p><a href="{_esc(canonical)}">View full match analysis →</a></p>
+  </main>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html, headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/seo/player/{player_id}", response_class=HTMLResponse)
+def seo_player(player_id: int):
+    """
+    Server-side rendered HTML for Googlebot crawling player pages.
+    """
+    from api.db import get_conn
+
+    row = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.id, p.player_name, p.country,
+                       pr.rtt_score, pr.form_score,
+                       pr.serve_rating, pr.clay_rating, pr.hard_rating, pr.grass_rating
+                FROM players p
+                LEFT JOIN player_ratings pr ON pr.player_id = p.id
+                WHERE p.id = %s
+                LIMIT 1
+            """, (player_id,))
+            row = cur.fetchone()
+        conn.close()
+    except Exception as exc:
+        logging.warning("seo_player DB error: %s", exc)
+
+    if not row:
+        return HTMLResponse(status_code=404, content="<html><body><p>Player not found.</p></body></html>")
+
+    pid, name, country, rtt_score, form_score, serve_rating, clay, hard, grass = row
+
+    slug = _slug(name or "")
+    canonical = f"https://ratethat.tennis/player/{pid}/{slug}"
+    title = _esc(f"{name} | Tennis Analytics & Predictions | RateThatTennis")
+    rtt_str = f"RTT Score {round(float(rtt_score))}/100" if rtt_score is not None else ""
+    desc = _esc(
+        f"{name} tennis analytics on RateThatTennis. {rtt_str}. "
+        f"ML win predictions, RTT player ratings, form, serve stats and match history."
+    )
+
+    rating_rows = ""
+    for label, val in [("RTT Score", rtt_score), ("Form", form_score), ("Serve", serve_rating),
+                       ("Clay", clay), ("Hard", hard), ("Grass", grass)]:
+        if val is not None:
+            rating_rows += f"<p><strong>{label}:</strong> {round(float(val))}/100</p>\n    "
+
+    json_ld = f"""{{
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "{_esc(name)}",
+    "description": "{desc}",
+    "url": "{_esc(canonical)}",
+    "sport": "Tennis"
+  }}"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <meta name="description" content="{desc}">
+  <link rel="canonical" href="{_esc(canonical)}">
+  <meta name="robots" content="index, follow">
+  <meta property="og:type"        content="profile">
+  <meta property="og:site_name"   content="RateThatTennis">
+  <meta property="og:title"       content="{title}">
+  <meta property="og:description" content="{desc}">
+  <meta property="og:url"         content="{_esc(canonical)}">
+  <meta property="og:image"       content="https://ratethat.tennis/og-image.png">
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:site"        content="@ratethattennis">
+  <meta name="twitter:title"       content="{title}">
+  <meta name="twitter:description" content="{desc}">
+  <meta name="twitter:image"       content="https://ratethat.tennis/og-image.png">
+  <script type="application/ld+json">{json_ld}</script>
+</head>
+<body>
+  <header><a href="https://ratethat.tennis">RateThatTennis</a></header>
+  <main>
+    <h1>{_esc(name)}</h1>
+    {f"<p><strong>Country:</strong> {_esc(country)}</p>" if country else ""}
+    {rating_rows}
+    <p><a href="{_esc(canonical)}">View full player profile →</a></p>
+  </main>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/")
