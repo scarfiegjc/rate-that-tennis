@@ -373,7 +373,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
       </div>
 
       {/* Player names row */}
-      <div style={{
+      <div className="player-bar-grid" style={{
         display: 'grid',
         gridTemplateColumns: '1fr auto 1fr',
         alignItems: 'center',
@@ -384,8 +384,8 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <HandLozenge hand={p1.hand} />
-            <Link to={playerUrl({ id: p1.player_id, name: p1.name })} style={{
-              fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px',
+            <Link to={playerUrl({ id: p1.player_id, name: p1.name })} className="player-bar-name" style={{
+              fontWeight: 700, letterSpacing: '-0.5px',
               color: 'var(--text)', textDecoration: 'none',
             }}>
               {p1.name || '—'}
@@ -455,8 +455,8 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
                 size="md"
               />
             )}
-            <Link to={playerUrl({ id: p2.player_id, name: p2.name })} style={{
-              fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px',
+            <Link to={playerUrl({ id: p2.player_id, name: p2.name })} className="player-bar-name" style={{
+              fontWeight: 700, letterSpacing: '-0.5px',
               color: 'var(--text)', textDecoration: 'none',
             }}>
               {p2.name || '—'}
@@ -485,7 +485,7 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
       </div>
 
       {/* Tabs */}
-      <div style={{
+      <div className="player-bar-tabs-row" style={{
         display: 'flex',
         justifyContent: 'center',
         gap: 0,

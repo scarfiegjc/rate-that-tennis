@@ -308,7 +308,7 @@ function Hero({ player, ratings, history, msProfile }) {
 
 function TabBar({ tabs, active, onChange }) {
   return (
-    <div style={{
+    <div className="player-page-tabs" style={{
       display: 'flex',
       borderBottom: '1px solid var(--border)',
       marginBottom: 18,

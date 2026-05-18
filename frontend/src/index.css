@@ -1376,11 +1376,55 @@ gap: 16px;
 }
 
 @media (max-width: 640px) {
+/* Page breathing room */
+.page { padding: 16px 12px; }
+
+/* H1 / Match Centre title */
+h1, .cc-title { font-size: 20px; padding: 5px 14px; }
+
+/* Two-col stack */
 .two-col { grid-template-columns: 1fr; }
-.match-header-players { grid-template-columns: 1fr; }
-.match-row { grid-template-columns: 36px 1fr auto; }
-.match-row .match-player-cell.right,
+
+/* Match row — show BOTH players, drop only the right meta column */
+.match-row {
+  grid-template-columns: 30px minmax(0, 1fr) 68px minmax(0, 1fr);
+  padding: 9px 10px;
+}
+.match-row .match-player-cell.right { display: flex; }
 .match-row .match-row-meta { display: none; }
+.match-player-name { font-size: 12px; }
+.match-player-sub { gap: 3px; }
+.match-centre { min-width: 0; padding: 0 4px; }
+.match-probs { font-size: 11px; gap: 4px; }
+
+/* Match detail header */
+.match-header { padding: 16px 14px; }
+.match-header-players { grid-template-columns: 1fr auto 1fr; gap: 12px; }
+.match-header-name { font-size: 16px; letter-spacing: -0.3px; }
+.match-header-rtt { font-size: 22px; }
+.match-header-probs { font-size: 18px; gap: 10px; }
+
+/* Tabs — horizontal scroll so all 6 fit without overflow */
+.tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+.tab-btn { font-size: 12px; padding: 8px 10px; white-space: nowrap; flex-shrink: 0; }
+
+/* Rating bars */
+.rating-bar-row { grid-template-columns: 80px 1fr 28px; gap: 6px; }
+.rating-bar-label { font-size: 11px; }
+
+/* Dual rating bars — the comparison bars on match detail */
+.dual-rating-row { grid-template-columns: 26px 1fr 80px 1fr 26px; gap: 4px; }
+.dual-rating-label { font-size: 9px; }
+.dual-rating-val { font-size: 11px; }
+.dual-rating-legend { padding: 0 30px; }
+
+/* H2H stat bars */
+.stat-bar-row { grid-template-columns: 1fr 80px 1fr; gap: 6px; }
+.stat-segment { max-width: 80px; }
+.h2h-wins { font-size: 32px; }
+
+/* Metric cards: 2-up instead of 3 */
+.metric-cards { grid-template-columns: 1fr 1fr; }
 }
 
 /* ── Live command centre ─────────────────────────────── */
@@ -1660,3 +1704,60 @@ background: var(--bg-raised);
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Match detail — sticky player bar ───────────────── */
+
+/* Player names in the sticky bar (22px on desktop, shrinks on mobile) */
+.player-bar-name {
+font-size: 22px;
+}
+
+/* Tabs row in the sticky player bar */
+.player-bar-tabs-row {
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+}
+
+/* Player page tab bar */
+.player-page-tabs {
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+flex-wrap: nowrap;
+}
+.player-page-tabs button {
+white-space: nowrap;
+flex-shrink: 0;
+}
+
+/* ── Mobile-only overrides ──────────────────────────── */
+
+@media (max-width: 640px) {
+/* Nav — tighten spacing so items don't overflow */
+.app-header-inner { padding: 0 12px; gap: 8px; }
+.app-logo-text { font-size: 16px; }
+.nav-link { font-size: 12px; padding: 4px 7px; }
+
+/* Player bar — smaller names and padding */
+.player-bar-name { font-size: 14px; }
+.player-bar-grid { gap: 8px !important; padding: 10px 12px 8px !important; }
+.player-bar-tabs-row {
+  justify-content: flex-start !important;
+  padding: 0 12px !important;
+}
+.player-bar-tabs-row button {
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Player page hero */
+.player-page-tabs button { padding: 8px 12px; font-size: 12px; }
+
+/* Filter bar — give each group a bit more breathing room */
+.surface-pill { padding: 3px 9px; font-size: 11px; }
+
+/* Tournament header — truncate long names gracefully */
+.tournament-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tournament-info { gap: 5px; }
+}
