@@ -146,17 +146,30 @@ function MomentumSquares({ momentum, form_dots }) {
 // Non-sticky header (tournament info) — full-bleed court photo background
 // ─────────────────────────────────────────────────────────────────────────────
 
-function courtImage(surface) {
+function inferSurfaceFromName(name) {
+  const n = (name || '').toLowerCase()
+  if (/roland.?garros|french open|monte.?carlo|barcelona|madrid open|foro italico|italian open|internazionali|hamburg|geneva|lyon|strasbourg|rio open|buenos aires|santiago|marrakech|charleston|palermo|lausanne|prague/.test(n))
+    return 'clay'
+  if (/wimbledon|queen.?s club|cinch championships|halle|eastbourne|rothesay|nottingham|mallorca|newport|den bosch|rosmalen|birmingham|bad homburg/.test(n))
+    return 'grass'
+  return null
+}
+
+function courtImage(surface, tournamentName = '') {
   const s = (surface || '').toLowerCase()
   if (s.includes('clay'))  return courtClayImg
   if (s.includes('grass')) return courtGrassImg
   if (s.includes('hard') || s.includes('indoor') || s.includes('carpet')) return courtHardImg
+  // Fallback: infer from tournament name when surface is Unknown/null
+  const inferred = inferSurfaceFromName(tournamentName)
+  if (inferred === 'clay')  return courtClayImg
+  if (inferred === 'grass') return courtGrassImg
   return courtHardImg
 }
 
 function MatchMeta({ match }) {
   const pred   = match.prediction || {}
-  const imgSrc = courtImage(match.surface)
+  const imgSrc = courtImage(match.surface, match.tournament)
 
   const confidenceColor = pred.confidence === 'high'   ? '#4ade80'
                         : pred.confidence === 'medium' ? '#fbbf24'

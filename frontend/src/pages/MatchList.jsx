@@ -268,12 +268,31 @@ function MatchRow({ match, showTournament }) {
 
 // ── Court background helper ───────────────────────────────────────────────────
 
-function courtStyle(surface) {
+// Infer surface from tournament name when the DB returns 'Unknown' or null.
+// Mirrors the logic in pipeline/surface_backfill.py.
+function inferSurfaceFromName(name) {
+  const n = (name || '').toLowerCase()
+  if (/roland.?garros|french open|monte.?carlo|barcelona|madrid open|foro italico|italian open|internazionali|hamburg|geneva|lyon|strasbourg|rio open|buenos aires|santiago|marrakech|marrakesh|houston|charleston|iasi|bucharest|warsaw|parma|palermo|lausanne|prague|bogot/.test(n))
+    return 'clay'
+  if (/wimbledon|queen.?s club|cinch championships|halle|terra wortmann|eastbourne|rothesay|nottingham|mallorca|newport|den bosch|rosmalen|libema|birmingham|bad homburg|surbiton|ilkley/.test(n))
+    return 'grass'
+  if (/atp finals|wta finals|paris masters|rolex paris|bnp paribas masters|erste bank|vienna|swiss indoors|basel|moselle|stockholm|rotterdam|abn amro|marseille|sofia indoor|ostrava|linz/.test(n))
+    return 'indoor'
+  return null
+}
+
+function courtStyle(surface, tournamentName = '') {
   const s = (surface || '').toLowerCase()
-  if (s.includes('clay'))                        return { cls: 'clay',   img: courtClay }
-  if (s.includes('grass'))                       return { cls: 'grass',  img: courtGrass }
-  if (s.includes('hard'))                        return { cls: 'hard',   img: courtHard }
+  if (s.includes('clay'))                           return { cls: 'clay',   img: courtClay }
+  if (s.includes('grass'))                          return { cls: 'grass',  img: courtGrass }
+  if (s.includes('hard'))                           return { cls: 'hard',   img: courtHard }
   if (s.includes('indoor') || s.includes('carpet')) return { cls: 'indoor', img: null }
+  // Fallback: infer from tournament name when surface is Unknown/null
+  const inferred = inferSurfaceFromName(tournamentName)
+  if (inferred === 'clay')   return { cls: 'clay',   img: courtClay }
+  if (inferred === 'grass')  return { cls: 'grass',  img: courtGrass }
+  if (inferred === 'hard')   return { cls: 'hard',   img: courtHard }
+  if (inferred === 'indoor') return { cls: 'indoor', img: null }
   return { cls: '', img: null }
 }
 
@@ -291,7 +310,7 @@ function TournamentBlock({ name, surface, matches }) {
     /in play|live/i.test(m.event_status || '')
   ).length
 
-  const { cls, img } = courtStyle(surface)
+  const { cls, img } = courtStyle(surface, name)
 
   return (
     <div className="tournament-block">
@@ -876,7 +895,13 @@ export default function MatchList() {
       if (m.is_doubles) return false
       if (dateFilter === 'Today'    && (m.event_date || '').slice(0, 10) !== todayStr)    return false
       if (dateFilter === 'Tomorrow' && (m.event_date || '').slice(0, 10) !== tomorrowStr) return false
-      if (surface !== 'All' && (m.surface || '').toLowerCase() !== surface.toLowerCase()) return false
+      if (surface !== 'All') {
+        const matchSurface = (m.surface || '').toLowerCase()
+        const effectiveSurface = (matchSurface === 'unknown' || !matchSurface)
+          ? (inferSurfaceFromName(m.tournament) || '')
+          : matchSurface
+        if (effectiveSurface !== surface.toLowerCase()) return false
+      }
       if (gender === 'Men'   && m.gender !== 'Men')   return false
       if (gender === 'Women' && m.gender !== 'Women') return false
       if (tournament && m.tournament !== tournament)   return false
