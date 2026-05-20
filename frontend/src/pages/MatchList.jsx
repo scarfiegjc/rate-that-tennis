@@ -860,12 +860,12 @@ export default function MatchList() {
   const [surface,          setSurface]          = useState('All')
   const [gender,           setGender]           = useState('All')
   const [levels,           setLevels]           = useState(() => new Set(['Slam / Masters', 'Challenger']))
-  const [upcomingOnly,     setUpcomingOnly]     = useState(true)
+  const [upcomingOnly,     setUpcomingOnly]     = useState(false)
   const [ratedOnly,        setRatedOnly]        = useState(false)
   const [hideUnidentified, setHideUnidentified] = useState(true)
   const [tournament,       setTournament]       = useState('')
   const [sortBy,           setSortBy]           = useState('time')
-  const [dateFilter,       setDateFilter]       = useState('All')
+  const [dateFilter,       setDateFilter]       = useState('Today')
   const [lastFetch,        setLastFetch]        = useState(null)
 
   useSEO({
