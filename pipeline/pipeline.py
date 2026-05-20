@@ -513,8 +513,9 @@ def job_sync_tournaments(api: TennisAPI, conn) -> dict:
 
 
 def job_daily_fixtures(api: TennisAPI, conn, target_date: date) -> dict:
-    # Fetch a 3-day window — the api-tennis.com API requires a range to return results
-    date_start = target_date
+    # Fetch a 5-day window: 3 days back (to resolve stale "upcoming" results) + 2 days ahead.
+    # Without the lookback, matches played 1-3 days ago stay stuck as "upcoming" forever.
+    date_start = target_date - timedelta(days=3)
     date_stop  = target_date + timedelta(days=2)
     log.info(f"Fetching fixtures for {date_start} to {date_stop}...")
 
