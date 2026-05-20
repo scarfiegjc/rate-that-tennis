@@ -36,13 +36,16 @@ COPY pipeline/schema_additions.sql      ./schema_additions.sql
 COPY pipeline/predictions_schema.sql    ./predictions_schema.sql
 COPY pipeline/picks_schema.sql          ./picks_schema.sql
 
-# ML package (proper package import — `from ml.rtt_predictor import …`).
-# We deliberately copy ONLY the lightweight modules the scheduler needs at
-# runtime — they use psycopg2 + stdlib only. Heavy modules (ratings.py uses
-# scipy; train/backtest use xgboost+lightgbm) stay out so the pipeline image
-# remains slim and boots fast.
+# ML package — full LivePredictor stack (XGBoost + LightGBM ensemble).
+# ml/predict.py is the production predictor; it imports elo, features, train
+# at runtime. ml/models/ contains the trained .pkl files committed to git.
 COPY ml/__init__.py                  ./ml/__init__.py
 COPY ml/rtt_predictor.py             ./ml/rtt_predictor.py
 COPY ml/systems.py                   ./ml/systems.py
+COPY ml/predict.py                   ./ml/predict.py
+COPY ml/elo.py                       ./ml/elo.py
+COPY ml/features.py                  ./ml/features.py
+COPY ml/train.py                     ./ml/train.py
+COPY ml/models/                      ./ml/models/
 
 CMD ["python", "scheduler.py"]
