@@ -836,6 +836,23 @@ justify-content: flex-end;
 gap: 6px;
 }
 
+/* Odds display in match card */
+.match-odds-row {
+display: flex;
+align-items: center;
+gap: 4px;
+}
+.match-odds-val {
+font-size: 11px;
+font-weight: 700;
+font-variant-numeric: tabular-nums;
+color: var(--text-2);
+}
+.match-odds-sep {
+font-size: 10px;
+color: var(--text-3);
+}
+
 /* ── Date separator ──────────────────────────────────── */
 
 .date-sep {

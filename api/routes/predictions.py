@@ -533,7 +533,7 @@ def admin_intel_queue(days_ahead: int = Query(default=2, ge=1, le=7)):
           AND mp.match_id IS NOT NULL
           AND (mp.match_preview IS NULL OR mp.match_preview = '')
         ORDER BY m.event_date, m.event_time NULLS LAST
-        LIMIT 100
+        LIMIT 500
         """,
         (days_ahead,),
     )

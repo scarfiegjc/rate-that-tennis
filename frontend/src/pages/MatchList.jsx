@@ -158,7 +158,16 @@ function MatchRow({ match, showTournament }) {
         ? 'match-row match-row--wrong'
         : 'match-row'
 
-  const liveScore = match.game_result || match.final_result || ''
+  // Live score: show set scores + current game score together (e.g. "6-4 3-2  40-30")
+  const liveScore = match.set_scores
+    ? (match.game_result ? `${match.set_scores}  ${match.game_result}` : match.set_scores)
+    : (match.game_result || match.final_result || '')
+
+  // Odds
+  const mkt    = match.market || {}
+  const p1odds = mkt.odds_first_player
+  const p2odds = mkt.odds_second_player
+  const hasOdds = !!(p1odds && p2odds)
 
   return (
     <button className={rowCls} onClick={() => navigate(matchUrl(match))}>
@@ -249,18 +258,27 @@ function MatchRow({ match, showTournament }) {
             {match.tournament}
           </span>
         )}
-        {hasEdge
-          ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
-          : isFinished
-            ? predictionCorrect === true
-              ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
-              : predictionCorrect === false
-                ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          {hasOdds && (
+            <div className="match-odds-row">
+              <span className="match-odds-val">{p1odds.toFixed(2)}</span>
+              <span className="match-odds-sep">·</span>
+              <span className="match-odds-val">{p2odds.toFixed(2)}</span>
+            </div>
+          )}
+          {hasEdge
+            ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
+            : isFinished
+              ? predictionCorrect === true
+                ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
+                : predictionCorrect === false
+                  ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
+                  : null
+              : p1prob != null && !hasOdds
+                ? <span className="edge-badge neutral">—</span>
                 : null
-            : p1prob != null
-              ? <span className="edge-badge neutral">—</span>
-              : null
-        }
+          }
+        </div>
       </div>
     </button>
   )
