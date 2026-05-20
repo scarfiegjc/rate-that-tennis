@@ -1735,9 +1735,28 @@ def _startup_bootstrap():
         log.error(f"[startup] odds fetch failed: {e}")
 
 
+def _periodic_surface_backfill():
+    """Run surface backfill every 6 hours so new tournament records never stay
+    'Unknown' for long between full-bootstrap / deploy cycles."""
+    import time
+    # Initial delay — let startup bootstrap finish first
+    time.sleep(600)
+    while True:
+        try:
+            from api.bootstrap import run_surface_backfill
+            result = run_surface_backfill()
+            n = result.get("updated", 0)
+            if n:
+                log.info(f"[surface-backfill periodic] updated {n} tournament surfaces")
+        except Exception as e:
+            log.warning(f"[surface-backfill periodic] failed: {e}")
+        time.sleep(6 * 3600)  # 6 hours
+
+
 @app.on_event("startup")
 def _kick_off_bootstrap():
     if os.environ.get("RTT_DISABLE_AUTO_BOOTSTRAP", "").lower() in ("1", "true", "yes"):
         log.info("[startup] auto-bootstrap disabled via RTT_DISABLE_AUTO_BOOTSTRAP")
         return
     threading.Thread(target=_startup_bootstrap, daemon=True).start()
+    threading.Thread(target=_periodic_surface_backfill, daemon=True).start()

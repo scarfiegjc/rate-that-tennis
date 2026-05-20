@@ -511,7 +511,11 @@ def match_point_analysis(match_id: int):
 
 @router.get("/admin/intel/queue")
 def admin_intel_queue(days_ahead: int = Query(default=2, ge=1, le=7)):
-    """List of matches in the next N days that don't yet have intelligence."""
+    """List of matches in the next N days that don't yet have intelligence.
+
+    Excludes ITF and Junior matches — those players have no Sackmann history so
+    predictions default to 50/50 and intelligence would be meaningless noise.
+    """
     rows = safe_query(
         """
         SELECT m.id AS match_id, m.event_date, m.event_time,
@@ -520,10 +524,11 @@ def admin_intel_queue(days_ahead: int = Query(default=2, ge=1, le=7)):
                p1.name AS p1_name, p2.name AS p2_name,
                mp.predictor_version
         FROM matches m
-        LEFT JOIN tournaments t ON t.id = m.tournament_id
-        LEFT JOIN surfaces s    ON s.id = t.surface_id
-        LEFT JOIN players p1    ON p1.id = m.first_player_id
-        LEFT JOIN players p2    ON p2.id = m.second_player_id
+        LEFT JOIN tournaments t  ON t.id = m.tournament_id
+        LEFT JOIN surfaces s     ON s.id = t.surface_id
+        LEFT JOIN event_types et ON et.id = m.event_type_id
+        LEFT JOIN players p1     ON p1.id = m.first_player_id
+        LEFT JOIN players p2     ON p2.id = m.second_player_id
         LEFT JOIN model_predictions mp ON mp.match_id = m.id
         WHERE m.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + (%s || ' days')::interval
           AND m.event_status NOT IN ('Cancelled','Walkover','Postponed','Finished')
@@ -532,6 +537,7 @@ def admin_intel_queue(days_ahead: int = Query(default=2, ge=1, le=7)):
           AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
           AND mp.match_id IS NOT NULL
           AND (mp.match_preview IS NULL OR mp.match_preview = '')
+          AND (et.tour_category IS NULL OR et.tour_category NOT IN ('ITF', 'Junior'))
         ORDER BY m.event_date, m.event_time NULLS LAST
         LIMIT 500
         """,
