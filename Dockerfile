@@ -39,10 +39,15 @@ COPY pipeline/merge_duplicate_players.py ./merge_duplicate_players.py
 COPY pipeline/odds.py                ./odds.py
 COPY pipeline/odds_io.py             ./odds_io.py
 
-# ML package (rtt_predictor + systems engine — both lightweight)
+# ML package — full predictor with trained XGBoost/LightGBM/Logistic models
 COPY ml/__init__.py                  ./ml/__init__.py
+COPY ml/predict.py                   ./ml/predict.py
+COPY ml/elo.py                       ./ml/elo.py
+COPY ml/train.py                     ./ml/train.py
+COPY ml/features.py                  ./ml/features.py
 COPY ml/rtt_predictor.py             ./ml/rtt_predictor.py
 COPY ml/systems.py                   ./ml/systems.py
+COPY ml/models/                      ./ml/models/
 
 # Expose port — must match $PORT injected by Railway (default 8080)
 EXPOSE 8080
