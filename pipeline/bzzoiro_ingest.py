@@ -853,6 +853,9 @@ def sync_rankings(conn: psycopg2.extensions.connection) -> int:
     Fetch ATP and WTA rankings from Bzzoiro (/rankings/?ranking_type=ATP|WTA)
     and update players.current_rank and players.ranking_points.
 
+    Uses bulk CTE updates (not per-player transactions) to avoid deadlocks with
+    Railway's concurrent scheduler processes.
+
     Resolution order per ranked player:
       1. player_external_ids WHERE source='bzzoiro'
       2. Fuzzy name match on players.full_name / players.name
@@ -863,104 +866,101 @@ def sync_rankings(conn: psycopg2.extensions.connection) -> int:
     total_updated = 0
 
     for tour in ("ATP", "WTA"):
-        rows = _paginate("/rankings/", params={
-            "ranking_type": tour,
-            "limit":        500,
-        })
+        rows = _paginate("/rankings/", params={"ranking_type": tour, "limit": 500})
         log.info(f"  {tour}: {len(rows)} ranked players")
 
+        # Collect all data upfront — no DB queries during API pagination
+        data: list[tuple] = []
+        for r in rows:
+            p = r.get("player") or {}
+            bzz_pid = p.get("id")
+            pos     = r.get("position")
+            pts     = r.get("points")
+            name    = (p.get("name") or "").strip()
+            if bzz_pid and pos is not None:
+                data.append((str(bzz_pid), name, int(pos), int(pts) if pts is not None else None))
+
+        if not data:
+            continue
+
         with conn.cursor() as cur:
-            for r in rows:
+            # Fail fast on lock waits to avoid piling up behind concurrent writers
+            cur.execute("SET LOCAL lock_timeout = '4s'")
+
+            # ── Step 1: Bulk UPDATE via existing external_id mappings (single statement) ──
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                UPDATE players p
+                SET current_rank   = d.pos,
+                    ranking_points = d.pts,
+                    updated_at     = NOW()
+                FROM (VALUES %s) AS d(bzz_pid TEXT, full_name TEXT, pos INT, pts INT)
+                JOIN player_external_ids ei
+                  ON ei.source = 'bzzoiro' AND ei.external_id = d.bzz_pid
+                WHERE p.id = ei.player_id
+                """,
+                data,
+                template="(%s, %s, %s, %s)",
+            )
+            known_updated = cur.rowcount
+
+            # ── Step 2: Name-match new players not yet in external_ids ──
+            # Build a set of bzz_pids we already have mapped to skip them
+            cur.execute(
+                "SELECT external_id FROM player_external_ids WHERE source = 'bzzoiro' AND external_id = ANY(%s)",
+                ([d[0] for d in data],),
+            )
+            already_mapped = {r["external_id"] for r in cur.fetchall()}
+
+            name_updated = 0
+            for bzz_pid, name, pos, pts in data:
+                if bzz_pid in already_mapped or not name:
+                    continue
                 try:
-                    updated = _update_player_ranking(cur, r)
-                    total_updated += updated
+                    # Find player by name + store mapping + update rank in one shot
+                    cur.execute(
+                        """
+                        WITH found AS (
+                            SELECT id FROM players
+                            WHERE (LOWER(TRIM(full_name)) = LOWER(%s)
+                               OR  LOWER(TRIM(name))      = LOWER(%s))
+                            LIMIT 1
+                        ),
+                        mapped AS (
+                            INSERT INTO player_external_ids (player_id, source, external_id)
+                            SELECT id, 'bzzoiro', %s FROM found
+                            ON CONFLICT (player_id, source) DO UPDATE
+                                SET external_id = EXCLUDED.external_id
+                            RETURNING player_id
+                        )
+                        UPDATE players p
+                        SET current_rank   = %s,
+                            ranking_points = %s,
+                            updated_at     = NOW()
+                        FROM mapped
+                        WHERE p.id = mapped.player_id
+                        """,
+                        (name, name, bzz_pid, pos, pts),
+                    )
+                    name_updated += cur.rowcount
                 except Exception as exc:
-                    log.error(
-                        f"  Ranking update failed for {r.get('player', {}).get('name')}: "
-                        f"{type(exc).__name__}: {exc}"
+                    log.warning(
+                        f"  Ranking name-match failed for {name!r}: {type(exc).__name__}: {exc}"
                     )
                     try:
                         conn.rollback()
+                        cur.execute("SET LOCAL lock_timeout = '4s'")
                     except Exception:
                         pass
 
         conn.commit()
-        log.info(f"  {tour} rankings committed")
+        tour_total = known_updated + name_updated
+        total_updated += tour_total
+        log.info(f"  {tour} rankings committed: {known_updated} via ext-id, {name_updated} via name match")
 
     log.info(f"sync_rankings done: {total_updated} players updated")
     return total_updated
-
-
-def _update_player_ranking(
-    cur: psycopg2.extensions.cursor,
-    bzz_rank_row: dict,
-) -> int:
-    """
-    Update current_rank and ranking_points for one ranked player.
-    Returns 1 if updated, 0 if player not found.
-    """
-    player_obj  = bzz_rank_row.get("player") or {}
-    bzz_pid     = player_obj.get("id")
-    position    = bzz_rank_row.get("position")
-    points      = bzz_rank_row.get("points")
-    full_name   = player_obj.get("name")
-    country_code = player_obj.get("country_code")
-
-    if not bzz_pid or position is None:
-        return 0
-
-    # Find our player
-    our_player_id: Optional[int] = None
-
-    cur.execute(
-        "SELECT player_id FROM player_external_ids WHERE source = 'bzzoiro' AND external_id = %s",
-        (str(bzz_pid),),
-    )
-    row = cur.fetchone()
-    if row:
-        our_player_id = row["player_id"]
-    else:
-        # Name lookup
-        search_name = (full_name or "").strip()
-        if search_name:
-            cur.execute(
-                "SELECT id FROM players WHERE full_name ILIKE %s LIMIT 1",
-                (search_name,),
-            )
-            row = cur.fetchone()
-            if not row:
-                cur.execute(
-                    "SELECT id FROM players WHERE name ILIKE %s LIMIT 1",
-                    (search_name,),
-                )
-                row = cur.fetchone()
-            if row:
-                our_player_id = row["id"]
-                # Store external ID mapping for future lookups
-                cur.execute(
-                    """
-                    INSERT INTO player_external_ids (player_id, source, external_id)
-                    VALUES (%s, 'bzzoiro', %s)
-                    ON CONFLICT (player_id, source) DO UPDATE SET external_id = EXCLUDED.external_id
-                    """,
-                    (our_player_id, str(bzz_pid)),
-                )
-
-    if our_player_id is None:
-        return 0
-
-    # Update rank + points
-    cur.execute(
-        """
-        UPDATE players
-        SET current_rank   = %s,
-            ranking_points = %s,
-            updated_at     = NOW()
-        WHERE id = %s
-        """,
-        (int(position), int(points) if points is not None else None, our_player_id),
-    )
-    return cur.rowcount
 
 
 # ─────────────────────────────────────────────────────────────────────────────
