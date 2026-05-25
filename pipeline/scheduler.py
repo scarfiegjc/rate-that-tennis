@@ -536,6 +536,12 @@ if __name__ == "__main__":
     schedule.every().day.at("18:15").do(_surface_backfill_only)
     schedule.every().day.at("18:20").do(_fill_ratings_only)
     schedule.every().day.at("18:30").do(run_predictions)      # predictions after evening fixtures
+    # Hourly results refresh 08:00–22:00 UTC — catches completed matches and
+    # withdrawals between the main 06:00 and 18:00 fixture pulls.
+    # Skips hours already covered by the main pulls (06, 18).
+    for _hr in ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17",
+                "19", "20", "21", "22"]:
+        schedule.every().day.at(f"{_hr}:00").do(run_daily_fixtures)
     schedule.every(5).minutes.do(run_livescore)               # live scores
     # Settle predictions every 15 minutes — keeps the tracker page live as
     # matches finish through the day.
