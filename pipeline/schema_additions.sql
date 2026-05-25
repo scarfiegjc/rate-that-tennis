@@ -161,6 +161,45 @@ VALUES
 ON CONFLICT (bookmaker_key) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Unique constraint on player_external_ids(player_id, source) — needed for
+-- ON CONFLICT upserts in bzzoiro_ingest.py.  Deduplicate first; then add.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Remove duplicate (player_id, source) rows, keeping the highest-confidence/latest entry
+DELETE FROM player_external_ids
+WHERE id IN (
+    SELECT id FROM (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY player_id, source
+                   ORDER BY
+                       CASE confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'manual' THEN 3 WHEN 'low' THEN 4 END,
+                       id DESC
+               ) AS rn
+        FROM player_external_ids
+    ) ranked
+    WHERE rn > 1
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'player_external_ids_player_source_key'
+    ) THEN
+        ALTER TABLE player_external_ids
+            ADD CONSTRAINT player_external_ids_player_source_key UNIQUE (player_id, source);
+    END IF;
+END $$;
+
+-- Add expected_aces / expected_dfs columns to model_predictions
+ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_aces_p1       FLOAT;
+ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_aces_p2       FLOAT;
+ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_aces_combined FLOAT;
+ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_dfs_p1        FLOAT;
+ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_dfs_p2        FLOAT;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Deactivate all v1 betting systems — underperforming, cleared 2026-05-13
 -- The systems infrastructure stays in place for future v2 systems.
 -- ─────────────────────────────────────────────────────────────────────────────
