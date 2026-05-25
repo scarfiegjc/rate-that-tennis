@@ -3,12 +3,16 @@
 ratethat.tennis — Pipeline Scheduler
 
 Runs continuously on Railway, keeping the database up-to-date automatically:
-  - daily_fixtures  : 06:00 and 18:00 UTC every day (fetches today + next 2 days)
-  - predictions     : 06:30 and 18:30 UTC (ML win probabilities, runs after fixtures)
-  - livescore       : every 5 minutes (live match updates during play)
-  - odds            : 07:00 and 19:00 UTC (bookmaker odds via The Odds API)
-  - ratings         : daily at 01:00 UTC (RTT player ratings — all active players)
-  - sync_events     : once on startup (event types + tournaments)
+  - daily_fixtures          : 06:00 and 18:00 UTC every day (fetches today + next 2 days)
+  - predictions             : 06:30 and 18:30 UTC (ML win probabilities, runs after fixtures)
+  - livescore               : every 5 minutes (live match updates during play)
+  - odds                    : 07:00, 12:00, and 19:00 UTC (bookmaker odds via The Odds API)
+  - ratings                 : daily at 01:00 UTC and 08:00 UTC (RTT player ratings)
+  - bzzoiro_matches         : 06:15 and 18:15 UTC (match sync, after fixtures)
+  - bzzoiro_predictions     : 06:20 and 18:20 UTC (prediction fallback sync)
+  - bzzoiro_rankings        : every Monday 07:00 UTC
+  - bzzoiro_player_bios     : every Monday 07:05 UTC
+  - sync_events             : once on startup (event types + tournaments)
 
 No manual intervention needed once deployed.
 """
@@ -87,6 +91,81 @@ def run_bresbet_links():
         bresbet_run()
     except Exception as e:
         log.error(f"Bresbet links failed: {e}")
+
+
+# ─────────────────────────────────────────────
+# BZZOIRO JOB WRAPPERS
+# ─────────────────────────────────────────────
+
+def _import_bzzoiro():
+    """Import shim — works as pipeline.* package locally and flat in Docker."""
+    try:
+        from pipeline.bzzoiro_ingest import sync_matches, sync_predictions, sync_rankings, sync_player_bios, get_db_conn
+    except ImportError:
+        from bzzoiro_ingest import sync_matches, sync_predictions, sync_rankings, sync_player_bios, get_db_conn
+    return sync_matches, sync_predictions, sync_rankings, sync_player_bios, get_db_conn
+
+
+def run_bzzoiro_matches():
+    """Sync Bzzoiro match data: last 1 day + next 2 days. Runs after fixtures."""
+    log.info("Scheduled: Bzzoiro match sync")
+    try:
+        from datetime import date, timedelta
+        sync_matches, _, _, _, get_db_conn = _import_bzzoiro()
+        date_from = (date.today() - timedelta(days=1)).isoformat()
+        date_to = (date.today() + timedelta(days=2)).isoformat()
+        conn = get_db_conn()
+        try:
+            sync_matches(conn, date_from, date_to)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"Bzzoiro match sync failed: {e}")
+
+
+def run_bzzoiro_predictions():
+    """Sync Bzzoiro predictions as a fallback for matches our own model didn't predict."""
+    log.info("Scheduled: Bzzoiro predictions sync")
+    try:
+        from datetime import date, timedelta
+        _, sync_predictions, _, _, get_db_conn = _import_bzzoiro()
+        date_from = (date.today() - timedelta(days=1)).isoformat()
+        date_to = (date.today() + timedelta(days=2)).isoformat()
+        conn = get_db_conn()
+        try:
+            sync_predictions(conn, date_from, date_to)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"Bzzoiro predictions sync failed: {e}")
+
+
+def run_bzzoiro_rankings():
+    """Weekly sync of Bzzoiro player rankings."""
+    log.info("Scheduled: Bzzoiro rankings sync")
+    try:
+        _, _, sync_rankings, _, get_db_conn = _import_bzzoiro()
+        conn = get_db_conn()
+        try:
+            sync_rankings(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"Bzzoiro rankings sync failed: {e}")
+
+
+def run_bzzoiro_player_bios():
+    """Weekly sync of Bzzoiro player bios."""
+    log.info("Scheduled: Bzzoiro player bios sync")
+    try:
+        _, _, _, sync_player_bios, get_db_conn = _import_bzzoiro()
+        conn = get_db_conn()
+        try:
+            sync_player_bios(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"Bzzoiro player bios sync failed: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -477,12 +556,23 @@ if __name__ == "__main__":
     schedule.every().day.at("07:00").do(run_odds)             # odds after fixtures
     schedule.every().day.at("07:05").do(run_odds_io)          # odds-api.io (Challengers/ITF)
     schedule.every().day.at("07:10").do(run_bresbet_links)    # Bresbet affiliate deep links
+    schedule.every().day.at("12:00").do(run_odds)             # midday odds refresh
+    schedule.every().day.at("12:05").do(run_odds_io)          # odds-api.io midday refresh
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
     schedule.every().day.at("19:05").do(run_odds_io)          # odds-api.io evening refresh
     schedule.every().day.at("19:10").do(run_bresbet_links)    # Bresbet evening refresh
-    schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh
-    schedule.every().day.at("08:00").do(run_email_predictions_digest)  # predictions digest email
-    schedule.every().day.at("08:30").do(run_email_picks_summary)       # personalised picks email
+    schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh (overnight)
+    schedule.every().day.at("08:00").do(run_ratings)           # daily ratings refresh (morning, after predictions)
+    schedule.every().day.at("08:15").do(run_email_predictions_digest)  # predictions digest email
+    schedule.every().day.at("08:45").do(run_email_picks_summary)       # personalised picks email
+    # Bzzoiro match + predictions sync — runs after each fixtures pull
+    schedule.every().day.at("06:15").do(run_bzzoiro_matches)       # after morning fixtures
+    schedule.every().day.at("06:20").do(run_bzzoiro_predictions)   # after morning Bzzoiro matches
+    schedule.every().day.at("18:15").do(run_bzzoiro_matches)       # after evening fixtures
+    schedule.every().day.at("18:20").do(run_bzzoiro_predictions)   # after evening Bzzoiro matches
+    # Bzzoiro weekly syncs — Monday morning
+    schedule.every().monday.at("07:00").do(run_bzzoiro_rankings)   # player rankings
+    schedule.every().monday.at("07:05").do(run_bzzoiro_player_bios)  # player bios
     # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
     def _player_sync_weekly():
         try:
@@ -506,8 +596,11 @@ if __name__ == "__main__":
         "Scheduler running. "
         "Fixtures at 06:00 and 18:00 UTC. "
         "Predictions at 06:30 and 18:30 UTC. "
-        "Odds at 07:00 and 19:00 UTC. "
-        "Ratings every day 01:00 UTC. "
+        "Bzzoiro matches at 06:15 and 18:15 UTC. "
+        "Bzzoiro predictions at 06:20 and 18:20 UTC. "
+        "Bzzoiro rankings/bios every Monday 07:00/07:05 UTC. "
+        "Odds at 07:00, 12:00, and 19:00 UTC. "
+        "Ratings every day 01:00 and 08:00 UTC. "
         "Livescore every 5 minutes."
     )
 

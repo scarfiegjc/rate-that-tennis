@@ -365,6 +365,53 @@ def get_player(player_id: int):
     # player link, so derive a 0-100 scale from those.
     ratings = _augment_ratings_from_ms_career(ratings, ms_career)
 
+    # Career serve averages by surface from match_serve_stats (Bzzoiro data).
+    # Table may not exist on all environments — fail soft.
+    serve_stats_by_surface: list = []
+    try:
+        serve_stats_by_surface = query(
+            """
+            SELECT
+                s.name as surface,
+                COUNT(*) as matches,
+                ROUND(AVG(mss.aces)::numeric, 1) as avg_aces,
+                ROUND(AVG(mss.double_faults)::numeric, 1) as avg_dfs,
+                ROUND(AVG(mss.first_serve_pct)::numeric, 1) as avg_first_serve_pct,
+                ROUND(AVG(mss.first_serve_won_pct)::numeric, 1) as avg_first_serve_won_pct,
+                ROUND(AVG(mss.second_serve_won_pct)::numeric, 1) as avg_second_serve_won_pct
+            FROM match_serve_stats mss
+            JOIN matches m ON mss.match_id = m.id
+            JOIN surfaces s ON m.surface_id = s.id
+            WHERE mss.player_id = %s
+              AND m.event_date > NOW() - INTERVAL '18 months'
+            GROUP BY s.name
+            ORDER BY COUNT(*) DESC
+            """,
+            (player_id,),
+        )
+        serve_stats_by_surface = [dict(r) for r in serve_stats_by_surface]
+    except Exception:
+        serve_stats_by_surface = []
+
+    # Clutch / point stats from player_point_stats (production point-by-point data).
+    clutch_stats: dict = {}
+    try:
+        cs_row = query_one(
+            """
+            SELECT service_hold_pct, bp_save_pct, bp_conversion_pct,
+                   love_hold_pct, avg_service_game_pts,
+                   tiebreak_win_pct, pressure_win_pct, match_point_save_pct,
+                   set_point_save_pct, set1_recovery_pct,
+                   longest_game_run, matches_analyzed
+            FROM player_point_stats
+            WHERE player_id = %s
+            """,
+            (player_id,),
+        )
+        clutch_stats = dict(cs_row) if cs_row else {}
+    except Exception:
+        clutch_stats = {}
+
     return {
         "player": player,
         "ratings": ratings,
@@ -375,6 +422,8 @@ def get_player(player_id: int):
         },
         "ms_profile": ms_profile,
         "ms_career":  ms_career,
+        "serve_stats_by_surface": serve_stats_by_surface,
+        "clutch_stats": clutch_stats,
     }
 
 

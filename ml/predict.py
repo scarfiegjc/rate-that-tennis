@@ -151,6 +151,47 @@ def _sanitize_json(obj):
     return obj
 
 
+def _compute_expected_aces(
+    conn,
+    player_id: int,
+    surface_name: Optional[str],
+) -> tuple[Optional[float], Optional[float], int]:
+    """
+    Compute expected ace and double-fault totals for a player on a given surface
+    using the last 24 months of match_serve_stats data.
+
+    Returns (avg_aces, avg_dfs, sample_size).
+    Returns (None, None, 0) if the table is absent or sample_size < 3.
+    """
+    if player_id is None:
+        return None, None, 0
+    surf_pattern = surface_name if surface_name else '%'
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    AVG(mss.aces)          AS avg_aces,
+                    AVG(mss.double_faults) AS avg_dfs,
+                    COUNT(*)               AS sample_size
+                FROM match_serve_stats mss
+                JOIN matches m  ON mss.match_id = m.id
+                JOIN surfaces s ON m.surface_id = s.id
+                WHERE mss.player_id = %s
+                  AND s.name ILIKE %s
+                  AND m.event_date > NOW() - INTERVAL '24 months'
+                HAVING COUNT(*) >= 3
+            """, (player_id, surf_pattern))
+            row = cur.fetchone()
+        if row is None:
+            return None, None, 0
+        avg_aces = float(row['avg_aces']) if row['avg_aces'] is not None else None
+        avg_dfs  = float(row['avg_dfs'])  if row['avg_dfs']  is not None else None
+        sample   = int(row['sample_size'])
+        return avg_aces, avg_dfs, sample
+    except Exception:
+        return None, None, 0
+
+
 def describe_factor(feature: str, value: float, importance: float) -> dict:
     """Build a factor card for the Intelligence tab."""
     label = FACTOR_LABELS.get(feature, feature.replace('_', ' ').title())
@@ -815,16 +856,23 @@ class LivePredictor:
                 cur.execute("""
                     INSERT INTO model_predictions
                         (match_id, prob_first_player, prob_second_player, confidence,
-                         predicted_winner, key_factors, model_version)
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+                         predicted_winner, key_factors, model_version,
+                         expected_aces_p1, expected_aces_p2, expected_aces_combined,
+                         expected_dfs_p1, expected_dfs_p2)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (match_id) DO UPDATE SET
-                        prob_first_player  = EXCLUDED.prob_first_player,
-                        prob_second_player = EXCLUDED.prob_second_player,
-                        confidence         = EXCLUDED.confidence,
-                        predicted_winner   = EXCLUDED.predicted_winner,
-                        key_factors        = EXCLUDED.key_factors,
-                        model_version      = EXCLUDED.model_version,
-                        predicted_at       = NOW()
+                        prob_first_player       = EXCLUDED.prob_first_player,
+                        prob_second_player      = EXCLUDED.prob_second_player,
+                        confidence              = EXCLUDED.confidence,
+                        predicted_winner        = EXCLUDED.predicted_winner,
+                        key_factors             = EXCLUDED.key_factors,
+                        model_version           = EXCLUDED.model_version,
+                        expected_aces_p1        = EXCLUDED.expected_aces_p1,
+                        expected_aces_p2        = EXCLUDED.expected_aces_p2,
+                        expected_aces_combined  = EXCLUDED.expected_aces_combined,
+                        expected_dfs_p1         = EXCLUDED.expected_dfs_p1,
+                        expected_dfs_p2         = EXCLUDED.expected_dfs_p2,
+                        predicted_at            = NOW()
                 """, (
                     prediction['match_id'],
                     prediction['prob_first_player'],
@@ -833,6 +881,11 @@ class LivePredictor:
                     prediction['predicted_winner'],
                     json.dumps(clean_factors),
                     prediction['model_version'],
+                    prediction.get('expected_aces_p1'),
+                    prediction.get('expected_aces_p2'),
+                    prediction.get('expected_aces_combined'),
+                    prediction.get('expected_dfs_p1'),
+                    prediction.get('expected_dfs_p2'),
                 ))
             # Only auto-commit when this call owns the connection. When
             # predict_upcoming holds a persistent self._write_conn, defer
@@ -1078,6 +1131,39 @@ class LivePredictor:
                 """, (pids,))
                 for r in cur.fetchall():
                     rank_by_pid[r['pid']] = (r['rank'], r['rank_pts'])
+
+            # ── Bulk ace / double-fault prefetch from match_serve_stats
+            # Groups by (player_id, surface) over last 24 months.
+            # Table may not exist in all environments — fail soft.
+            ace_by_pid_surf: dict[tuple[int, str], tuple[Optional[float], Optional[float]]] = {}
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT
+                            mss.player_id,
+                            LOWER(s.name)          AS surface,
+                            AVG(mss.aces)          AS avg_aces,
+                            AVG(mss.double_faults) AS avg_dfs,
+                            COUNT(*)               AS n
+                        FROM match_serve_stats mss
+                        JOIN matches m  ON mss.match_id = m.id
+                        JOIN surfaces s ON m.surface_id = s.id
+                        WHERE mss.player_id = ANY(%s)
+                          AND m.event_date > NOW() - INTERVAL '24 months'
+                        GROUP BY mss.player_id, LOWER(s.name)
+                        HAVING COUNT(*) >= 3
+                    """, (pids,))
+                    for r in cur.fetchall():
+                        key = (r['player_id'], r['surface'])
+                        ace_by_pid_surf[key] = (
+                            float(r['avg_aces']) if r['avg_aces'] is not None else None,
+                            float(r['avg_dfs'])  if r['avg_dfs']  is not None else None,
+                        )
+                log.info(f"  Ace stats prefetched for {len(ace_by_pid_surf)} player/surface combinations")
+            except Exception as e:
+                log.warning(f"  Ace prefetch skipped (match_serve_stats may not exist): {e}")
+                ace_by_pid_surf = {}
+
         finally:
             conn.close()
 
@@ -1091,6 +1177,7 @@ class LivePredictor:
         # SQL if a cache isn't populated).
         self._odds_by_mid = odds_by_mid
         self._rtt_by_pid = rtt_by_pid if rtt_by_pid else None
+        self._ace_by_pid_surf = ace_by_pid_surf
         # Persistent write connection — eliminates per-match reconnect.
         self._write_conn = psycopg2.connect(self.db_url)
 
@@ -1122,6 +1209,24 @@ class LivePredictor:
                     p2_hand      = match.get('p2_hand'),
                     match_date   = event_date,
                 )
+
+                # ── Ace / DF expectations from prefetched match_serve_stats averages
+                _surf_key = (match.get('surface') or '').lower() or '%'
+                _ace_cache = getattr(self, '_ace_by_pid_surf', {})
+                exp_aces_p1, exp_dfs_p1 = _ace_cache.get(
+                    (match['first_player_id'],  _surf_key), (None, None))
+                exp_aces_p2, exp_dfs_p2 = _ace_cache.get(
+                    (match['second_player_id'], _surf_key), (None, None))
+                pred['expected_aces_p1'] = exp_aces_p1
+                pred['expected_aces_p2'] = exp_aces_p2
+                pred['expected_aces_combined'] = (
+                    round(exp_aces_p1 + exp_aces_p2, 2)
+                    if exp_aces_p1 is not None and exp_aces_p2 is not None
+                    else None
+                )
+                pred['expected_dfs_p1'] = exp_dfs_p1
+                pred['expected_dfs_p2'] = exp_dfs_p2
+
                 self.write_prediction(pred)
                 self._write_conn.commit()  # commit per row so partial runs persist
                 predicted += 1

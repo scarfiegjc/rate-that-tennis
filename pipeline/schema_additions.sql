@@ -72,6 +72,14 @@ ALTER TABLE model_predictions
     ADD COLUMN IF NOT EXISTS analogue_description  TEXT,
     ADD COLUMN IF NOT EXISTS bet_recommendations   JSONB;
 
+-- Ace / double-fault prediction columns (populated by ml/predict.py)
+ALTER TABLE model_predictions
+    ADD COLUMN IF NOT EXISTS expected_aces_p1       FLOAT,
+    ADD COLUMN IF NOT EXISTS expected_aces_p2       FLOAT,
+    ADD COLUMN IF NOT EXISTS expected_aces_combined FLOAT,
+    ADD COLUMN IF NOT EXISTS expected_dfs_p1        FLOAT,
+    ADD COLUMN IF NOT EXISTS expected_dfs_p2        FLOAT;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. bookmaker_odds — for edge calculation
 -- ─────────────────────────────────────────────────────────────────────────────

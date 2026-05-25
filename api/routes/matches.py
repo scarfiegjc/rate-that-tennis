@@ -371,6 +371,71 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
         import logging
         logging.getLogger("api.matches").warning(f"player_match_metrics failed: {e}")
 
+    # Clutch / point stats — from player_point_stats (production data, point-by-point)
+    def _clutch_stats(player_id: int) -> dict:
+        try:
+            row = query_one(
+                """
+                SELECT service_hold_pct, bp_save_pct, bp_conversion_pct,
+                       love_hold_pct, avg_service_game_pts,
+                       tiebreak_win_pct, pressure_win_pct, match_point_save_pct,
+                       set_point_save_pct, set1_recovery_pct,
+                       longest_game_run, matches_analyzed
+                FROM player_point_stats
+                WHERE player_id = %s
+                """,
+                (player_id,),
+            )
+            return dict(row) if row else {}
+        except Exception:
+            return {}
+
+    p1_clutch_stats = _clutch_stats(p1_id)
+    p2_clutch_stats = _clutch_stats(p2_id)
+
+    # Serve zones — from serve_zones table (charting project data, normalized)
+    def _serve_zones(player_id: int, surface_id) -> list:
+        try:
+            if surface_id is None:
+                rows = query(
+                    """
+                    SELECT sz.serve_number, sz.court_side, sz.zone, sz.pct, sz.sample_size
+                    FROM serve_zones sz
+                    WHERE sz.player_id = %s AND sz.surface_id IS NULL
+                    ORDER BY sz.serve_number, sz.court_side, sz.zone
+                    """,
+                    (player_id,),
+                )
+            else:
+                rows = query(
+                    """
+                    SELECT sz.serve_number, sz.court_side, sz.zone, sz.pct, sz.sample_size,
+                           s.name as surface_name
+                    FROM serve_zones sz
+                    JOIN surfaces s ON sz.surface_id = s.id
+                    WHERE sz.player_id = %s AND sz.surface_id = %s
+                    ORDER BY sz.serve_number, sz.court_side, sz.zone
+                    """,
+                    (player_id, surface_id),
+                )
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    # Resolve surface_id from the match surface name
+    surface_id_row = None
+    try:
+        surface_id_row = query_one(
+            "SELECT id FROM surfaces WHERE name ILIKE %s LIMIT 1",
+            (f"%{surface_name}%",),
+        ) if surface_name else None
+    except Exception:
+        pass
+    surface_id = surface_id_row["id"] if surface_id_row else None
+
+    p1_serve_zones = _serve_zones(p1_id, surface_id)
+    p2_serve_zones = _serve_zones(p2_id, surface_id)
+
     # Prediction
     pred = query_one(
         """
@@ -442,6 +507,10 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
         "prediction": pred,
         "market": odds,
         "edge": edge,
+        "p1_clutch_stats": p1_clutch_stats,
+        "p2_clutch_stats": p2_clutch_stats,
+        "p1_serve_zones": p1_serve_zones,
+        "p2_serve_zones": p2_serve_zones,
     }
 
 

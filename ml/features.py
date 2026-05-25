@@ -39,6 +39,11 @@ import psycopg2.extras
 
 from ml.elo import EloEngine, SURFACE_MAP, ALL_SURFACES
 
+try:
+    from pipeline.aging_curve import age_factor as _age_factor
+except ImportError:
+    def _age_factor(age): return 1.0
+
 log = logging.getLogger("rtt-features")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -423,6 +428,63 @@ class FeatureBuilder:
             log.warning(f"  Could not load player_ratings_history: {e}")
             return {}
 
+    def _load_point_stats(self, engine) -> dict:
+        """
+        Load player_point_stats into a dict: player_id → stats dict.
+        Returns empty dict if the table is empty or unavailable.
+        """
+        try:
+            from sqlalchemy import text as sa_text
+            with engine.connect() as conn:
+                df_ps = pd.read_sql(sa_text("""
+                    SELECT player_id, tiebreak_win_pct, pressure_win_pct,
+                           match_point_save_pct, bp_save_pct, bp_conversion_pct
+                    FROM player_point_stats
+                """), conn)
+            if df_ps.empty:
+                return {}
+            result = {}
+            for _, r in df_ps.iterrows():
+                result[int(r['player_id'])] = {
+                    'tiebreak_win_pct':     r.get('tiebreak_win_pct'),
+                    'pressure_win_pct':     r.get('pressure_win_pct'),
+                    'match_point_save_pct': r.get('match_point_save_pct'),
+                    'bp_save_pct':          r.get('bp_save_pct'),
+                    'bp_conversion_pct':    r.get('bp_conversion_pct'),
+                }
+            log.info(f"  Point stats loaded for {len(result):,} players")
+            return result
+        except Exception as e:
+            log.warning(f"  Could not load player_point_stats: {e}")
+            return {}
+
+    def _load_ms_career_stats(self, engine) -> dict:
+        """
+        Load ms_player_career_stats (slam_winner_ue_ratio) joined via ms_player_links.
+        Returns dict: production player_id → stats dict.
+        """
+        try:
+            from sqlalchemy import text as sa_text
+            with engine.connect() as conn:
+                df_ms = pd.read_sql(sa_text("""
+                    SELECT pl.player_id, cs.slam_winner_ue_ratio
+                    FROM ms_player_links pl
+                    JOIN ms_player_career_stats cs ON cs.ms_player_id = pl.ms_id
+                    WHERE cs.slam_winner_ue_ratio IS NOT NULL
+                """), conn)
+            if df_ms.empty:
+                return {}
+            result = {}
+            for _, r in df_ms.iterrows():
+                result[int(r['player_id'])] = {
+                    'slam_winner_ue_ratio': r.get('slam_winner_ue_ratio'),
+                }
+            log.info(f"  MS career stats loaded for {len(result):,} players")
+            return result
+        except Exception as e:
+            log.warning(f"  Could not load ms_player_career_stats: {e}")
+            return {}
+
     # ─────────────────────────────────────────
     # BUILD
     # ─────────────────────────────────────────
@@ -458,11 +520,15 @@ class FeatureBuilder:
             from sqlalchemy import create_engine
             _engine = create_engine(self.db_url)
             rtt_history = self._load_rtt_history(_engine)
+            point_stats = self._load_point_stats(_engine)
+            ms_career   = self._load_ms_career_stats(_engine)
         except Exception:
             rtt_history = {}
+            point_stats = {}
+            ms_career   = {}
 
         log.info("Building rolling stats and H2H features ...")
-        rows = self._build_rows(df, elo_df, random_seed, rtt_history)
+        rows = self._build_rows(df, elo_df, random_seed, rtt_history, point_stats, ms_career)
 
         result = pd.DataFrame(rows)
         log.info(f"Feature matrix: {len(result):,} rows × {len(result.columns)} columns")
@@ -485,10 +551,14 @@ class FeatureBuilder:
         elo_df: pd.DataFrame,
         random_seed: int,
         rtt_history: Optional[dict] = None,
+        point_stats: Optional[dict] = None,
+        ms_career: Optional[dict] = None,
     ) -> list[dict]:
         """Core loop: iterate matches chronologically, build features, then update trackers."""
 
         rtt_history = rtt_history or {}
+        point_stats = point_stats or {}
+        ms_career   = ms_career   or {}
 
         def _lookup_rtt(player_id: int, match_date) -> dict:
             """Return the most recent RTT ratings for player before match_date."""
@@ -567,6 +637,37 @@ class FeatureBuilder:
             p2_ht    = match['loser_ht']     if p1_is_winner else match['winner_ht']
             p1_hand  = match['winner_hand']  if p1_is_winner else match['loser_hand']
             p2_hand  = match['loser_hand']   if p1_is_winner else match['winner_hand']
+
+            # Aging curve
+            p1_age_factor  = _age_factor(p1_age)
+            p2_age_factor  = _age_factor(p2_age)
+
+            # Clutch / pressure stats from player_point_stats (production player IDs)
+            # Note: sa_matches player IDs may not map to production IDs — these features
+            # will fill with 0.5 (neutral) for most historical training rows, but they
+            # enrich any row where the IDs do match or when used in live predict mode.
+            def _ps_val(pid: int, key: str, default: float = 0.5) -> float:
+                ps = point_stats.get(int(pid), {})
+                v  = ps.get(key)
+                if v is None:
+                    return default
+                return float(v) / 100.0  # stored as 0-100, normalise to 0-1
+
+            p1_tiebreak_pct   = _ps_val(p1_id, 'tiebreak_win_pct')
+            p2_tiebreak_pct   = _ps_val(p2_id, 'tiebreak_win_pct')
+            p1_pressure_pct   = _ps_val(p1_id, 'pressure_win_pct')
+            p2_pressure_pct   = _ps_val(p2_id, 'pressure_win_pct')
+            p1_match_save_pct = _ps_val(p1_id, 'match_point_save_pct')
+            p2_match_save_pct = _ps_val(p2_id, 'match_point_save_pct')
+
+            # Slam WUE ratio from ms_player_career_stats
+            def _ms_val(pid: int, key: str, default: float = 1.5) -> float:
+                ms = ms_career.get(int(pid), {})
+                v  = ms.get(key)
+                return float(v) if v is not None else default
+
+            p1_slam_wue = _ms_val(p1_id, 'slam_winner_ue_ratio')
+            p2_slam_wue = _ms_val(p2_id, 'slam_winner_ue_ratio')
 
             # Seeding
             w_seed = match.get('winner_seed')
@@ -676,6 +777,27 @@ class FeatureBuilder:
                 'age_diff':         diff(p1_age, p2_age),
                 'height_diff':      diff(p1_ht, p2_ht),
                 'hand_enc':         HAND_ENCODE.get((p1_hand, p2_hand), 0),
+
+                # ── Aging curve
+                'p1_age_factor':    p1_age_factor,
+                'p2_age_factor':    p2_age_factor,
+                'age_factor_diff':  p1_age_factor - p2_age_factor,
+
+                # ── Clutch / pressure (from player_point_stats)
+                'p1_tiebreak_pct':    p1_tiebreak_pct,
+                'p2_tiebreak_pct':    p2_tiebreak_pct,
+                'tiebreak_pct_diff':  p1_tiebreak_pct - p2_tiebreak_pct,
+                'p1_pressure_pct':    p1_pressure_pct,
+                'p2_pressure_pct':    p2_pressure_pct,
+                'pressure_pct_diff':  p1_pressure_pct - p2_pressure_pct,
+                'p1_match_save_pct':  p1_match_save_pct,
+                'p2_match_save_pct':  p2_match_save_pct,
+                'match_save_diff':    p1_match_save_pct - p2_match_save_pct,
+
+                # ── Slam winner/UE ratio (from ms_player_career_stats)
+                'p1_slam_wue':      p1_slam_wue,
+                'p2_slam_wue':      p2_slam_wue,
+                'slam_wue_diff':    p1_slam_wue - p2_slam_wue,
 
                 # ── Rolling form (p1)
                 **{f'p1_{k}': v for k, v in p1_w.items()},
