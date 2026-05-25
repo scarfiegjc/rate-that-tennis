@@ -649,6 +649,12 @@ def ingest_charting_matches(conn, repo_dir: Path, tour: str):
             ))
 
     if rows:
+        # Deduplicate by match_id — CSV may contain duplicate rows for the same match
+        seen = {}
+        for r in rows:
+            seen[r[0]] = r  # r[0] is match_id; last writer wins
+        rows = list(seen.values())
+
         with conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, """
                 INSERT INTO sa_charting_matches
