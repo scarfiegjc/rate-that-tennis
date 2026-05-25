@@ -676,13 +676,24 @@ def ingest_charting_matches(conn, repo_dir: Path, tour: str):
 def ingest_charting_points(conn, repo_dir: Path, tour: str):
     """
     Load point-by-point charting data.
-    The repo splits points into decade files (charting-m-points-2010s.csv etc.)
+    The MCP repo splits points into decade files (charting-m-points-2010s.csv etc.)
     OR provides a single charting-m-points.csv. We handle both.
+
+    MCP CSV columns used: match_id, Svr, 1st, 2nd, PtWinner, isBreakPt, isSetPt, isMatchPt
+    Serve direction is encoded in first char of '1st'/'2nd':
+        4=wide/deuce  5=body/deuce  6=T/deuce
+        7=wide/ad     8=body/ad     9=T/ad
+    If '2nd' has content, the first serve was a fault → serve_no=2.
     """
+    # MCP serve direction code → (serve_dir, court_side)
+    SERVE_CODES = {
+        '4': ('W', 'deuce'), '5': ('B', 'deuce'), '6': ('T', 'deuce'),
+        '7': ('W', 'ad'),    '8': ('B', 'ad'),    '9': ('T', 'ad'),
+    }
+
     gender = "m" if tour == "ATP" else "w"
 
     # Collect all matching points files (single or decade-split)
-    import glob as _glob
     all_files = sorted(repo_dir.glob(f"charting-{gender}-points*.csv"))
     if not all_files:
         log.warning(f"  No charting points files found for {tour} in {repo_dir}")
@@ -700,23 +711,25 @@ def ingest_charting_points(conn, repo_dir: Path, tour: str):
         file_processed = file_skipped = file_inserted = 0
         CHUNK = 2000
         rows = []
+        match_point_counter: dict = {}  # match_id → sequential point counter
 
         def flush(rows):
-            nonlocal inserted
+            nonlocal inserted, file_inserted
             if not rows:
                 return
             with conn.cursor() as cur:
                 psycopg2.extras.execute_values(cur, """
                     INSERT INTO sa_charting_points (
                         match_id, set_no, game_no, point_no, server, serve_no,
-                        p1_sets, p2_sets, p1_games, p2_games, p1_points, p2_points,
                         is_break_point, is_set_point, is_match_point, point_winner,
-                        shot_sequence, serve_dir, serve_fault, rally_length,
+                        shot_sequence, serve_dir, court_side, serve_fault, rally_length,
                         point_end_type, last_shot_type, last_shot_dir
                     ) VALUES %s
                     ON CONFLICT (match_id, set_no, game_no, point_no, serve_no) DO NOTHING
                 """, rows, page_size=500)
-                inserted += cur.rowcount
+                n = cur.rowcount
+                inserted += n
+                file_inserted += n
             conn.commit()
 
         with open(fpath, encoding="utf-8", errors="replace") as f:
@@ -726,40 +739,47 @@ def ingest_charting_points(conn, repo_dir: Path, tour: str):
                 processed += 1
 
                 match_id = row.get("match_id", "").strip()
-                if not match_id:
+                server   = to_int(row.get("Svr") or row.get("server") or row.get("Svr "))
+                if not match_id or server is None:
                     file_skipped += 1
                     skipped += 1
                     continue
 
-                set_no   = to_int(row.get("set_no") or row.get("Set"))
-                game_no  = to_int(row.get("game_no") or row.get("game"))
-                point_no = to_int(row.get("point_no") or row.get("point"))
-                serve_no = to_int(row.get("serve_no") or row.get("Serve"))
-                server   = to_int(row.get("server") or row.get("Svr"))
+                # Sequential point counter per match (used as point_no)
+                match_point_counter[match_id] = match_point_counter.get(match_id, 0) + 1
+                point_no = match_point_counter[match_id]
 
-                if not all([set_no, game_no, point_no is not None, serve_no]):
-                    file_skipped += 1
-                    skipped += 1
-                    continue
+                # Determine serve: if 2nd has content, first serve was fault → serve_no=2
+                first_seq  = (row.get("1st") or "").strip()
+                second_seq = (row.get("2nd") or "").strip()
+                if second_seq:
+                    serve_no  = 2
+                    serve_seq = second_seq
+                else:
+                    serve_no  = 1
+                    serve_seq = first_seq
 
-                shot_seq = row.get("1st", "") or row.get("shot_seq", "") or ""
-                parsed = parse_shot_sequence(shot_seq)
+                # Parse direction + court side from MCP serve codes
+                serve_dir = court_side = None
+                if serve_seq and serve_seq[0] in SERVE_CODES:
+                    serve_dir, court_side = SERVE_CODES[serve_seq[0]]
+
+                # Parse rally info from the actual serve sequence
+                parsed = parse_shot_sequence(serve_seq)
 
                 rows.append((
                     match_id,
-                    set_no, game_no, point_no, server, serve_no,
-                    to_int(row.get("p1_sets") or row.get("Sets1")),
-                    to_int(row.get("p2_sets") or row.get("Sets2")),
-                    to_int(row.get("p1_games") or row.get("Games1")),
-                    to_int(row.get("p2_games") or row.get("Games2")),
-                    row.get("p1_points") or row.get("Pts1") or None,
-                    row.get("p2_points") or row.get("Pts2") or None,
-                    bool(to_int(row.get("isBreakPt") or row.get("bp", "0"))),
-                    bool(to_int(row.get("isSetPt") or row.get("sp", "0"))),
-                    bool(to_int(row.get("isMatchPt") or row.get("mp", "0"))),
-                    to_int(row.get("PtWinner") or row.get("pw")),
-                    shot_seq or None,
-                    parsed.get("serve_dir"),
+                    1, 1,           # set_no, game_no — dummies; point_no is unique per match
+                    point_no,
+                    server,
+                    serve_no,
+                    bool(to_int(row.get("isBreakPt") or row.get("isBrk") or "0")),
+                    bool(to_int(row.get("isSetPt") or "0")),
+                    bool(to_int(row.get("isMatchPt") or "0")),
+                    to_int(row.get("PtWinner") or row.get("Pt")),
+                    serve_seq or None,
+                    serve_dir,
+                    court_side,
                     parsed.get("serve_fault", False),
                     parsed.get("rally_length", 0),
                     parsed.get("point_end_type"),

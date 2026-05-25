@@ -192,6 +192,12 @@ BEGIN
     END IF;
 END $$;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- court_side column on sa_charting_points (MCP serve codes encode deuce/ad)
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE sa_charting_points
+    ADD COLUMN IF NOT EXISTS court_side TEXT CHECK (court_side IN ('deuce', 'ad'));
+
 -- Add expected_aces / expected_dfs columns to model_predictions
 ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_aces_p1       FLOAT;
 ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS expected_aces_p2       FLOAT;

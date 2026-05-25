@@ -232,8 +232,7 @@ def aggregate_serve_zones(
                     cp.server,
                     cp.serve_no,
                     cp.serve_dir,
-                    cp.set_no,
-                    cp.game_no,
+                    cp.court_side,
                     cm.server1,
                     cm.server2,
                     cm.surface
@@ -242,6 +241,7 @@ def aggregate_serve_zones(
                 WHERE
                     cp.serve_dir IS NOT NULL
                     AND cp.serve_dir IN ('T', 'B', 'W')
+                    AND cp.court_side IS NOT NULL
                     AND cp.serve_no IN (1, 2)
                     AND (cp.serve_fault IS NULL OR cp.serve_fault = FALSE)
             ),
@@ -252,9 +252,7 @@ def aggregate_serve_zones(
                     surface,
                     CASE WHEN server = 1 THEN server1 ELSE server2 END AS player_name,
                     serve_no,
-                    -- Court side from game number: odd game = deuce, even game = ad
-                    -- (game 1 in a set is server's first service game)
-                    CASE WHEN (game_no % 2) = 1 THEN 'deuce' ELSE 'ad' END AS court_side,
+                    court_side,
                     serve_dir
                 FROM point_data
             )
@@ -280,12 +278,13 @@ def aggregate_serve_zones(
                     NULL::TEXT AS surface,
                     cp.server,
                     cp.serve_no,
-                    CASE WHEN (cp.game_no % 2) = 1 THEN 'deuce' ELSE 'ad' END AS court_side,
+                    cp.court_side,
                     cp.serve_dir
                 FROM sa_charting_points cp
                 WHERE
                     cp.serve_dir IS NOT NULL
                     AND cp.serve_dir IN ('T', 'B', 'W')
+                    AND cp.court_side IS NOT NULL
                     AND cp.serve_no IN (1, 2)
                     AND (cp.serve_fault IS NULL OR cp.serve_fault = FALSE)
             )
