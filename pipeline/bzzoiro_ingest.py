@@ -895,7 +895,7 @@ def sync_rankings(conn: psycopg2.extensions.connection) -> int:
                 SET current_rank   = d.pos,
                     ranking_points = d.pts,
                     updated_at     = NOW()
-                FROM (VALUES %s) AS d(bzz_pid TEXT, full_name TEXT, pos INT, pts INT)
+                FROM (VALUES %s) AS d(bzz_pid, full_name, pos, pts)
                 JOIN player_external_ids ei
                   ON ei.source = 'bzzoiro' AND ei.external_id = d.bzz_pid
                 WHERE p.id = ei.player_id
