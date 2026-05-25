@@ -440,7 +440,9 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
     pred = query_one(
         """
         SELECT prob_first_player, prob_second_player, confidence,
-               key_factors, narrative, analogue_description, bet_recommendations
+               key_factors, narrative, analogue_description, bet_recommendations,
+               expected_aces_p1, expected_aces_p2, expected_aces_combined,
+               expected_dfs_p1, expected_dfs_p2
         FROM model_predictions
         WHERE match_id = %s
         """,
@@ -550,6 +552,11 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             mp.prob_first_player,
             mp.prob_second_player,
             mp.confidence,
+            mp.expected_aces_p1,
+            mp.expected_aces_p2,
+            mp.expected_aces_combined,
+            mp.expected_dfs_p1,
+            mp.expected_dfs_p2,
             ms.set_scores,
             bo1.decimal_odds AS odds_p1,
             bo1.implied_prob AS impl_p1,
@@ -646,6 +653,11 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
                 "confidence": m.get("confidence"),
                 "edge_first":  e_p1,
                 "edge_second": e_p2,
+                "expected_aces_p1":      float(m["expected_aces_p1"])      if m.get("expected_aces_p1")      else None,
+                "expected_aces_p2":      float(m["expected_aces_p2"])      if m.get("expected_aces_p2")      else None,
+                "expected_aces_combined": float(m["expected_aces_combined"]) if m.get("expected_aces_combined") else None,
+                "expected_dfs_p1":       float(m["expected_dfs_p1"])       if m.get("expected_dfs_p1")       else None,
+                "expected_dfs_p2":       float(m["expected_dfs_p2"])       if m.get("expected_dfs_p2")       else None,
             },
             "market": {
                 "odds_first_player": float(m["odds_p1"]) if m.get("odds_p1") else None,
