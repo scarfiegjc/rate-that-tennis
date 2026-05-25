@@ -56,6 +56,13 @@ import psycopg2
 import psycopg2.extras
 import requests
 
+# Load .env if present (local dev / .command runner — Railway injects env vars directly)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — rely on env vars being set externally
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────

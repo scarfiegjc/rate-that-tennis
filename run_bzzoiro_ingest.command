@@ -14,6 +14,14 @@ pip3 install requests psycopg2-binary python-dotenv \
   --quiet --break-system-packages 2>/dev/null || \
 pip3 install requests psycopg2-binary python-dotenv --quiet
 
+# Load .env for local runs
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 echo ""
 
 # Default to last 30 days if no args

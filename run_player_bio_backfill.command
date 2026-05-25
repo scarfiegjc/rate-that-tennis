@@ -14,6 +14,8 @@ pip3 install requests psycopg2-binary python-dotenv \
   --quiet --break-system-packages 2>/dev/null || \
 pip3 install requests psycopg2-binary python-dotenv --quiet
 
+if [ -f .env ]; then set -a; source .env; set +a; fi
+
 echo ""
 echo "Running player bio backfill from Sackmann data..."
 python3 -m pipeline.player_bio_backfill --verbose

@@ -18,6 +18,8 @@ pip3 install requests psycopg2-binary python-dotenv \
   --quiet --break-system-packages 2>/dev/null || \
 pip3 install requests psycopg2-binary python-dotenv --quiet
 
+if [ -f .env ]; then set -a; source .env; set +a; fi
+
 echo ""
 echo "Checking sa_charting_points..."
 python3 -c "
