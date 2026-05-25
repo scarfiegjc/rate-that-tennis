@@ -676,98 +676,108 @@ def ingest_charting_matches(conn, repo_dir: Path, tour: str):
 def ingest_charting_points(conn, repo_dir: Path, tour: str):
     """
     Load point-by-point charting data.
-    This is a large file (~4M rows for men). We process in streaming chunks.
+    The repo splits points into decade files (charting-m-points-2010s.csv etc.)
+    OR provides a single charting-m-points.csv. We handle both.
     """
     gender = "m" if tour == "ATP" else "w"
-    fname = f"charting-{gender}-points.csv"
-    fpath = repo_dir / fname
 
-    if not fpath.exists():
-        log.warning(f"  Charting points file not found: {fpath}")
+    # Collect all matching points files (single or decade-split)
+    import glob as _glob
+    all_files = sorted(repo_dir.glob(f"charting-{gender}-points*.csv"))
+    if not all_files:
+        log.warning(f"  No charting points files found for {tour} in {repo_dir}")
         return
 
-    if already_loaded(conn, "CHARTING_" + tour, fname):
-        log.info(f"  Skipping {fname} (already loaded)")
-        return
-
-    log.info(f"  Loading {fname} (this may take a few minutes) ...")
     processed = inserted = skipped = 0
-    CHUNK = 2000
 
-    def flush(rows):
-        nonlocal inserted
-        if not rows:
-            return
-        with conn.cursor() as cur:
-            psycopg2.extras.execute_values(cur, """
-                INSERT INTO sa_charting_points (
-                    match_id, set_no, game_no, point_no, server, serve_no,
-                    p1_sets, p2_sets, p1_games, p2_games, p1_points, p2_points,
-                    is_break_point, is_set_point, is_match_point, point_winner,
-                    shot_sequence, serve_dir, serve_fault, rally_length,
-                    point_end_type, last_shot_type, last_shot_dir
-                ) VALUES %s
-                ON CONFLICT (match_id, set_no, game_no, point_no, serve_no) DO NOTHING
-            """, rows, page_size=500)
-            inserted += cur.rowcount
-        conn.commit()
+    for fpath in all_files:
+        fname = fpath.name
+        if already_loaded(conn, "CHARTING_" + tour, fname):
+            log.info(f"  Skipping {fname} (already loaded)")
+            continue
 
-    rows = []
-    with open(fpath, encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            processed += 1
+        log.info(f"  Loading {fname} (this may take a few minutes) ...")
+        file_processed = file_skipped = file_inserted = 0
+        CHUNK = 2000
+        rows = []
 
-            match_id = row.get("match_id", "").strip()
-            if not match_id:
-                skipped += 1
-                continue
+        def flush(rows):
+            nonlocal inserted
+            if not rows:
+                return
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_values(cur, """
+                    INSERT INTO sa_charting_points (
+                        match_id, set_no, game_no, point_no, server, serve_no,
+                        p1_sets, p2_sets, p1_games, p2_games, p1_points, p2_points,
+                        is_break_point, is_set_point, is_match_point, point_winner,
+                        shot_sequence, serve_dir, serve_fault, rally_length,
+                        point_end_type, last_shot_type, last_shot_dir
+                    ) VALUES %s
+                    ON CONFLICT (match_id, set_no, game_no, point_no, serve_no) DO NOTHING
+                """, rows, page_size=500)
+                inserted += cur.rowcount
+            conn.commit()
 
-            # Check this match_id exists in sa_charting_matches
-            set_no   = to_int(row.get("set_no") or row.get("Set"))
-            game_no  = to_int(row.get("game_no") or row.get("game"))
-            point_no = to_int(row.get("point_no") or row.get("point"))
-            serve_no = to_int(row.get("serve_no") or row.get("Serve"))
-            server   = to_int(row.get("server") or row.get("Svr"))
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                file_processed += 1
+                processed += 1
 
-            if not all([set_no, game_no, point_no is not None, serve_no]):
-                skipped += 1
-                continue
+                match_id = row.get("match_id", "").strip()
+                if not match_id:
+                    file_skipped += 1
+                    skipped += 1
+                    continue
 
-            shot_seq = row.get("1st", "") or row.get("shot_seq", "") or ""
-            parsed = parse_shot_sequence(shot_seq)
+                set_no   = to_int(row.get("set_no") or row.get("Set"))
+                game_no  = to_int(row.get("game_no") or row.get("game"))
+                point_no = to_int(row.get("point_no") or row.get("point"))
+                serve_no = to_int(row.get("serve_no") or row.get("Serve"))
+                server   = to_int(row.get("server") or row.get("Svr"))
 
-            rows.append((
-                match_id,
-                set_no, game_no, point_no, server, serve_no,
-                to_int(row.get("p1_sets") or row.get("Sets1")),
-                to_int(row.get("p2_sets") or row.get("Sets2")),
-                to_int(row.get("p1_games") or row.get("Games1")),
-                to_int(row.get("p2_games") or row.get("Games2")),
-                row.get("p1_points") or row.get("Pts1") or None,
-                row.get("p2_points") or row.get("Pts2") or None,
-                bool(to_int(row.get("isBreakPt") or row.get("bp", "0"))),
-                bool(to_int(row.get("isSetPt") or row.get("sp", "0"))),
-                bool(to_int(row.get("isMatchPt") or row.get("mp", "0"))),
-                to_int(row.get("PtWinner") or row.get("pw")),
-                shot_seq or None,
-                parsed.get("serve_dir"),
-                parsed.get("serve_fault", False),
-                parsed.get("rally_length", 0),
-                parsed.get("point_end_type"),
-                parsed.get("last_shot_type"),
-                parsed.get("last_shot_dir"),
-            ))
+                if not all([set_no, game_no, point_no is not None, serve_no]):
+                    file_skipped += 1
+                    skipped += 1
+                    continue
 
-            if len(rows) >= CHUNK:
-                flush(rows)
-                rows = []
-                if processed % 100000 == 0:
-                    log.info(f"    ... {processed:,} points processed, {inserted:,} inserted")
+                shot_seq = row.get("1st", "") or row.get("shot_seq", "") or ""
+                parsed = parse_shot_sequence(shot_seq)
 
-    flush(rows)
-    log.info(f"    {fname}: {processed:,} processed, {inserted:,} inserted, {skipped:,} skipped")
-    log_ingest(conn, "CHARTING_" + tour, fname, "success", processed, inserted, skipped)
+                rows.append((
+                    match_id,
+                    set_no, game_no, point_no, server, serve_no,
+                    to_int(row.get("p1_sets") or row.get("Sets1")),
+                    to_int(row.get("p2_sets") or row.get("Sets2")),
+                    to_int(row.get("p1_games") or row.get("Games1")),
+                    to_int(row.get("p2_games") or row.get("Games2")),
+                    row.get("p1_points") or row.get("Pts1") or None,
+                    row.get("p2_points") or row.get("Pts2") or None,
+                    bool(to_int(row.get("isBreakPt") or row.get("bp", "0"))),
+                    bool(to_int(row.get("isSetPt") or row.get("sp", "0"))),
+                    bool(to_int(row.get("isMatchPt") or row.get("mp", "0"))),
+                    to_int(row.get("PtWinner") or row.get("pw")),
+                    shot_seq or None,
+                    parsed.get("serve_dir"),
+                    parsed.get("serve_fault", False),
+                    parsed.get("rally_length", 0),
+                    parsed.get("point_end_type"),
+                    parsed.get("last_shot_type"),
+                    parsed.get("last_shot_dir"),
+                ))
+
+                if len(rows) >= CHUNK:
+                    flush(rows)
+                    rows = []
+                    if processed % 100000 == 0:
+                        log.info(f"    ... {processed:,} points processed, {inserted:,} inserted")
+
+        flush(rows)
+        log.info(f"    {fname}: {file_processed:,} processed, {file_inserted:,} inserted, {file_skipped:,} skipped")
+        log_ingest(conn, "CHARTING_" + tour, fname, "success", file_processed, file_inserted, file_skipped)
+
+    log.info(f"  {tour} charting points total: {processed:,} processed, {inserted:,} inserted, {skipped:,} skipped")
 
 
 # ─────────────────────────────────────────────
