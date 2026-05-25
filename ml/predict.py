@@ -160,27 +160,43 @@ def _compute_expected_aces(
     Compute expected ace and double-fault totals for a player on a given surface
     using the last 24 months of match_serve_stats data.
 
+    match_serve_stats uses p1/p2 column layout (not per-player rows); surface is
+    reached via matches → tournaments → surfaces.
+
     Returns (avg_aces, avg_dfs, sample_size).
     Returns (None, None, 0) if the table is absent or sample_size < 3.
     """
     if player_id is None:
         return None, None, 0
-    surf_pattern = surface_name if surface_name else '%'
+    surf_filter = "AND s.name ILIKE %s" if surface_name else ""
+    surf_params = [surface_name] if surface_name else []
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    AVG(mss.aces)          AS avg_aces,
-                    AVG(mss.double_faults) AS avg_dfs,
-                    COUNT(*)               AS sample_size
-                FROM match_serve_stats mss
-                JOIN matches m  ON mss.match_id = m.id
-                JOIN surfaces s ON m.surface_id = s.id
-                WHERE mss.player_id = %s
-                  AND s.name ILIKE %s
-                  AND m.event_date > NOW() - INTERVAL '24 months'
+            cur.execute(f"""
+                SELECT AVG(ace_val) AS avg_aces, AVG(df_val) AS avg_dfs, COUNT(*) AS sample_size
+                FROM (
+                    SELECT mss.p1_aces AS ace_val, mss.p1_double_faults AS df_val
+                    FROM match_serve_stats mss
+                    JOIN matches m ON mss.match_id = m.id
+                    JOIN tournaments t ON m.tournament_id = t.id
+                    JOIN surfaces s ON t.surface_id = s.id
+                    WHERE m.first_player_id = %s
+                      {surf_filter}
+                      AND m.event_date > NOW() - INTERVAL '24 months'
+                      AND mss.p1_aces IS NOT NULL
+                    UNION ALL
+                    SELECT mss.p2_aces, mss.p2_double_faults
+                    FROM match_serve_stats mss
+                    JOIN matches m ON mss.match_id = m.id
+                    JOIN tournaments t ON m.tournament_id = t.id
+                    JOIN surfaces s ON t.surface_id = s.id
+                    WHERE m.second_player_id = %s
+                      {surf_filter}
+                      AND m.event_date > NOW() - INTERVAL '24 months'
+                      AND mss.p2_aces IS NOT NULL
+                ) combined
                 HAVING COUNT(*) >= 3
-            """, (player_id, surf_pattern))
+            """, [player_id] + surf_params + [player_id] + surf_params)
             row = cur.fetchone()
         if row is None:
             return None, None, 0
@@ -1133,26 +1149,43 @@ class LivePredictor:
                     rank_by_pid[r['pid']] = (r['rank'], r['rank_pts'])
 
             # ── Bulk ace / double-fault prefetch from match_serve_stats
-            # Groups by (player_id, surface) over last 24 months.
-            # Table may not exist in all environments — fail soft.
+            # match_serve_stats uses p1/p2 columns — surface via tournaments.
+            # We UNION both sides to get per-player stats, then group by player/surface.
+            # Fail soft if the table doesn't exist.
             ace_by_pid_surf: dict[tuple[int, str], tuple[Optional[float], Optional[float]]] = {}
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT
-                            mss.player_id,
-                            LOWER(s.name)          AS surface,
-                            AVG(mss.aces)          AS avg_aces,
-                            AVG(mss.double_faults) AS avg_dfs,
-                            COUNT(*)               AS n
-                        FROM match_serve_stats mss
-                        JOIN matches m  ON mss.match_id = m.id
-                        JOIN surfaces s ON m.surface_id = s.id
-                        WHERE mss.player_id = ANY(%s)
-                          AND m.event_date > NOW() - INTERVAL '24 months'
-                        GROUP BY mss.player_id, LOWER(s.name)
+                        SELECT player_id, surface, AVG(ace_val) AS avg_aces,
+                               AVG(df_val) AS avg_dfs, COUNT(*) AS n
+                        FROM (
+                            SELECT m.first_player_id AS player_id,
+                                   LOWER(s.name) AS surface,
+                                   mss.p1_aces AS ace_val,
+                                   mss.p1_double_faults AS df_val
+                            FROM match_serve_stats mss
+                            JOIN matches m ON mss.match_id = m.id
+                            JOIN tournaments t ON m.tournament_id = t.id
+                            JOIN surfaces s ON t.surface_id = s.id
+                            WHERE m.first_player_id = ANY(%s)
+                              AND m.event_date > NOW() - INTERVAL '24 months'
+                              AND mss.p1_aces IS NOT NULL
+                            UNION ALL
+                            SELECT m.second_player_id,
+                                   LOWER(s.name),
+                                   mss.p2_aces,
+                                   mss.p2_double_faults
+                            FROM match_serve_stats mss
+                            JOIN matches m ON mss.match_id = m.id
+                            JOIN tournaments t ON m.tournament_id = t.id
+                            JOIN surfaces s ON t.surface_id = s.id
+                            WHERE m.second_player_id = ANY(%s)
+                              AND m.event_date > NOW() - INTERVAL '24 months'
+                              AND mss.p2_aces IS NOT NULL
+                        ) combined
+                        GROUP BY player_id, surface
                         HAVING COUNT(*) >= 3
-                    """, (pids,))
+                    """, (pids, pids))
                     for r in cur.fetchall():
                         key = (r['player_id'], r['surface'])
                         ace_by_pid_surf[key] = (

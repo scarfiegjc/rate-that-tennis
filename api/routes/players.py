@@ -366,7 +366,8 @@ def get_player(player_id: int):
     ratings = _augment_ratings_from_ms_career(ratings, ms_career)
 
     # Career serve averages by surface from match_serve_stats (Bzzoiro data).
-    # Table may not exist on all environments — fail soft.
+    # Table uses p1/p2 column layout; surface is via tournaments.
+    # Fail soft if table is absent or player has no data.
     serve_stats_by_surface: list = []
     try:
         serve_stats_by_surface = query(
@@ -374,20 +375,40 @@ def get_player(player_id: int):
             SELECT
                 s.name as surface,
                 COUNT(*) as matches,
-                ROUND(AVG(mss.aces)::numeric, 1) as avg_aces,
-                ROUND(AVG(mss.double_faults)::numeric, 1) as avg_dfs,
-                ROUND(AVG(mss.first_serve_pct)::numeric, 1) as avg_first_serve_pct,
-                ROUND(AVG(mss.first_serve_won_pct)::numeric, 1) as avg_first_serve_won_pct,
-                ROUND(AVG(mss.second_serve_won_pct)::numeric, 1) as avg_second_serve_won_pct
-            FROM match_serve_stats mss
-            JOIN matches m ON mss.match_id = m.id
-            JOIN surfaces s ON m.surface_id = s.id
-            WHERE mss.player_id = %s
-              AND m.event_date > NOW() - INTERVAL '18 months'
-            GROUP BY s.name
+                ROUND(AVG(ace_val)::numeric, 1) as avg_aces,
+                ROUND(AVG(df_val)::numeric, 1) as avg_dfs,
+                ROUND(AVG(fs_pct)::numeric, 1) as avg_first_serve_pct,
+                ROUND(AVG(fs_won_pct)::numeric, 1) as avg_first_serve_won_pct,
+                ROUND(AVG(ss_won_pct)::numeric, 1) as avg_second_serve_won_pct
+            FROM (
+                SELECT s.name, mss.p1_aces AS ace_val, mss.p1_double_faults AS df_val,
+                       mss.p1_first_serve_pct AS fs_pct,
+                       mss.p1_first_serve_won_pct AS fs_won_pct,
+                       mss.p1_second_serve_won_pct AS ss_won_pct
+                FROM match_serve_stats mss
+                JOIN matches m ON mss.match_id = m.id
+                JOIN tournaments t ON m.tournament_id = t.id
+                JOIN surfaces s ON t.surface_id = s.id
+                WHERE m.first_player_id = %s
+                  AND m.event_date > NOW() - INTERVAL '18 months'
+                  AND mss.p1_aces IS NOT NULL
+                UNION ALL
+                SELECT s.name, mss.p2_aces, mss.p2_double_faults,
+                       mss.p2_first_serve_pct,
+                       mss.p2_first_serve_won_pct,
+                       mss.p2_second_serve_won_pct
+                FROM match_serve_stats mss
+                JOIN matches m ON mss.match_id = m.id
+                JOIN tournaments t ON m.tournament_id = t.id
+                JOIN surfaces s ON t.surface_id = s.id
+                WHERE m.second_player_id = %s
+                  AND m.event_date > NOW() - INTERVAL '18 months'
+                  AND mss.p2_aces IS NOT NULL
+            ) combined
+            GROUP BY surface
             ORDER BY COUNT(*) DESC
             """,
-            (player_id,),
+            (player_id, player_id),
         )
         serve_stats_by_surface = [dict(r) for r in serve_stats_by_surface]
     except Exception:

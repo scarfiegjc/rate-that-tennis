@@ -411,13 +411,15 @@ def _upsert_serve_stats(
     detail: dict,
 ) -> int:
     """
-    Upsert match_serve_stats rows for both players from the /matches/{id}/ detail payload.
+    Upsert a single match_serve_stats row from the /matches/{id}/ detail payload.
 
-    Returns number of rows written (0, 1, or 2).
-    match_serve_stats schema:
-        id, match_id, player_id, aces, double_faults,
-        first_serve_pct, first_serve_won_pct, second_serve_won_pct
-        UNIQUE(match_id, player_id)
+    The match_serve_stats table uses a p1/p2 column layout (not per-player rows):
+        id, match_id, bzzoiro_match_id,
+        p1_aces, p1_double_faults, p1_first_serve_pct, p1_first_serve_won_pct, p1_second_serve_won_pct,
+        p2_aces, p2_double_faults, p2_first_serve_pct, p2_first_serve_won_pct, p2_second_serve_won_pct
+        UNIQUE(match_id)
+
+    Returns 1 if data was written, 0 if no stats found in payload.
     """
     def _float(val) -> Optional[float]:
         if val is None or val == "":
@@ -435,52 +437,49 @@ def _upsert_serve_stats(
         except (TypeError, ValueError):
             return None
 
-    rows = [
-        (
-            match_id,
-            p1_id,
-            _int(detail.get("p1_aces")),
-            _int(detail.get("p1_double_faults")),
-            _float(detail.get("p1_first_serve_pct")),
-            _float(detail.get("p1_first_serve_won_pct")),
-            _float(detail.get("p1_second_serve_won_pct")),
-        ),
-        (
-            match_id,
-            p2_id,
-            _int(detail.get("p2_aces")),
-            _int(detail.get("p2_double_faults")),
-            _float(detail.get("p2_first_serve_pct")),
-            _float(detail.get("p2_first_serve_won_pct")),
-            _float(detail.get("p2_second_serve_won_pct")),
-        ),
-    ]
+    p1_aces   = _int(detail.get("p1_aces"))
+    p1_dfs    = _int(detail.get("p1_double_faults"))
+    p1_1st    = _float(detail.get("p1_first_serve_pct"))
+    p1_1st_w  = _float(detail.get("p1_first_serve_won_pct"))
+    p1_2nd_w  = _float(detail.get("p1_second_serve_won_pct"))
+    p2_aces   = _int(detail.get("p2_aces"))
+    p2_dfs    = _int(detail.get("p2_double_faults"))
+    p2_1st    = _float(detail.get("p2_first_serve_pct"))
+    p2_1st_w  = _float(detail.get("p2_first_serve_won_pct"))
+    p2_2nd_w  = _float(detail.get("p2_second_serve_won_pct"))
 
-    # Only write rows where we have at least one non-null stat
-    def _has_data(r) -> bool:
-        return any(v is not None for v in r[2:])
-
-    rows = [r for r in rows if _has_data(r)]
-    if not rows:
+    # Only write if at least one stat is populated
+    if all(v is None for v in (p1_aces, p1_dfs, p1_1st, p2_aces, p2_dfs, p2_1st)):
         return 0
 
-    psycopg2.extras.execute_values(
-        cur,
+    cur.execute(
         """
         INSERT INTO match_serve_stats
-            (match_id, player_id, aces, double_faults,
-             first_serve_pct, first_serve_won_pct, second_serve_won_pct)
-        VALUES %s
-        ON CONFLICT (match_id, player_id) DO UPDATE SET
-            aces                  = COALESCE(EXCLUDED.aces,                  match_serve_stats.aces),
-            double_faults         = COALESCE(EXCLUDED.double_faults,         match_serve_stats.double_faults),
-            first_serve_pct       = COALESCE(EXCLUDED.first_serve_pct,       match_serve_stats.first_serve_pct),
-            first_serve_won_pct   = COALESCE(EXCLUDED.first_serve_won_pct,   match_serve_stats.first_serve_won_pct),
-            second_serve_won_pct  = COALESCE(EXCLUDED.second_serve_won_pct,  match_serve_stats.second_serve_won_pct)
+            (match_id,
+             p1_aces, p1_double_faults, p1_first_serve_pct,
+             p1_first_serve_won_pct, p1_second_serve_won_pct,
+             p2_aces, p2_double_faults, p2_first_serve_pct,
+             p2_first_serve_won_pct, p2_second_serve_won_pct)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (match_id) DO UPDATE SET
+            p1_aces                = COALESCE(EXCLUDED.p1_aces,                match_serve_stats.p1_aces),
+            p1_double_faults       = COALESCE(EXCLUDED.p1_double_faults,       match_serve_stats.p1_double_faults),
+            p1_first_serve_pct     = COALESCE(EXCLUDED.p1_first_serve_pct,     match_serve_stats.p1_first_serve_pct),
+            p1_first_serve_won_pct = COALESCE(EXCLUDED.p1_first_serve_won_pct, match_serve_stats.p1_first_serve_won_pct),
+            p1_second_serve_won_pct= COALESCE(EXCLUDED.p1_second_serve_won_pct,match_serve_stats.p1_second_serve_won_pct),
+            p2_aces                = COALESCE(EXCLUDED.p2_aces,                match_serve_stats.p2_aces),
+            p2_double_faults       = COALESCE(EXCLUDED.p2_double_faults,       match_serve_stats.p2_double_faults),
+            p2_first_serve_pct     = COALESCE(EXCLUDED.p2_first_serve_pct,     match_serve_stats.p2_first_serve_pct),
+            p2_first_serve_won_pct = COALESCE(EXCLUDED.p2_first_serve_won_pct, match_serve_stats.p2_first_serve_won_pct),
+            p2_second_serve_won_pct= COALESCE(EXCLUDED.p2_second_serve_won_pct,match_serve_stats.p2_second_serve_won_pct)
         """,
-        rows,
+        (
+            match_id,
+            p1_aces, p1_dfs, p1_1st, p1_1st_w, p1_2nd_w,
+            p2_aces, p2_dfs, p2_1st, p2_1st_w, p2_2nd_w,
+        ),
     )
-    return len(rows)
+    return 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
