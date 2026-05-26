@@ -170,23 +170,35 @@ def _latest_odds(match_id: int) -> dict:
         reverse=True,
     )
 
-    # Bresbet deep link — stored per-match by bresbet_links pipeline
-    bresbet_link = None
+    # Per-match deep links — currently bresbet + cloudbet
+    bresbet_link = cloudbet_link = None
+    cloudbet_event_url = None
     try:
-        bbl = query_one(
+        for row in query(
             """
-            SELECT affiliate_url, event_url
+            SELECT bookmaker_key, affiliate_url, event_url
             FROM bookmaker_match_links
-            WHERE match_id = %s AND bookmaker_key = 'bresbet'
+            WHERE match_id = %s
             """,
             (match_id,),
-        )
-        if bbl:
-            bresbet_link = bbl.get("affiliate_url") or bbl.get("event_url")
+        ):
+            bk = row.get("bookmaker_key")
+            aff = row.get("affiliate_url") or row.get("event_url")
+            if bk == "bresbet":
+                bresbet_link = aff
+            elif bk == "cloudbet":
+                cloudbet_link     = aff
+                cloudbet_event_url = row.get("event_url")
     except Exception:
         pass  # table may not exist yet on first deploy
 
-    return {**best, "all_bookmakers": all_bk, "bresbet_link": bresbet_link}
+    return {
+        **best,
+        "all_bookmakers": all_bk,
+        "bresbet_link":   bresbet_link,
+        "cloudbet_link":  cloudbet_link,
+        "cloudbet_event_url": cloudbet_event_url,
+    }
 
 
 def _edge(model_prob: float | None, implied_prob: float | None) -> float | None:

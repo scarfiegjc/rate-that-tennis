@@ -93,6 +93,19 @@ def run_bresbet_links():
         log.error(f"Bresbet links failed: {e}")
 
 
+def run_cloudbet_odds():
+    """Fetch Cloudbet tennis odds + per-event deep links via their API."""
+    log.info("Scheduled: Cloudbet odds + deep links")
+    try:
+        try:
+            from pipeline.cloudbet_odds import run as cloudbet_run
+        except ImportError:
+            from cloudbet_odds import run as cloudbet_run
+        cloudbet_run()
+    except Exception as e:
+        log.error(f"Cloudbet odds failed: {e}")
+
+
 # ─────────────────────────────────────────────
 # BZZOIRO JOB WRAPPERS
 # ─────────────────────────────────────────────
@@ -493,6 +506,7 @@ if __name__ == "__main__":
     run_odds()
     run_odds_io()
     run_bresbet_links()
+    run_cloudbet_odds()
 
     # ── Scheduled jobs ──────────────────────────────────────────────────────
     schedule.every().day.at("06:00").do(run_daily_fixtures)   # 06:00 UTC
@@ -567,6 +581,9 @@ if __name__ == "__main__":
     schedule.every().day.at("19:00").do(run_odds)             # evening refresh
     schedule.every().day.at("19:05").do(run_odds_io)          # odds-api.io evening refresh
     schedule.every().day.at("19:10").do(run_bresbet_links)    # Bresbet evening refresh
+    schedule.every().day.at("07:15").do(run_cloudbet_odds)    # Cloudbet odds + deep links (morning)
+    schedule.every().day.at("12:10").do(run_cloudbet_odds)    # Cloudbet midday refresh
+    schedule.every().day.at("19:15").do(run_cloudbet_odds)    # Cloudbet evening refresh
     schedule.every().day.at("01:00").do(run_ratings)           # daily ratings refresh (overnight)
     schedule.every().day.at("08:00").do(run_ratings)           # daily ratings refresh (morning, after predictions)
     schedule.every().day.at("08:15").do(run_email_predictions_digest)  # predictions digest email
