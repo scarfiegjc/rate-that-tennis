@@ -701,19 +701,40 @@ def get_player_form(
             q_params,
         )
 
-    # ── 3. Merge live + historical, dedup by (date, opponent), newest first ──
-    seen: set[tuple] = set()
-    merged: list[dict] = []
+    # ── 3. Merge live + historical, dedup by opponent + approximate date ──
+    # TML/Sackmann can record the same match 1-2 days off from the production
+    # date (timezone / recording differences). Use opponent name + ±2 day window.
+    from datetime import date as _date, timedelta
 
+    def _to_date(val):
+        if val is None:
+            return None
+        if isinstance(val, _date):
+            return val
+        try:
+            return _date.fromisoformat(str(val)[:10])
+        except Exception:
+            return None
+
+    # Index production matches: opponent_slug → list of dates
+    live_opponent_dates: dict[str, list] = {}
+    merged: list[dict] = []
     for m in live_match_rows:
-        key = (str(m.get("date") or ""), str(m.get("opponent_name") or "").lower()[:8])
-        seen.add(key)
+        slug = str(m.get("opponent_name") or "").lower()[:8]
+        d = _to_date(m.get("date"))
+        live_opponent_dates.setdefault(slug, []).append(d)
         merged.append(dict(m))
 
+    # Only add historical matches if no production match with same opponent ±2 days
     for m in hist_match_rows:
-        key = (str(m.get("date") or ""), str(m.get("opponent_name") or "").lower()[:8])
-        if key in seen:
-            continue
+        slug = str(m.get("opponent_name") or "").lower()[:8]
+        d = _to_date(m.get("date"))
+        existing_dates = live_opponent_dates.get(slug, [])
+        if d and any(
+            e and abs((d - e).days) <= 2
+            for e in existing_dates
+        ):
+            continue  # production already has this match
         merged.append(dict(m))
 
     merged.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
