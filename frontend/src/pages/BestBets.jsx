@@ -176,10 +176,8 @@ export default function BestBets() {
           Best Bets
         </h1>
         <p style={{ color: 'var(--text-2)', maxWidth: 720, marginTop: 8, lineHeight: 1.5 }}>
-          Upcoming matches where our ML model picks the winner <em>and</em> Cloudbet's
-          price gives that pick a lower implied probability than we do. Edge is
-          calculated against Cloudbet's price specifically — that's the price you
-          actually get when you click through.
+          Matches where our model picks the winner and the market gives that
+          pick a lower implied probability than we do.
         </p>
 
         {/* Edge threshold pills */}
@@ -241,22 +239,18 @@ export default function BestBets() {
         </div>
       )}
 
-      {/* Footer */}
+      {/* Footer — responsible gambling line only */}
       <div style={{
         marginTop: 28,
-        padding: '14px 18px',
-        background: 'var(--bg-2)',
-        borderRadius: 10,
-        fontSize: 13,
+        padding: '10px 16px',
+        textAlign: 'center',
+        fontSize: 11,
         color: 'var(--text-3)',
-        lineHeight: 1.5,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        fontWeight: 600,
       }}>
-        Prices refresh three times a day. Edge is model probability minus the
-        implied probability of Cloudbet's quoted price. Bet-now opens Cloudbet
-        with our affiliate code.
-        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>
-          18+ · BeGambleAware.org
-        </div>
+        18+ · BeGambleAware.org
       </div>
     </div>
   )

@@ -699,10 +699,25 @@ def get_best_bets(
     Returns upcoming matches where our ML model picks the winner AND Cloudbet's
     price gives that pick a lower implied probability than we do (positive edge).
 
-    Sorted by edge desc. Edge is calculated against Cloudbet's price specifically
-    because Cloudbet is the affiliate — the price quoted is the price the
-    punter actually gets when they click through.
+    Sorted by edge desc.
     """
+    import traceback
+    try:
+        return _get_best_bets_impl(days_ahead, min_edge, limit)
+    except Exception as e:
+        # Surface the actual error to the response (and logs) so we can
+        # diagnose — the Railway edge layer was just returning a bare 500.
+        return {
+            "error":      str(e),
+            "error_type": type(e).__name__,
+            "traceback":  traceback.format_exc().splitlines()[-12:],
+            "bets":       [],
+            "min_edge":   min_edge,
+            "count":      0,
+        }
+
+
+def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
     today  = date.today()
     cutoff = today + timedelta(days=days_ahead)
 
