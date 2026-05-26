@@ -684,47 +684,9 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /matches/{id}
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/{match_id}")
-def get_match(match_id: int):
-    m = query_one(
-        """
-        SELECT
-            m.id,
-            m.first_player_id,
-            m.second_player_id,
-            m.event_date,
-            m.event_time,
-            m.tournament_round,
-            m.event_status,
-            m.winner,
-            m.final_result,
-            m.game_result,
-            m.is_live,
-            t.name AS tournament_name,
-            s.name AS surface_name,
-            COALESCE(
-                (SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number)
-                 FROM match_scores ms WHERE ms.match_id = m.id),
-                NULL
-            ) AS set_scores
-        FROM matches m
-        LEFT JOIN tournaments t ON t.id = m.tournament_id
-        LEFT JOIN surfaces s ON s.id = t.surface_id
-        WHERE m.id = %s
-        """,
-        (match_id,),
-    )
-    if not m:
-        raise HTTPException(status_code=404, detail="Match not found")
-
-    return _build_match_payload(match_id, m)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Best Bets — Cloudbet-priced value selections
+# (Must be declared BEFORE /{match_id} so FastAPI matches the literal path
+#  instead of trying to parse "best-bets" as an integer match_id.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/best-bets")
@@ -806,7 +768,6 @@ def get_best_bets(
         ]:
             if model_p is None or price is None:
                 continue
-            # Must be a predicted winner — not a long-shot underdog at a long price.
             if model_p <= 0.5:
                 continue
             implied = 1.0 / price
@@ -835,3 +796,43 @@ def get_best_bets(
 
     bets.sort(key=lambda x: x["edge"], reverse=True)
     return {"bets": bets[:limit], "min_edge": min_edge, "count": len(bets[:limit])}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /matches/{id}
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{match_id}")
+def get_match(match_id: int):
+    m = query_one(
+        """
+        SELECT
+            m.id,
+            m.first_player_id,
+            m.second_player_id,
+            m.event_date,
+            m.event_time,
+            m.tournament_round,
+            m.event_status,
+            m.winner,
+            m.final_result,
+            m.game_result,
+            m.is_live,
+            t.name AS tournament_name,
+            s.name AS surface_name,
+            COALESCE(
+                (SELECT string_agg(score_first || '-' || score_second, ' ' ORDER BY set_number)
+                 FROM match_scores ms WHERE ms.match_id = m.id),
+                NULL
+            ) AS set_scores
+        FROM matches m
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        WHERE m.id = %s
+        """,
+        (match_id,),
+    )
+    if not m:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    return _build_match_payload(match_id, m)
