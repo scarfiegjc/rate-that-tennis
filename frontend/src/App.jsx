@@ -19,6 +19,7 @@ import AdminPage from './pages/AdminPage.jsx'
 import JoinPage from './pages/JoinPage.jsx'
 import AccountPage from './pages/AccountPage.jsx'
 import LivePage from './pages/LivePage.jsx'
+import BestBets from './pages/BestBets.jsx'
 import rttLogo from './assets/rtt_logo.png'
 
 function Header() {
@@ -49,6 +50,9 @@ function Header() {
             <Link to="/in-play" className={`nav-link ${is('/in-play') ? 'active' : ''}`}>
               <span className="live-dot" style={{ width: 5, height: 5 }} />
               In play
+            </Link>
+            <Link to="/best-bets" className={`nav-link ${is('/best-bets') ? 'active' : ''}`}>
+              💎 Best Bets
             </Link>
             <Link to="/predictions" className={`nav-link ${is('/predictions') ? 'active' : ''}`}>
               Predictions
@@ -184,6 +188,7 @@ function AppRoutes() {
         <Route path="/players"                element={<PlayerDatabase />} />
         <Route path="/player/:id"             element={<PlayerPage />} />
         <Route path="/player/:id/:slug"       element={<PlayerPage />} />
+        <Route path="/best-bets"              element={<BestBets />} />
         <Route path="/predictions"            element={<PredictionsResults />} />
         <Route path="/predictions/today"      element={<PredictionsToday />} />
         <Route path="/predictions/history"    element={<PredictionsHistory />} />

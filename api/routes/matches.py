@@ -721,3 +721,117 @@ def get_match(match_id: int):
         raise HTTPException(status_code=404, detail="Match not found")
 
     return _build_match_payload(match_id, m)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Best Bets — Cloudbet-priced value selections
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/best-bets")
+def get_best_bets(
+    days_ahead: int = Query(default=5, ge=0, le=14),
+    min_edge:   float = Query(default=0.02, ge=0.0, le=0.5),
+    limit:      int   = Query(default=40, ge=1, le=100),
+):
+    """
+    Returns upcoming matches where our ML model picks the winner AND Cloudbet's
+    price gives that pick a lower implied probability than we do (positive edge).
+
+    Sorted by edge desc. Edge is calculated against Cloudbet's price specifically
+    because Cloudbet is the affiliate — the price quoted is the price the
+    punter actually gets when they click through.
+    """
+    today  = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+
+    rows = query(
+        """
+        SELECT
+            m.id                          AS match_id,
+            m.event_date,
+            m.event_time,
+            m.tournament_round,
+            t.name                        AS tournament_name,
+            s.name                        AS surface_name,
+            p1.id                         AS p1_id,
+            p1.name                       AS p1_name,
+            p1.country_code               AS p1_country,
+            p2.id                         AS p2_id,
+            p2.name                       AS p2_name,
+            p2.country_code               AS p2_country,
+            mp.prob_first_player,
+            mp.prob_second_player,
+            mp.confidence,
+            cb1.decimal_odds              AS cb_p1_odds,
+            cb2.decimal_odds              AS cb_p2_odds,
+            bml.affiliate_url             AS cloudbet_link,
+            bml.event_url                 AS cloudbet_event_url
+        FROM matches m
+        JOIN players p1            ON p1.id = m.first_player_id
+        JOIN players p2            ON p2.id = m.second_player_id
+        LEFT JOIN tournaments t    ON t.id = m.tournament_id
+        LEFT JOIN surfaces s       ON s.id = t.surface_id
+        LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        LEFT JOIN LATERAL (
+            SELECT decimal_odds FROM bookmaker_odds
+            WHERE match_id = m.id AND bookmaker = 'cloudbet' AND player_ref = 'first_player'
+            ORDER BY fetched_at DESC LIMIT 1
+        ) cb1 ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT decimal_odds FROM bookmaker_odds
+            WHERE match_id = m.id AND bookmaker = 'cloudbet' AND player_ref = 'second_player'
+            ORDER BY fetched_at DESC LIMIT 1
+        ) cb2 ON TRUE
+        LEFT JOIN bookmaker_match_links bml
+               ON bml.match_id = m.id AND bml.bookmaker_key = 'cloudbet'
+        WHERE m.event_date BETWEEN %s AND %s
+          AND m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover')
+          AND (m.winner IS NULL OR m.winner = '')
+          AND mp.prob_first_player IS NOT NULL
+          AND (cb1.decimal_odds IS NOT NULL OR cb2.decimal_odds IS NOT NULL)
+        """,
+        (today, cutoff),
+    )
+
+    bets: list[dict] = []
+    for r in rows:
+        p1_prob = float(r["prob_first_player"]) if r.get("prob_first_player") else None
+        p2_prob = float(r["prob_second_player"]) if r.get("prob_second_player") else None
+        cb_p1   = float(r["cb_p1_odds"]) if r.get("cb_p1_odds") else None
+        cb_p2   = float(r["cb_p2_odds"]) if r.get("cb_p2_odds") else None
+
+        for side, model_p, price, pick_name, pick_country, opp_name in [
+            ("p1", p1_prob, cb_p1, r["p1_name"], r.get("p1_country"), r["p2_name"]),
+            ("p2", p2_prob, cb_p2, r["p2_name"], r.get("p2_country"), r["p1_name"]),
+        ]:
+            if model_p is None or price is None:
+                continue
+            # Must be a predicted winner — not a long-shot underdog at a long price.
+            if model_p <= 0.5:
+                continue
+            implied = 1.0 / price
+            edge = model_p - implied
+            if edge < min_edge:
+                continue
+            bets.append({
+                "match_id":           r["match_id"],
+                "side":               side,
+                "pick_name":          pick_name,
+                "pick_country":       pick_country,
+                "opp_name":           opp_name,
+                "tournament":         r.get("tournament_name"),
+                "surface":            r.get("surface_name"),
+                "round":              r.get("tournament_round"),
+                "event_date":         r["event_date"].isoformat() if r.get("event_date") else None,
+                "event_time":         str(r["event_time"]) if r.get("event_time") else None,
+                "model_prob":         round(model_p, 4),
+                "implied_prob":       round(implied, 4),
+                "edge":               round(edge, 4),
+                "price":              price,
+                "book":               "Cloudbet",
+                "cloudbet_link":      r.get("cloudbet_link"),
+                "cloudbet_event_url": r.get("cloudbet_event_url"),
+            })
+
+    bets.sort(key=lambda x: x["edge"], reverse=True)
+    return {"bets": bets[:limit], "min_edge": min_edge, "count": len(bets[:limit])}

@@ -51,6 +51,8 @@ async function del(path) {
 export const api = {
   matchesToday:  ()           => get('/api/v1/matches/today'),
   match:         (id)         => get(`/api/v1/matches/${id}`),
+  bestBets:      (daysAhead = 5, minEdge = 0.02, limit = 40) =>
+    get(`/api/v1/matches/best-bets?days_ahead=${daysAhead}&min_edge=${minEdge}&limit=${limit}`),
   playersDatabase: ({ sort = 'rtt', country, search, activeOnly = true, limit = 300 } = {}) => {
     const q = new URLSearchParams({ sort, active_only: activeOnly, limit })
     if (country) q.set('country', country)

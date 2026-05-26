@@ -727,7 +727,13 @@ function SectionIntelligence({ match }) {
       {(() => {
         const mkt         = match.market || {}
         const allBk       = mkt.all_bookmakers || []
-        const bresbetLink = mkt.bresbet_link || null
+        // Prefer Cloudbet's per-event deep link when present (Cloudbet is the
+        // affiliate where our quoted price IS the price the user gets).
+        // Fall back to BresBet's link if Cloudbet hasn't matched this fight.
+        const ctaLink     = mkt.cloudbet_link || mkt.bresbet_link || null
+        const ctaLabel    = mkt.cloudbet_link ? 'Bet at Cloudbet →' : 'Bet at BresBet →'
+        // Keep the legacy variable so existing JSX below doesn't break.
+        const bresbetLink = ctaLink
         const p1prob = pred.prob_first_player
         const p2prob = pred.prob_second_player
 
@@ -897,7 +903,7 @@ function SectionIntelligence({ match }) {
               </details>
             )}
 
-            {/* Bresbet affiliate strip */}
+            {/* Affiliate strip — prefers Cloudbet when available */}
             {bresbetLink && (
               <div style={{
                 borderTop: '1px solid var(--border-faint)',
@@ -906,7 +912,7 @@ function SectionIntelligence({ match }) {
                 background: 'var(--bg-raised)',
               }}>
                 <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                  Bet on this match at BresBet
+                  {mkt.cloudbet_link ? 'Bet on this match at Cloudbet' : 'Bet on this match at BresBet'}
                 </span>
                 <a
                   href={bresbetLink}
@@ -918,7 +924,7 @@ function SectionIntelligence({ match }) {
                     whiteSpace: 'nowrap', flexShrink: 0,
                   }}
                 >
-                  Bet at BresBet ↗
+                  {mkt.cloudbet_link ? 'Bet at Cloudbet ↗' : 'Bet at BresBet ↗'}
                 </a>
               </div>
             )}
@@ -2089,6 +2095,8 @@ export default function MatchDetail() {
             link_url_p2:         mkt.p2?.link_url,
             all_bookmakers:      mkt.all_bookmakers || [],
             bresbet_link:        mkt.bresbet_link || null,
+            cloudbet_link:       mkt.cloudbet_link || null,
+            cloudbet_event_url:  mkt.cloudbet_event_url || null,
           },
           edge,
         })
