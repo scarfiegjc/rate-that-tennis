@@ -348,13 +348,21 @@ def upsert_odds(conn, match_id: int, p1_price: Optional[float], p2_price: Option
             """, (match_id, player_ref, price, implied))
 
 
-def upsert_link(conn, match_id: int, cb_event_key: str,
+def upsert_link(conn, match_id: int, comp_key: str, ev_key: str,
                 markets_data: Optional[dict] = None):
-    """Store per-match Cloudbet deep-link URL and full markets JSON."""
-    if not cb_event_key: return
-    event_path = f'/en/sports/tennis/{cb_event_key}'
+    """Store per-match Cloudbet deep-link URL and full markets JSON.
+
+    event_url    — specific event deep-link (valid before match starts only;
+                   Cloudbet removes it once the match goes live)
+    affiliate_url — competition-level affiliate link (always valid throughout
+                   the tournament, used as the reliable bet-now URL)
+    """
+    if not ev_key: return
+    event_path = f'/en/sports/tennis/{comp_key}/{ev_key}' if comp_key else f'/en/sports/tennis/{ev_key}'
+    comp_path  = f'/en/sports/tennis/{comp_key}' if comp_key else '/en/sports/tennis'
     event_url  = f'{PUBLIC_BASE}{event_path}'
-    affiliate  = f'{AFFILIATE_BASE}{event_path}?{AFFILIATE_TRACKING}'
+    # Affiliate URL points to competition page — always resolves even when match is live
+    affiliate  = f'{AFFILIATE_BASE}{comp_path}?{AFFILIATE_TRACKING}'
     markets_json_str = json.dumps(markets_data) if markets_data else None
     with conn.cursor() as cur:
         cur.execute("""
@@ -399,11 +407,9 @@ def run() -> None:
                 wrote_odds += 1
 
             # Write deep-link + full markets JSON
-            # URL path = competition_key/event_key so Cloudbet routes correctly
             if ev.get('key'):
-                comp_key = ev.get('_competition_key', '')
-                link_key = f'{comp_key}/{ev["key"]}' if comp_key else ev['key']
-                upsert_link(conn, match_id, link_key,
+                ck = ev.get('_competition_key', '')
+                upsert_link(conn, match_id, ck, ev['key'],
                             markets_data=all_markets if all_markets else None)
                 wrote_links += 1
 
