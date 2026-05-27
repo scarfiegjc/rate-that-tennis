@@ -124,7 +124,7 @@ function Tickbox({ label, checked, onChange, accent }) {
 // Combatrics-style: dark header strip + horizontal two-colour split body.
 // Left green section width = P1 win probability.
 // Right blue section width = P2 win probability.
-function MatchCard({ match, large = false }) {
+function MatchCard({ match }) {
   const navigate = useNavigate()
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
@@ -157,48 +157,36 @@ function MatchCard({ match, large = false }) {
     ? rawTourn
     : (match.surface && match.surface !== 'Unknown' ? match.surface : null)
 
+  // Court photo in the header strip
+  const { img: courtImg } = courtStyle(match.surface || '', match.tournament || '')
+  const hdrBg = courtImg
+    ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.55),rgba(0,0,0,0.55)),url(${courtImg})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : undefined
+
   // Flex weights proportional to probability (fall back to 50/50)
   const p1w = p1prob ?? 50
   const p2w = p2prob ?? 50
 
   return (
-    <button className={`mc-card${large ? ' mc-card--live' : ''}`} onClick={() => navigate(matchUrl(match))}>
+    <button className="mc-card" onClick={() => navigate(matchUrl(match))}>
 
-      {/* Dark header strip: time · tournament · edge/result */}
-      <div className="mc-card-hdr">
+      {/* Header strip with court background */}
+      <div className="mc-card-hdr" style={hdrBg}>
         {isLive ? (
-          large ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-                <LiveLozenge small />
-                {tournDisplay && <span className="mc-hdr-tourn" style={{ flex: 1 }}>{tournDisplay}</span>}
-                {hasEdge && <span className="mc-card-edge" style={{ flexShrink: 0 }}>+{Math.round(edgeVal * 100)}% edge</span>}
-              </div>
-              {(match.set_scores || match.game_result) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-                    <span key={i} className="mc-live-set mc-live-set--lg">{set}</span>
-                  ))}
-                  {match.game_result && <span className="mc-live-game mc-live-game--lg">{match.game_result}</span>}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <LiveLozenge small />
-              {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-                <span key={i} className="mc-live-set">{set}</span>
-              ))}
-              {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
-            </>
-          )
+          <>
+            <LiveLozenge small />
+            {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+              <span key={i} className="mc-live-set">{set}</span>
+            ))}
+            {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
+          </>
         ) : (
           <>
             {timeStr && <span className="mc-hdr-time">{timeStr}</span>}
             {tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
           </>
         )}
-        {hasEdge && !(isLive && large) && (
+        {hasEdge && (
           <span className="mc-card-edge" style={{ marginLeft: 'auto', flexShrink: 0 }}>
             +{Math.round(edgeVal * 100)}% edge
           </span>
@@ -213,15 +201,10 @@ function MatchCard({ match, large = false }) {
 
       {/* Two-colour split body */}
       <div className="mc-card-body">
-
-        {/* Background bands — proportional widths, no content */}
         <div className="mc-side mc-side-green" style={{ width: `${p1w}%`, opacity: winner2 ? 0.45 : 1 }} />
         <div className="mc-side mc-side-blue"  style={{ width: `${p2w}%`, opacity: winner1 ? 0.45 : 1 }} />
-
-        {/* VS at centre */}
         <div className="mc-vs">VS</div>
 
-        {/* P1 info — always left half regardless of probability */}
         <div className="mc-player-info mc-player-left" style={{ opacity: winner2 ? 0.45 : 1 }}>
           <div className="mc-side-top">
             {p1.photo_url
@@ -231,14 +214,11 @@ function MatchCard({ match, large = false }) {
           </div>
           <div className="mc-side-name-row">
             <span className="mc-side-name">{p1.name || '—'}</span>
-            {p1.rtt_score != null && (
-              <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>
-            )}
+            {p1.rtt_score != null && <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>}
           </div>
           {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
 
-        {/* P2 info — always right half regardless of probability */}
         <div className="mc-player-info mc-player-right" style={{ opacity: winner1 ? 0.45 : 1 }}>
           <div className="mc-side-top" style={{ flexDirection: 'row-reverse' }}>
             {p2.photo_url
@@ -248,13 +228,10 @@ function MatchCard({ match, large = false }) {
           </div>
           <div className="mc-side-name-row right">
             <span className="mc-side-name">{p2.name || '—'}</span>
-            {p2.rtt_score != null && (
-              <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>
-            )}
+            {p2.rtt_score != null && <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>}
           </div>
           {p2prob != null && <div className="mc-side-prob" style={{ textAlign: 'right' }}>{p2prob}%</div>}
         </div>
-
       </div>
     </button>
   )
@@ -306,18 +283,6 @@ function TournamentBlock({ name, surface, matches }) {
 
   const { cls, img } = courtStyle(surface, name)
 
-  const isLiveMatch = m => /in play|live|set \d|game/i.test(m.event_status || '')
-  const sortFn = (a, b) => {
-    const aFin = /finished/i.test(a.event_status || '') ? 1 : 0
-    const bFin = /finished/i.test(b.event_status || '') ? 1 : 0
-    if (aFin !== bFin) return aFin - bFin
-    const ta = a.event_time || '99:99', tb = b.event_time || '99:99'
-    if (ta !== tb) return ta < tb ? -1 : 1
-    return (a.match_id || 0) - (b.match_id || 0)
-  }
-  const liveMatches  = matches.filter(isLiveMatch).sort(sortFn)
-  const otherMatches = matches.filter(m => !isLiveMatch(m)).sort(sortFn)
-
   return (
     <div className="tournament-block">
       <button
@@ -346,18 +311,22 @@ function TournamentBlock({ name, surface, matches }) {
       </button>
 
       {open && (
-        <>
-          {liveMatches.length > 0 && (
-            <div className="mc-card-grid mc-card-grid--live">
-              {liveMatches.map(m => <MatchCard key={m.match_id} match={m} large />)}
-            </div>
-          )}
-          {otherMatches.length > 0 && (
-            <div className="mc-card-grid">
-              {otherMatches.map(m => <MatchCard key={m.match_id} match={m} />)}
-            </div>
-          )}
-        </>
+        <div className="mc-card-grid">
+          {[...matches].sort((a, b) => {
+            const aLive = /in play|live|set \d|game/i.test(a.event_status || '') ? 1 : 0
+            const bLive = /in play|live|set \d|game/i.test(b.event_status || '') ? 1 : 0
+            if (aLive !== bLive) return bLive - aLive
+            const aFin = /finished/i.test(a.event_status || '') ? 1 : 0
+            const bFin = /finished/i.test(b.event_status || '') ? 1 : 0
+            if (aFin !== bFin) return aFin - bFin
+            const ta = a.event_time || '99:99'
+            const tb = b.event_time || '99:99'
+            if (ta !== tb) return ta < tb ? -1 : 1
+            return (a.match_id || 0) - (b.match_id || 0)
+          }).map(m => (
+            <MatchCard key={m.match_id} match={m} />
+          ))}
+        </div>
       )}
     </div>
   )
