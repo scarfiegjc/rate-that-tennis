@@ -260,10 +260,14 @@ function MatchHero({ match }) {
 
         {/* ← Today back-link */}
         <Link to="/" style={{
-          position: 'absolute', top: 12, left: 28,
-          color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 500,
+          position: 'absolute', top: 14, left: 28,
+          color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 500,
           textDecoration: 'none', zIndex: 20,
           letterSpacing: 0.1,
+          background: 'rgba(255,255,255,0.07)',
+          border: '1px solid rgba(255,255,255,0.13)',
+          borderRadius: 5,
+          padding: '3px 8px',
         }}>← Today</Link>
 
         {/* ── CENTER CARD ─────────────────────────────────────────── */}
@@ -383,9 +387,14 @@ function MatchHero({ match }) {
               >
                 {p1.name || '—'}
               </Link>
-              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'rgba(255,255,255,0.75)', marginTop: 3, letterSpacing: '0.02em' }}>
-                RTT {p1.ratings?.rtt_score != null ? Math.round(p1.ratings.rtt_score) : '—'}
-              </div>
+              {p1.ratings?.rtt_score != null && (
+                <div style={{ marginTop: 5 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(22,163,74,0.25)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
+                    <span style={{ fontSize: '1rem', fontWeight: 900, color: '#4ade80', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p1.ratings.rtt_score)}</span>
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
                 {p1.current_rank    && <P1Pill>#{p1.current_rank}</P1Pill>}
                 {p1.country_code    && <P1Pill>{p1.country_code}</P1Pill>}
@@ -437,9 +446,14 @@ function MatchHero({ match }) {
               >
                 {p2.name || '—'}
               </Link>
-              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'rgba(255,255,255,0.75)', marginTop: 3, letterSpacing: '0.02em' }}>
-                RTT {p2.ratings?.rtt_score != null ? Math.round(p2.ratings.rtt_score) : '—'}
-              </div>
+              {p2.ratings?.rtt_score != null && (
+                <div style={{ marginTop: 5 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(29,78,216,0.25)', border: '1px solid rgba(29,78,216,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
+                    <span style={{ fontSize: '1rem', fontWeight: 900, color: '#60a5fa', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p2.ratings.rtt_score)}</span>
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5, justifyContent: 'flex-end' }}>
                 {(p2.form_dots || []).length > 0 && (
                   <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -725,118 +739,6 @@ function PlayerBar({ match, activeTab, onTabClick, tabRefs }) {
         ) : (
           <div style={{ width: '100%', background: 'var(--border)' }} />
         )}
-      </div>
-
-      {/* Player names row */}
-      <div className="player-bar-grid" style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr auto 1fr',
-        alignItems: 'center',
-        gap: 16,
-        padding: '12px 24px 8px',
-      }}>
-        {/* Player 1 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <HandLozenge hand={p1.hand} />
-            <Link to={playerUrl({ id: p1.player_id, name: p1.name })} className="player-bar-name" style={{
-              fontWeight: 700, letterSpacing: '-0.5px',
-              color: 'var(--text)', textDecoration: 'none',
-            }}>
-              {p1.name || '—'}
-            </Link>
-            <RttLozenge score={p1.ratings?.rtt_score} />
-            {!isFinished && p1.player_id && (
-              <StarPick
-                matchId={match.match_id}
-                playerId={p1.player_id}
-                playerName={p1.name}
-                ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
-                size="md"
-              />
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <OddsLozenge odds={p1odds} edge={edge.p1} />
-            {/* W/L dots */}
-            {(p1.form_dots || []).length > 0 && (
-              <div style={{ display: 'flex', gap: 3 }}>
-                {(p1.form_dots || []).slice(0, 5).map((d, i) => (
-                  <span key={i} title={d === 'W' ? 'Win' : 'Loss'} style={{
-                    display: 'inline-block',
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: d === 'W' ? '#166534' : '#e5e0d8',
-                    opacity: d === 'W' ? 1 : 0.5,
-                  }} />
-                ))}
-              </div>
-            )}
-            {p1.country_code && (
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p1.country_code}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Centre probability */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 100 }}>
-          {pred.prob_first_player != null ? (
-            <>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--green)', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.round(pred.prob_first_player * 100)}%
-                </span>
-                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>vs</span>
-                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--blue)', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.round(pred.prob_second_player * 100)}%
-                </span>
-              </div>
-              <ProbBar p1={pred.prob_first_player} p2={pred.prob_second_player} name1="" name2="" />
-            </>
-          ) : (
-            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-3)' }}>vs</span>
-          )}
-        </div>
-
-        {/* Player 2 */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <RttLozenge score={p2.ratings?.rtt_score} />
-            {!isFinished && p2.player_id && (
-              <StarPick
-                matchId={match.match_id}
-                playerId={p2.player_id}
-                playerName={p2.name}
-                ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
-                size="md"
-              />
-            )}
-            <Link to={playerUrl({ id: p2.player_id, name: p2.name })} className="player-bar-name" style={{
-              fontWeight: 700, letterSpacing: '-0.5px',
-              color: 'var(--text)', textDecoration: 'none',
-            }}>
-              {p2.name || '—'}
-            </Link>
-            <HandLozenge hand={p2.hand} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-            {p2.country_code && (
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{p2.country_code}</span>
-            )}
-            {(p2.form_dots || []).length > 0 && (
-              <div style={{ display: 'flex', gap: 3 }}>
-                {(p2.form_dots || []).slice(0, 5).map((d, i) => (
-                  <span key={i} title={d === 'W' ? 'Win' : 'Loss'} style={{
-                    display: 'inline-block',
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: d === 'W' ? '#166534' : '#e5e0d8',
-                    opacity: d === 'W' ? 1 : 0.5,
-                  }} />
-                ))}
-              </div>
-            )}
-            <OddsLozenge odds={p2odds} edge={edge.p2} />
-          </div>
-        </div>
       </div>
 
       {/* Tabs */}
@@ -2526,12 +2428,12 @@ export default function MatchDetail() {
   const affiliateUrl    = mkt.cloudbet_link || mkt.bresbet_link || null
 
   return (
-    <div className="page" style={{ paddingTop: 0 }}>
+    <div>
 
-      {/* ── HERO — Combatrics-style gradient header ── */}
+      {/* ── HERO — full-bleed, outside any max-width container ── */}
       <MatchHero match={match} />
 
-      {/* ── STICKY PLAYER + TABS BAR ── */}
+      {/* ── STICKY PLAYER + TABS BAR — full-width ── */}
       <PlayerBar
         match={match}
         activeTab={activeTab}
