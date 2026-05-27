@@ -506,7 +506,10 @@ if __name__ == "__main__":
     run_odds()
     run_odds_io()
     run_bresbet_links()
-    run_cloudbet_odds()
+    # NOTE: run_cloudbet_odds() deliberately NOT called here.
+    # Cloudbet deep-link matching is run manually via run_cloudbet_odds.command.
+    # Running it on every Railway startup was overwriting locally-populated odds data
+    # with empty/unmatched results, causing OddsRail to disappear after deploys.
 
     # ── Scheduled jobs ──────────────────────────────────────────────────────
     schedule.every().day.at("06:00").do(run_daily_fixtures)   # 06:00 UTC
