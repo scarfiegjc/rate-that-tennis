@@ -146,16 +146,18 @@ function MatchCard({ match }) {
     if (actualWinner != null) predCorrect = predictedSide === actualWinner
   }
 
-  const edgeVal  = Math.max(pred.edge_first || 0, pred.edge_second || 0)
-  const hasEdge  = edgeVal > 0.02
-
-  const liveScore = match.set_scores
-    ? (match.game_result ? `${match.set_scores}  ${match.game_result}` : match.set_scores)
-    : (match.game_result || match.final_result || '')
+  const edgeVal = Math.max(pred.edge_first || 0, pred.edge_second || 0)
+  const hasEdge = edgeVal > 0.02
 
   const timeStr = isFinished ? 'FT' : match.event_time?.slice(0, 5) || null
 
-  // Use probability for section widths; fall back to 50/50 if no prediction
+  // Filter out "Unknown" tournament strings — fall back to surface name
+  const rawTourn = (match.tournament || '').trim()
+  const tournDisplay = rawTourn && !['unknown tournament', 'unknown'].includes(rawTourn.toLowerCase())
+    ? rawTourn
+    : (match.surface && match.surface !== 'Unknown' ? match.surface : null)
+
+  // Flex weights proportional to probability (fall back to 50/50)
   const p1w = p1prob ?? 50
   const p2w = p2prob ?? 50
 
@@ -167,12 +169,13 @@ function MatchCard({ match }) {
         {isLive ? (
           <>
             <LiveLozenge small />
-            {liveScore && <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>{liveScore}</span>}
+            {match.set_scores && <span className="mc-live-sets">{match.set_scores}</span>}
+            {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
           </>
         ) : (
           <>
             {timeStr && <span className="mc-hdr-time">{timeStr}</span>}
-            {match.tournament && <span className="mc-hdr-tourn">{match.tournament}</span>}
+            {tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
           </>
         )}
         {hasEdge && (
@@ -191,12 +194,18 @@ function MatchCard({ match }) {
       {/* Two-colour split body */}
       <div className="mc-card-body">
 
-        {/* P1 — green left, width proportional to win probability */}
+        {/* VS marker at the colour boundary */}
+        <div className="mc-vs" style={{ left: `${p1w}%` }}>VS</div>
+
+        {/* P1 — green left, flex proportional to win probability */}
         <div className="mc-side mc-side-green"
-          style={{ width: `${p1w}%`, opacity: winner2 ? 0.45 : 1 }}
+          style={{ flex: p1w, opacity: winner2 ? 0.45 : 1 }}
         >
           <div className="mc-side-top">
-            <span className="mc-side-flag">{flagEmoji(p1.country_code)}</span>
+            {p1.photo_url
+              ? <img src={p1.photo_url} className="mc-side-photo" alt="" />
+              : <span className="mc-side-flag">{flagEmoji(p1.country_code)}</span>
+            }
             {p1.rtt_score != null && (
               <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>
             )}
@@ -205,12 +214,15 @@ function MatchCard({ match }) {
           {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
 
-        {/* P2 — blue right, mirrored */}
+        {/* P2 — blue right, mirrored layout */}
         <div className="mc-side mc-side-blue"
-          style={{ width: `${p2w}%`, opacity: winner1 ? 0.45 : 1 }}
+          style={{ flex: p2w, opacity: winner1 ? 0.45 : 1 }}
         >
           <div className="mc-side-top" style={{ flexDirection: 'row-reverse' }}>
-            <span className="mc-side-flag">{flagEmoji(p2.country_code)}</span>
+            {p2.photo_url
+              ? <img src={p2.photo_url} className="mc-side-photo" alt="" />
+              : <span className="mc-side-flag">{flagEmoji(p2.country_code)}</span>
+            }
             {p2.rtt_score != null && (
               <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>
             )}
