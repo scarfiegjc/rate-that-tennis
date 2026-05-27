@@ -2,13 +2,17 @@
  * InPlayPage — only matches currently in play.
  *
  * Auto-refreshes every 20 seconds.
- * Uses the same green/blue split MatchCard as the homepage, large variant.
+ * Same green/blue split cards as the homepage — 3-col grid,
+ * court photo in the header strip.
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSEO } from '../hooks/useSEO.js'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
+import courtClay  from '../assets/court-clay.jpg'
+import courtHard  from '../assets/court-hard.jpg'
+import courtGrass from '../assets/court-grass.jpg'
 
 const REFRESH_MS = 20_000
 
@@ -56,6 +60,32 @@ function matchUrl(match) {
   return `/match/${match.match_id}/${slug}`
 }
 
+// ── Court background helper ───────────────────────────────────────────────────
+
+function inferSurfaceFromName(name) {
+  const n = (name || '').toLowerCase()
+  if (/roland.?garros|french open|monte.?carlo|barcelona|madrid|clay/i.test(n)) return 'clay'
+  if (/wimbledon|queen.?s club|halle|eastbourne|nottingham|grass/i.test(n)) return 'grass'
+  return null
+}
+
+function courtBgStyle(surface, tournament) {
+  const s = (surface || '').toLowerCase()
+  let img = null
+  if (s.includes('clay'))  img = courtClay
+  else if (s.includes('grass')) img = courtGrass
+  else if (s.includes('hard'))  img = courtHard
+  else {
+    const inf = inferSurfaceFromName(tournament)
+    if (inf === 'clay')  img = courtClay
+    else if (inf === 'grass') img = courtGrass
+    else if (inf === 'hard')  img = courtHard
+  }
+  return img
+    ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.55),rgba(0,0,0,0.55)),url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : undefined
+}
+
 // ── Live lozenge ─────────────────────────────────────────────────────────────
 
 function LiveLozenge({ small = false }) {
@@ -73,7 +103,7 @@ function isLiveStatus(status) {
   return /in play|live|set \d|game/i.test(status || '')
 }
 
-// ── Match card — same green/blue split as homepage, always large ──────────────
+// ── Match card ────────────────────────────────────────────────────────────────
 
 function MatchCard({ match }) {
   const navigate = useNavigate()
@@ -94,23 +124,23 @@ function MatchCard({ match }) {
   const tournDisplay = rawTourn && !['unknown tournament', 'unknown'].includes(rawTourn.toLowerCase())
     ? rawTourn : null
 
-  return (
-    <button className="mc-card mc-card--live" onClick={() => navigate(matchUrl(match))}>
+  const hdrBg = courtBgStyle(match.surface || '', match.tournament || '')
 
-      {/* 2-row header: lozenge + tournament on row 1, scores on row 2 */}
-      <div className="mc-card-hdr">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-          <LiveLozenge small />
-          {tournDisplay && <span className="mc-hdr-tourn" style={{ flex: 1 }}>{tournDisplay}</span>}
-          {hasEdge && <span className="mc-card-edge" style={{ flexShrink: 0 }}>+{Math.round(edgeVal * 100)}% edge</span>}
-        </div>
-        {(match.set_scores || match.game_result) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-              <span key={i} className="mc-live-set mc-live-set--lg">{set}</span>
-            ))}
-            {match.game_result && <span className="mc-live-game mc-live-game--lg">{match.game_result}</span>}
-          </div>
+  return (
+    <button className="mc-card" onClick={() => navigate(matchUrl(match))}>
+
+      {/* Header with court background */}
+      <div className="mc-card-hdr" style={hdrBg}>
+        <LiveLozenge small />
+        {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+          <span key={i} className="mc-live-set">{set}</span>
+        ))}
+        {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
+        {!match.set_scores && tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
+        {hasEdge && (
+          <span className="mc-card-edge" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+            +{Math.round(edgeVal * 100)}% edge
+          </span>
         )}
       </div>
 
@@ -166,7 +196,7 @@ function TournamentGroup({ name, matches }) {
           </span>
         </div>
       </div>
-      <div className="mc-card-grid mc-card-grid--live">
+      <div className="mc-card-grid">
         {matches.map(m => <MatchCard key={m.match_id} match={m} />)}
       </div>
     </div>
