@@ -270,11 +270,11 @@ def _candidate_matches(conn) -> list[dict]:
             SELECT m.id AS match_id,
                    p1.name AS p1_name,
                    p2.name AS p2_name,
-                   m.match_date
+                   m.event_date
             FROM matches m
             JOIN players p1 ON p1.id = m.first_player_id
             JOIN players p2 ON p2.id = m.second_player_id
-            WHERE m.match_date BETWEEN CURRENT_DATE - INTERVAL '1 day'
+            WHERE m.event_date BETWEEN CURRENT_DATE - INTERVAL '1 day'
                                     AND CURRENT_DATE + INTERVAL %s
               AND (m.winner IS NULL OR m.winner = '')
         """, (f'{LOOK_AHEAD_DAYS} days',))
