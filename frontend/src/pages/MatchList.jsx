@@ -119,7 +119,11 @@ function Tickbox({ label, checked, onChange, accent }) {
 }
 
 // ── Match card (Combatrics-style compact card) ────────────────────────────────
+// Layout: court-image header banner → P1 row → P2 row → green/blue prob bar
 
+// Combatrics-style: dark header strip + horizontal two-colour split body.
+// Left green section width = P1 win probability.
+// Right blue section width = P2 win probability.
 function MatchCard({ match }) {
   const navigate = useNavigate()
   const p1   = match.first_player  || {}
@@ -144,106 +148,77 @@ function MatchCard({ match }) {
 
   const edgeVal  = Math.max(pred.edge_first || 0, pred.edge_second || 0)
   const hasEdge  = edgeVal > 0.02
-  const edgeSide = (pred.edge_first || 0) >= (pred.edge_second || 0) ? 'p1' : 'p2'
-
-  const { img } = courtStyle(match.surface, match.tournament)
 
   const liveScore = match.set_scores
     ? (match.game_result ? `${match.set_scores}  ${match.game_result}` : match.set_scores)
     : (match.game_result || match.final_result || '')
 
-  const timeStr = isLive ? null
-    : isFinished ? 'FT'
-    : match.event_time?.slice(0, 5) || null
+  const timeStr = isFinished ? 'FT' : match.event_time?.slice(0, 5) || null
 
-  const cardBorderColor = isLive
-    ? 'rgba(251,146,60,0.55)'
-    : predCorrect === true
-      ? 'rgba(74,222,128,0.35)'
-      : predCorrect === false
-        ? 'rgba(239,68,68,0.35)'
-        : undefined
-
-  const bgStyle = img
-    ? { backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center 40%' }
-    : {}
+  // Use probability for section widths; fall back to 50/50 if no prediction
+  const p1w = p1prob ?? 50
+  const p2w = p2prob ?? 50
 
   return (
-    <button
-      className="mc-card"
-      style={cardBorderColor ? { borderColor: cardBorderColor } : undefined}
-      onClick={() => navigate(matchUrl(match))}
-    >
-      {/* P1 banner */}
-      <div className="mc-card-banner" style={bgStyle}>
-        <div className="mc-card-tint" />
-        <span className="mc-card-flag">{flagEmoji(p1.country_code)}</span>
-        <span
-          className="mc-card-name"
-          style={{ fontWeight: winner1 ? 700 : 500, opacity: winner2 ? 0.5 : 1 }}
-        >
-          {p1.name || '—'}
-        </span>
-        {p1.rtt_score != null && (
-          <span className="mc-card-rtt">{Math.round(p1.rtt_score)}</span>
+    <button className="mc-card" onClick={() => navigate(matchUrl(match))}>
+
+      {/* Dark header strip: time · tournament · edge/result */}
+      <div className="mc-card-hdr">
+        {isLive ? (
+          <>
+            <LiveLozenge small />
+            {liveScore && <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>{liveScore}</span>}
+          </>
+        ) : (
+          <>
+            {timeStr && <span className="mc-hdr-time">{timeStr}</span>}
+            {match.tournament && <span className="mc-hdr-tourn">{match.tournament}</span>}
+          </>
         )}
-        {p1.momentum === 'rising' && <span className="mc-card-momentum">↑</span>}
-        <div className="mc-card-prob-wrap">
-          {p1prob != null && (
-            <span className={`mc-card-prob${edgeSide === 'p1' && hasEdge ? ' edge' : ''}`}>
-              {p1prob}%
-            </span>
-          )}
-        </div>
+        {hasEdge && (
+          <span className="mc-card-edge" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+            +{Math.round(edgeVal * 100)}% edge
+          </span>
+        )}
+        {!hasEdge && isFinished && predCorrect === true  && (
+          <span style={{ marginLeft: 'auto', color: '#4ade80', fontSize: 13, fontWeight: 700 }}>✓</span>
+        )}
+        {!hasEdge && isFinished && predCorrect === false && (
+          <span style={{ marginLeft: 'auto', color: '#f87171', fontSize: 13, fontWeight: 700 }}>✗</span>
+        )}
       </div>
 
-      {/* Center info strip */}
-      <div className="mc-card-strip">
-        <div className="mc-card-strip-left">
-          {isLive ? (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <LiveLozenge small />
-              {liveScore && <span className="mc-card-score">{liveScore}</span>}
-            </span>
-          ) : (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {timeStr && <span className="mc-card-time">{timeStr}</span>}
-              {match.tournament && <span className="mc-card-info">{match.tournament}</span>}
-            </span>
-          )}
-        </div>
-        <div className="mc-card-strip-right">
-          {hasEdge ? (
-            <span className="mc-card-edge">+{Math.round(edgeVal * 100)}% edge</span>
-          ) : isFinished && predCorrect === true ? (
-            <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 700 }}>✓</span>
-          ) : isFinished && predCorrect === false ? (
-            <span style={{ color: 'var(--red)', fontSize: 13, fontWeight: 700 }}>✗</span>
-          ) : null}
-        </div>
-      </div>
+      {/* Two-colour split body */}
+      <div className="mc-card-body">
 
-      {/* P2 banner */}
-      <div className="mc-card-banner" style={bgStyle}>
-        <div className="mc-card-tint" />
-        <span className="mc-card-flag">{flagEmoji(p2.country_code)}</span>
-        <span
-          className="mc-card-name"
-          style={{ fontWeight: winner2 ? 700 : 500, opacity: winner1 ? 0.5 : 1 }}
+        {/* P1 — green left, width proportional to win probability */}
+        <div className="mc-side mc-side-green"
+          style={{ width: `${p1w}%`, opacity: winner2 ? 0.45 : 1 }}
         >
-          {p2.name || '—'}
-        </span>
-        {p2.rtt_score != null && (
-          <span className="mc-card-rtt">{Math.round(p2.rtt_score)}</span>
-        )}
-        {p2.momentum === 'rising' && <span className="mc-card-momentum">↑</span>}
-        <div className="mc-card-prob-wrap">
-          {p2prob != null && (
-            <span className={`mc-card-prob${edgeSide === 'p2' && hasEdge ? ' edge' : ''}`}>
-              {p2prob}%
-            </span>
-          )}
+          <div className="mc-side-top">
+            <span className="mc-side-flag">{flagEmoji(p1.country_code)}</span>
+            {p1.rtt_score != null && (
+              <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>
+            )}
+          </div>
+          <div className="mc-side-name">{p1.name || '—'}</div>
+          {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
+
+        {/* P2 — blue right, mirrored */}
+        <div className="mc-side mc-side-blue"
+          style={{ width: `${p2w}%`, opacity: winner1 ? 0.45 : 1 }}
+        >
+          <div className="mc-side-top" style={{ flexDirection: 'row-reverse' }}>
+            <span className="mc-side-flag">{flagEmoji(p2.country_code)}</span>
+            {p2.rtt_score != null && (
+              <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>
+            )}
+          </div>
+          <div className="mc-side-name" style={{ textAlign: 'right' }}>{p2.name || '—'}</div>
+          {p2prob != null && <div className="mc-side-prob" style={{ textAlign: 'right' }}>{p2prob}%</div>}
+        </div>
+
       </div>
     </button>
   )
