@@ -1,100 +1,159 @@
 /**
- * InPlayPage — only matches that are currently in play.
+ * InPlayPage — only matches currently in play.
  *
- * Auto-refreshes every 20 seconds. The live score is the headline of every row.
+ * Auto-refreshes every 20 seconds.
+ * Uses the same green/blue split MatchCard as the homepage, large variant.
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSEO } from '../hooks/useSEO.js'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
-import FormDots from '../components/FormDots.jsx'
-import RttLozenge from '../components/RttLozenge.jsx'
 
 const REFRESH_MS = 20_000
+
+// ── Country flag emoji ─────────────────────────────────────────────────────────
+
+const IOC_TO_ALPHA2 = {
+  USA:'US', GBR:'GB', ESP:'ES', FRA:'FR', ITA:'IT', GER:'DE', RUS:'RU', SRB:'RS',
+  AUT:'AT', ARG:'AR', CAN:'CA', AUS:'AU', JPN:'JP', CHN:'CN', KOR:'KR', BRA:'BR',
+  NED:'NL', BEL:'BE', SUI:'CH', CRO:'HR', GRE:'GR', POL:'PL', NOR:'NO', SWE:'SE',
+  DEN:'DK', FIN:'FI', CZE:'CZ', SVK:'SK', HUN:'HU', ROU:'RO', BUL:'BG', UKR:'UA',
+  BLR:'BY', LAT:'LV', LTU:'LT', EST:'EE', POR:'PT', IRL:'IE', ISL:'IS', IND:'IN',
+  KAZ:'KZ', MEX:'MX', COL:'CO', CHI:'CL', URU:'UY', PER:'PE', VEN:'VE', ECU:'EC',
+  PAR:'PY', RSA:'ZA', EGY:'EG', MAR:'MA', TUN:'TN', ALG:'DZ', ISR:'IL', TUR:'TR',
+  LIB:'LB', JOR:'JO', KSA:'SA', QAT:'QA', UAE:'AE', NZL:'NZ', TPE:'TW', HKG:'HK',
+  SIN:'SG', THA:'TH', INA:'ID', MAS:'MY', PHI:'PH', VIE:'VN', PUR:'PR', DOM:'DO',
+  BAH:'BS', BAR:'BB', JAM:'JM', SLO:'SI', MNE:'ME', MDA:'MD', GEO:'GE', ARM:'AM',
+  AZE:'AZ', UZB:'UZ', LUX:'LU', MON:'MC', LIE:'LI', CYP:'CY', MLT:'MT', BIH:'BA',
+  MKD:'MK', ALB:'AL', KOS:'XK',
+}
+
+function flagEmoji(code) {
+  if (!code) return ''
+  const up = code.toUpperCase()
+  const cc = up.length === 2 ? up : (IOC_TO_ALPHA2[up] || '')
+  if (cc.length !== 2) return ''
+  return String.fromCodePoint(...[...cc].map(c => 0x1f1a5 + c.charCodeAt(0)))
+}
+
+// ── SEO URL helpers ───────────────────────────────────────────────────────────
+
+function toSlug(str) {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function matchUrl(match) {
+  const date       = (match.event_date || '').slice(0, 10)
+  const tournament = toSlug(match.tournament || '')
+  const p1         = toSlug(match.first_player?.name  || 'player')
+  const p2         = toSlug(match.second_player?.name || 'player')
+  const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
+  return `/match/${match.match_id}/${slug}`
+}
+
+// ── Live lozenge ─────────────────────────────────────────────────────────────
+
+function LiveLozenge({ small = false }) {
+  return (
+    <span className={small ? 'live-lozenge live-lozenge--sm' : 'live-lozenge'}>
+      <span className="live-lozenge-dot" />
+      LIVE
+    </span>
+  )
+}
+
+// ── Status check ─────────────────────────────────────────────────────────────
 
 function isLiveStatus(status) {
   return /in play|live|set \d|game/i.test(status || '')
 }
 
-function LiveScoreDisplay({ match }) {
-  // Prefer aggregated set scores; fall back to game_result / final_result.
-  const sets = match.set_scores || match.final_result || ''
-  const game = match.game_result || ''
-  const status = match.event_status || ''
+// ── Match card — same green/blue split as homepage, always large ──────────────
 
-  return (
-    <div className="match-centre match-centre--inplay">
-      {sets ? (
-        <div className="match-live-score-big">{sets}</div>
-      ) : (
-        <div className="match-live-score-big" style={{ opacity: 0.6 }}>—</div>
-      )}
-      {game && game !== sets && (
-        <div className="match-live-game">{game}</div>
-      )}
-      <div className="match-live-status">{status}</div>
-    </div>
-  )
-}
-
-function InPlayRow({ match }) {
+function MatchCard({ match }) {
   const navigate = useNavigate()
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
   const pred = match.prediction    || {}
+
   const p1prob = pred.prob_first_player  != null ? Math.round(pred.prob_first_player  * 100) : null
   const p2prob = pred.prob_second_player != null ? Math.round(pred.prob_second_player * 100) : null
 
+  const edgeVal = Math.max(pred.edge_first || 0, pred.edge_second || 0)
+  const hasEdge = edgeVal > 0.02
+
+  const p1w = p1prob ?? 50
+  const p2w = p2prob ?? 50
+
+  const rawTourn = (match.tournament || '').trim()
+  const tournDisplay = rawTourn && !['unknown tournament', 'unknown'].includes(rawTourn.toLowerCase())
+    ? rawTourn : null
+
   return (
-    <button
-      className="match-row match-row--live"
-      onClick={() => navigate(`/match/${match.match_id}`)}
-    >
-      {/* Live indicator */}
-      <div className="match-row-time live">
-        <span className="live-dot" />
-      </div>
+    <button className="mc-card mc-card--live" onClick={() => navigate(matchUrl(match))}>
 
-      {/* Player 1 */}
-      <div className="match-player-cell">
-        <div className="match-player-name">{p1.name || '—'}</div>
-        <div className="match-player-sub">
-          <span className="match-player-country">{p1.country_code || ''}</span>
-          <RttLozenge score={p1.rtt_score} hideIfMissing />
-          <FormDots dots={p1.form_dots || []} max={10} />
+      {/* 2-row header: lozenge + tournament on row 1, scores on row 2 */}
+      <div className="mc-card-hdr">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+          <LiveLozenge small />
+          {tournDisplay && <span className="mc-hdr-tourn" style={{ flex: 1 }}>{tournDisplay}</span>}
+          {hasEdge && <span className="mc-card-edge" style={{ flexShrink: 0 }}>+{Math.round(edgeVal * 100)}% edge</span>}
         </div>
-      </div>
-
-      {/* Centre — live score is the headline */}
-      <LiveScoreDisplay match={match} />
-
-      {/* Player 2 */}
-      <div className="match-player-cell right">
-        <div className="match-player-name">{p2.name || '—'}</div>
-        <div className="match-player-sub">
-          <FormDots dots={p2.form_dots || []} max={10} />
-          <RttLozenge score={p2.rtt_score} hideIfMissing />
-          <span className="match-player-country">{p2.country_code || ''}</span>
-        </div>
-      </div>
-
-      {/* Right meta — model probabilities + tournament */}
-      <div className="match-row-meta">
-        {p1prob != null && (
-          <span className="match-prob-pair" title="Model prediction">
-            <span className={p1prob >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p1prob}%</span>
-            <span style={{ color: 'var(--border)', margin: '0 3px' }}>·</span>
-            <span className={p2prob >= 50 ? 'match-prob-p1' : 'match-prob-p2'}>{p2prob}%</span>
-          </span>
+        {(match.set_scores || match.game_result) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+              <span key={i} className="mc-live-set mc-live-set--lg">{set}</span>
+            ))}
+            {match.game_result && <span className="mc-live-game mc-live-game--lg">{match.game_result}</span>}
+          </div>
         )}
-        <span className="live-badge amber">
-          <span className="live-dot" style={{ background: 'var(--amber)' }} />LIVE
-        </span>
       </div>
+
+      {/* Two-colour split body */}
+      <div className="mc-card-body">
+        <div className="mc-side mc-side-green" style={{ width: `${p1w}%` }} />
+        <div className="mc-side mc-side-blue"  style={{ width: `${p2w}%` }} />
+        <div className="mc-vs">VS</div>
+
+        <div className="mc-player-info mc-player-left">
+          <div className="mc-side-top">
+            {p1.photo_url
+              ? <img src={p1.photo_url} className="mc-side-photo" alt="" />
+              : <span className="mc-side-flag">{flagEmoji(p1.country_code)}</span>
+            }
+          </div>
+          <div className="mc-side-name-row">
+            <span className="mc-side-name">{p1.name || '—'}</span>
+            {p1.rtt_score != null && <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>}
+          </div>
+          {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
+        </div>
+
+        <div className="mc-player-info mc-player-right">
+          <div className="mc-side-top" style={{ flexDirection: 'row-reverse' }}>
+            {p2.photo_url
+              ? <img src={p2.photo_url} className="mc-side-photo" alt="" />
+              : <span className="mc-side-flag">{flagEmoji(p2.country_code)}</span>
+            }
+          </div>
+          <div className="mc-side-name-row right">
+            <span className="mc-side-name">{p2.name || '—'}</span>
+            {p2.rtt_score != null && <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>}
+          </div>
+          {p2prob != null && <div className="mc-side-prob" style={{ textAlign: 'right' }}>{p2prob}%</div>}
+        </div>
+      </div>
+
     </button>
   )
 }
+
+// ── Tournament group ──────────────────────────────────────────────────────────
 
 function TournamentGroup({ name, matches }) {
   return (
@@ -107,30 +166,32 @@ function TournamentGroup({ name, matches }) {
           </span>
         </div>
       </div>
-      <div>
-        {matches.map(m => <InPlayRow key={m.match_id} match={m} />)}
+      <div className="mc-card-grid mc-card-grid--live">
+        {matches.map(m => <MatchCard key={m.match_id} match={m} />)}
       </div>
     </div>
   )
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 export default function InPlayPage() {
   useSEO({
-    title: 'Live Tennis Scores & In-Play Odds | RateThatTennis',
-    description: 'Live tennis match scores, in-play updates and real-time win probability. ATP, WTA and Challenger matches updated every 5 minutes.',
+    title: 'Live Tennis Scores & In-Play | RateThatTennis',
+    description: 'Live tennis match scores, in-play updates and real-time win probability. ATP, WTA and Challenger matches updated every 20 seconds.',
     canonical: 'https://ratethat.tennis/in-play',
   })
 
-  const [matches,    setMatches]    = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(null)
-  const [lastFetch,  setLastFetch]  = useState(null)
+  const [matches,   setMatches]   = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
+  const [lastFetch, setLastFetch] = useState(null)
 
   const load = useCallback(() => {
     api.matchesToday()
       .then(data => {
-        const all = Array.isArray(data) ? data : data.matches || []
-        const live = all.filter(m => isLiveStatus(m.event_status))
+        const all  = Array.isArray(data) ? data : data.matches || []
+        const live = all.filter(m => !m.is_doubles && isLiveStatus(m.event_status))
         setMatches(live)
         setLastFetch(new Date())
         setLoading(false)
@@ -147,7 +208,6 @@ export default function InPlayPage() {
   if (loading) return <div className="page"><div className="loading">Loading live matches…</div></div>
   if (error)   return <div className="page"><div className="error">{error}</div></div>
 
-  // Group by tournament
   const byTournament = {}
   for (const m of matches) {
     const key = m.tournament || 'Other'
@@ -161,11 +221,9 @@ export default function InPlayPage() {
       <div className="cc-header">
         <div>
           <h1 className="cc-title">In play</h1>
-          <div className="cc-subtitle">
-            Matches happening right now · refreshes every 20s
-          </div>
+          <div className="cc-subtitle">Matches happening right now · refreshes every 20s</div>
         </div>
-        <div className="cc-meta-badges">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="count-badge live">
             <span className="live-dot" />{matches.length} live
           </span>
@@ -174,6 +232,11 @@ export default function InPlayPage() {
               {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
+          <button
+            onClick={load}
+            style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', padding: '4px 6px', borderRadius: 'var(--r-sm)' }}
+            title="Refresh"
+          >↻</button>
         </div>
       </div>
 
