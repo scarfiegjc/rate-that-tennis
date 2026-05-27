@@ -618,12 +618,26 @@ def get_player_form(
           AND m.event_date IS NOT NULL
           AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
           {surf_clause_live}
-        ORDER BY m.event_date DESC, m.id DESC
+        ORDER BY m.event_date DESC,
+                 LEAST(m.first_player_id, m.second_player_id),
+                 GREATEST(m.first_player_id, m.second_player_id),
+                 m.id DESC
         LIMIT %s
         """,
         [player_id, player_id, player_id, player_id, player_id,
          player_id, player_id, *surf_params_live, limit],
     )
+    # Dedup production rows — same match sometimes stored under two IDs
+    seen_pairs: set = set()
+    deduped_live: list = []
+    for row in live_match_rows:
+        d = str(row.get("date") or "")
+        opp = str(row.get("opponent_name") or "").lower()
+        key = (d, opp)
+        if key not in seen_pairs:
+            seen_pairs.add(key)
+            deduped_live.append(row)
+    live_match_rows = deduped_live
 
     # ── 2. Historical Sackmann data (rich rank-aware perf index for older matches) ──
     sa_ids = _sa_ids_for(player_id)
@@ -695,6 +709,7 @@ def get_player_form(
             WHERE (sm.winner_id = ANY(%s) OR sm.loser_id = ANY(%s))
               {surface_clause}
               AND sm.tourney_date IS NOT NULL
+              AND sm.tourney_date >= CURRENT_DATE - INTERVAL '7 years'
             ORDER BY sm.tourney_date DESC
             LIMIT %s
             """,
