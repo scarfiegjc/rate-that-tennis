@@ -239,14 +239,26 @@ def extract_all_markets(event: dict, flipped: bool) -> dict:
 
 
 def ensure_markets_column(conn) -> None:
-    """Add markets_json JSONB column to bookmaker_match_links if it doesn't exist yet."""
+    """Create bookmaker_match_links if needed, then ensure markets_json column exists."""
     with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS bookmaker_match_links (
+                id             SERIAL PRIMARY KEY,
+                match_id       INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+                bookmaker_key  TEXT    NOT NULL,
+                event_url      TEXT,
+                affiliate_url  TEXT,
+                markets_json   JSONB,
+                fetched_at     TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (match_id, bookmaker_key)
+            )
+        """)
         cur.execute("""
             ALTER TABLE bookmaker_match_links
             ADD COLUMN IF NOT EXISTS markets_json JSONB
         """)
     conn.commit()
-    log.info('  schema: bookmaker_match_links.markets_json ensured')
+    log.info('  schema: bookmaker_match_links ensured (table + markets_json column)')
 
 
 # ── Match Cloudbet event → DB match_id ───────────────────────────────────────
