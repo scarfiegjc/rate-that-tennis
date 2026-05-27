@@ -2422,6 +2422,47 @@ export default function MatchDetail() {
       {/* ── HERO — full-bleed, outside any max-width container ── */}
       <MatchHero match={match} />
 
+      {/* ── LIVE SCORE BAR — only shown when match is in play ── */}
+      {match.is_live && (match.set_scores || match.game_result) && (
+        <div style={{
+          background: '#000',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          padding: '10px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+        }}>
+          <span className="live-lozenge">
+            <span className="live-lozenge-dot" />
+            LIVE
+          </span>
+          {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+            <span key={i} style={{
+              fontSize: 22,
+              fontWeight: 900,
+              color: '#fff',
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: 1,
+              background: 'rgba(255,255,255,0.1)',
+              borderRadius: 6,
+              padding: '2px 12px',
+            }}>{set}</span>
+          ))}
+          {match.game_result && (
+            <span style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: 'rgba(255,255,255,0.7)',
+              fontVariantNumeric: 'tabular-nums',
+              background: 'rgba(255,255,255,0.07)',
+              borderRadius: 5,
+              padding: '2px 10px',
+            }}>{match.game_result}</span>
+          )}
+        </div>
+      )}
+
       {/* ── STICKY PLAYER + TABS BAR — full-width ── */}
       <PlayerBar
         match={match}
