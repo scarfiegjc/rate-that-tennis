@@ -2007,6 +2007,50 @@ font-variant-numeric: tabular-nums;
 margin-left: 4px;
 }
 
+/* ── Live card (expanded) ─────────────────────────────────────────────── */
+.mc-card--live .mc-card-hdr {
+  flex-direction: column;
+  align-items: flex-start;
+  height: auto;
+  min-height: 48px;
+  padding: 6px 10px 5px;
+  gap: 4px;
+}
+.mc-card--live .mc-card-body { height: 110px; }
+
+/* Large set score chips for expanded live cards */
+.mc-live-set--lg {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+.mc-live-game--lg {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  padding: 2px 7px;
+  margin-left: 2px;
+}
+
+/* 2-col grid for live match cards within a tournament block */
+.mc-card-grid--live {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+@media (max-width: 700px) {
+  .mc-card-grid--live { grid-template-columns: 1fr; }
+}
+
 /* Name + RTT in one row */
 .mc-side-name-row {
 display: flex;
