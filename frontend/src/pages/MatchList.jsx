@@ -118,6 +118,16 @@ function Tickbox({ label, checked, onChange, accent }) {
   )
 }
 
+// ── Time helpers ─────────────────────────────────────────────────────────────
+
+function fmtUtcTime(timeStr) {
+  if (!timeStr) return null
+  const [h, m] = timeStr.split(':')
+  const d = new Date()
+  d.setUTCHours(parseInt(h, 10), parseInt(m, 10), 0, 0)
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
 // ── Match card (Combatrics-style compact card) ────────────────────────────────
 // Layout: court-image header banner → P1 row → P2 row → green/blue prob bar
 
@@ -149,7 +159,7 @@ function MatchCard({ match }) {
   const edgeVal = Math.max(pred.edge_first || 0, pred.edge_second || 0)
   const hasEdge = edgeVal > 0.02
 
-  const timeStr = isFinished ? 'FT' : match.event_time?.slice(0, 5) || null
+  const timeStr = isFinished ? 'FT' : (match.event_time ? fmtUtcTime(match.event_time) : null)
 
   // Filter out "Unknown" tournament strings — fall back to surface name
   const rawTourn = (match.tournament || '').trim()
@@ -183,6 +193,7 @@ function MatchCard({ match }) {
         ) : (
           <>
             {timeStr && <span className="mc-hdr-time">{timeStr}</span>}
+            {match.venue && <span className="mc-hdr-venue">{match.venue}</span>}
             {tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
           </>
         )}
@@ -600,7 +611,7 @@ function StatPicksSidebar({ navigate }) {
 
 function Sidebar({ allMatches }) {
   const navigate = useNavigate()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = new Date().toLocaleDateString('sv')  // YYYY-MM-DD in local tz
 
   const todaySingles = useMemo(() =>
     allMatches.filter(m => !m.is_doubles && (m.event_date || '').slice(0, 10) === today),
@@ -862,8 +873,8 @@ export default function MatchList() {
 
   // Filter — doubles always excluded
   const filtered = useMemo(() => {
-    const todayStr    = new Date().toISOString().slice(0, 10)
-    const tomorrowStr = new Date(Date.now() + 864e5).toISOString().slice(0, 10)
+    const todayStr    = new Date().toLocaleDateString('sv')  // YYYY-MM-DD in local tz
+    const tomorrowStr = new Date(Date.now() + 864e5).toLocaleDateString('sv')
     return matches.filter(m => {
       if (m.is_doubles) return false
       if (dateFilter === 'Today'    && (m.event_date || '').slice(0, 10) !== todayStr)    return false
