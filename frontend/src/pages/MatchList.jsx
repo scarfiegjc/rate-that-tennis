@@ -169,7 +169,9 @@ function MatchCard({ match }) {
         {isLive ? (
           <>
             <LiveLozenge small />
-            {match.set_scores && <span className="mc-live-sets">{match.set_scores}</span>}
+            {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+              <span key={i} className="mc-live-set">{set}</span>
+            ))}
             {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
           </>
         ) : (
@@ -194,8 +196,8 @@ function MatchCard({ match }) {
       {/* Two-colour split body */}
       <div className="mc-card-body">
 
-        {/* VS marker at the colour boundary */}
-        <div className="mc-vs" style={{ left: `${p1w}%` }}>VS</div>
+        {/* VS marker — always at 50% centre */}
+        <div className="mc-vs">VS</div>
 
         {/* P1 — green left, flex proportional to win probability */}
         <div className="mc-side mc-side-green"
@@ -206,11 +208,13 @@ function MatchCard({ match }) {
               ? <img src={p1.photo_url} className="mc-side-photo" alt="" />
               : <span className="mc-side-flag">{flagEmoji(p1.country_code)}</span>
             }
+          </div>
+          <div className="mc-side-name-row">
+            <span className="mc-side-name">{p1.name || '—'}</span>
             {p1.rtt_score != null && (
               <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>
             )}
           </div>
-          <div className="mc-side-name">{p1.name || '—'}</div>
           {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
 
@@ -223,11 +227,13 @@ function MatchCard({ match }) {
               ? <img src={p2.photo_url} className="mc-side-photo" alt="" />
               : <span className="mc-side-flag">{flagEmoji(p2.country_code)}</span>
             }
+          </div>
+          <div className="mc-side-name-row right">
+            <span className="mc-side-name">{p2.name || '—'}</span>
             {p2.rtt_score != null && (
               <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>
             )}
           </div>
-          <div className="mc-side-name" style={{ textAlign: 'right' }}>{p2.name || '—'}</div>
           {p2prob != null && <div className="mc-side-prob" style={{ textAlign: 'right' }}>{p2prob}%</div>}
         </div>
 
