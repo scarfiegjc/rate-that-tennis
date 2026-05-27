@@ -232,12 +232,17 @@ def _bulk_form_dots(player_ids: list, n: int = 10) -> dict:
             SELECT unnest(ARRAY[{placeholders}]::int[]) AS player_id
         ) ids
         CROSS JOIN LATERAL (
-            SELECT m.winner, m.first_player_id
+            SELECT DISTINCT ON (m.event_date, LEAST(m.first_player_id, m.second_player_id), GREATEST(m.first_player_id, m.second_player_id))
+                   m.winner, m.first_player_id
             FROM matches m
             WHERE (m.first_player_id = ids.player_id OR m.second_player_id = ids.player_id)
               AND m.event_status = 'Finished'
               AND m.event_date IS NOT NULL
-            ORDER BY m.event_date DESC, m.id DESC
+              AND (m.is_doubles IS NULL OR m.is_doubles = false)
+            ORDER BY m.event_date DESC,
+                     LEAST(m.first_player_id, m.second_player_id),
+                     GREATEST(m.first_player_id, m.second_player_id),
+                     m.id DESC
             LIMIT %s
         ) sub
         """,
@@ -253,15 +258,21 @@ def _bulk_form_dots(player_ids: list, n: int = 10) -> dict:
 
 
 def _form_dots(player_id: int, n: int = 10) -> list[str]:
-    """Last N match results as W/L list."""
+    """Last N singles match results as W/L list.
+    Deduplicates by (opponent, date) to collapse any pipeline double-ingestion."""
     rows = query(
         """
-        SELECT m.winner, m.first_player_id
+        SELECT DISTINCT ON (m.event_date, LEAST(m.first_player_id, m.second_player_id), GREATEST(m.first_player_id, m.second_player_id))
+               m.winner, m.first_player_id
         FROM matches m
         WHERE (m.first_player_id = %s OR m.second_player_id = %s)
           AND m.event_status = 'Finished'
           AND m.event_date IS NOT NULL
-        ORDER BY m.event_date DESC, m.id DESC
+          AND (m.is_doubles IS NULL OR m.is_doubles = false)
+        ORDER BY m.event_date DESC,
+                 LEAST(m.first_player_id, m.second_player_id),
+                 GREATEST(m.first_player_id, m.second_player_id),
+                 m.id DESC
         LIMIT %s
         """,
         (player_id, player_id, n),
