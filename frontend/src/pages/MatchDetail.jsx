@@ -365,37 +365,35 @@ function MatchHero({ match }) {
           </div>
         </div>
 
-        {/* ── PLAYER SIDES ─────────────────────────────────────────── */}
-        <div style={{ display: 'flex', minHeight: 230 }}>
+        {/* ── PLAYER SIDES — horizontal rows, avatars on inner edge ── */}
+        <div style={{ display: 'flex', minHeight: 240, paddingTop: 40 }}>
 
-          {/* Player 1 — left */}
+          {/* Player 1 — left: [text] [avatar→inner] */}
           <div style={{
             flex: 1,
-            padding: '28px 115px 24px 0',
+            paddingRight: 116,
             display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 16,
             minWidth: 0,
             overflow: 'hidden',
           }}>
-            <PlayerAvatar photoUrl={p1.logo_url} name={p1.name} size={72} accent={P1_ACC} />
-
-            <div style={{ minWidth: 0 }}>
+            {/* Text grows, left-aligned */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <Link
                 to={playerUrl({ id: p1.player_id, name: p1.name })}
-                style={{ fontWeight: 800, fontSize: 'clamp(1.1rem, 2.2vw, 1.7rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
+                style={{ fontWeight: 800, fontSize: 'clamp(1rem, 2vw, 1.6rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
               >
                 {p1.name || '—'}
               </Link>
               {p1.ratings?.rtt_score != null && (
-                <div style={{ marginTop: 5 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(22,163,74,0.25)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px' }}>
-                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
-                    <span style={{ fontSize: '1rem', fontWeight: 900, color: '#4ade80', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p1.ratings.rtt_score)}</span>
-                  </span>
-                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(22,163,74,0.25)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px', alignSelf: 'flex-start' }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
+                  <span style={{ fontSize: '1rem', fontWeight: 900, color: '#4ade80', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p1.ratings.rtt_score)}</span>
+                </span>
               )}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {p1.current_rank    && <P1Pill>#{p1.current_rank}</P1Pill>}
                 {p1.country_code    && <P1Pill>{p1.country_code}</P1Pill>}
                 {p1.hand && p1.hand !== 'Unknown' && <P1Pill>{p1.hand === 'Left' ? 'L-hand' : 'R-hand'}</P1Pill>}
@@ -411,10 +409,7 @@ function MatchHero({ match }) {
                   </span>
                 )}
               </div>
-            </div>
-
-            {!isFinished && p1.player_id && (
-              <div>
+              {!isFinished && p1.player_id && (
                 <StarPick
                   matchId={match.match_id}
                   playerId={p1.player_id}
@@ -422,39 +417,40 @@ function MatchHero({ match }) {
                   ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
                   size="sm"
                 />
-              </div>
-            )}
+              )}
+            </div>
+            {/* Avatar — inner edge */}
+            <PlayerAvatar photoUrl={p1.logo_url} name={p1.name} size={88} accent={P1_ACC} />
           </div>
 
-          {/* Player 2 — right */}
+          {/* Player 2 — right: [avatar→inner] [text] */}
           <div style={{
             flex: 1,
-            padding: '28px 0 24px 115px',
+            paddingLeft: 116,
             display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 16,
             minWidth: 0,
             overflow: 'hidden',
           }}>
-            <PlayerAvatar photoUrl={p2.logo_url} name={p2.name} size={72} accent={P2_ACC} />
-
-            <div style={{ textAlign: 'right', minWidth: 0 }}>
+            {/* Avatar — inner edge */}
+            <PlayerAvatar photoUrl={p2.logo_url} name={p2.name} size={88} accent={P2_ACC} />
+            {/* Text grows, right-aligned */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', textAlign: 'right' }}>
               <Link
                 to={playerUrl({ id: p2.player_id, name: p2.name })}
-                style={{ fontWeight: 800, fontSize: 'clamp(1.1rem, 2.2vw, 1.7rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
+                style={{ fontWeight: 800, fontSize: 'clamp(1rem, 2vw, 1.6rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
               >
                 {p2.name || '—'}
               </Link>
               {p2.ratings?.rtt_score != null && (
-                <div style={{ marginTop: 5 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(29,78,216,0.25)', border: '1px solid rgba(29,78,216,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px' }}>
-                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
-                    <span style={{ fontSize: '1rem', fontWeight: 900, color: '#60a5fa', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p2.ratings.rtt_score)}</span>
-                  </span>
-                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(29,78,216,0.25)', border: '1px solid rgba(29,78,216,0.5)', borderRadius: 6, padding: '3px 9px 3px 6px', alignSelf: 'flex-end' }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.07em' }}>RTT</span>
+                  <span style={{ fontSize: '1rem', fontWeight: 900, color: '#60a5fa', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{Math.round(p2.ratings.rtt_score)}</span>
+                </span>
               )}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
                 {(p2.form_dots || []).length > 0 && (
                   <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                     {(p2.form_dots || []).slice(0, 5).map((d, i) => (
@@ -470,10 +466,7 @@ function MatchHero({ match }) {
                 {p2.country_code    && <P1Pill>{p2.country_code}</P1Pill>}
                 {p2.current_rank    && <P1Pill>#{p2.current_rank}</P1Pill>}
               </div>
-            </div>
-
-            {!isFinished && p2.player_id && (
-              <div>
+              {!isFinished && p2.player_id && (
                 <StarPick
                   matchId={match.match_id}
                   playerId={p2.player_id}
@@ -481,8 +474,8 @@ function MatchHero({ match }) {
                   ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
                   size="sm"
                 />
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
         </div>
@@ -566,7 +559,7 @@ function OddsRail({ side, match, cloudbetMarkets, affiliateUrl }) {
   const accent   = isRight ? '#1d4ed8' : '#16a34a'
   const bgAccent = isRight ? '#0c1f3f' : '#0d3b1e'
 
-  if (!cloudbetMarkets && !match.market?.cloudbet_link) return null
+  if (!cloudbetMarkets && !match.market?.cloudbet_link) return <div />
 
   const mkts     = cloudbetMarkets || {}
   const winner   = mkts.winner   || {}
@@ -594,7 +587,7 @@ function OddsRail({ side, match, cloudbetMarkets, affiliateUrl }) {
     : null
 
   // Hide rail entirely if no useful data
-  if (!winPrice && !hdpPrice && !score20) return null
+  if (!winPrice && !hdpPrice && !score20) return <div />
 
   return (
     <div style={{
