@@ -196,13 +196,15 @@ function MatchCard({ match }) {
       {/* Two-colour split body */}
       <div className="mc-card-body">
 
-        {/* VS marker — always at 50% centre */}
+        {/* Background bands — proportional widths, no content */}
+        <div className="mc-side mc-side-green" style={{ width: `${p1w}%`, opacity: winner2 ? 0.45 : 1 }} />
+        <div className="mc-side mc-side-blue"  style={{ width: `${p2w}%`, opacity: winner1 ? 0.45 : 1 }} />
+
+        {/* VS at centre */}
         <div className="mc-vs">VS</div>
 
-        {/* P1 — green left, flex proportional to win probability */}
-        <div className="mc-side mc-side-green"
-          style={{ flex: p1w, opacity: winner2 ? 0.45 : 1 }}
-        >
+        {/* P1 info — always left half regardless of probability */}
+        <div className="mc-player-info mc-player-left" style={{ opacity: winner2 ? 0.45 : 1 }}>
           <div className="mc-side-top">
             {p1.photo_url
               ? <img src={p1.photo_url} className="mc-side-photo" alt="" />
@@ -218,10 +220,8 @@ function MatchCard({ match }) {
           {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
 
-        {/* P2 — blue right, mirrored layout */}
-        <div className="mc-side mc-side-blue"
-          style={{ flex: p2w, opacity: winner1 ? 0.45 : 1 }}
-        >
+        {/* P2 info — always right half regardless of probability */}
+        <div className="mc-player-info mc-player-right" style={{ opacity: winner1 ? 0.45 : 1 }}>
           <div className="mc-side-top" style={{ flexDirection: 'row-reverse' }}>
             {p2.photo_url
               ? <img src={p2.photo_url} className="mc-side-photo" alt="" />

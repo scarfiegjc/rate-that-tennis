@@ -1840,24 +1840,38 @@ padding: 1px 5px;
 
 /* Two-colour split body */
 .mc-card-body {
-display: flex;
+display: block;
 height: 88px;
 position: relative;
+overflow: hidden;
 }
 
-/* Shared side styles */
+/* Background colour bands — absolutely positioned, purely decorative */
 .mc-side {
+position: absolute;
+top: 0;
+bottom: 0;
+}
+
+.mc-side-green { left: 0;  background: #15803d; }
+.mc-side-blue  { right: 0; background: #1d4ed8; }
+
+/* Player info panels — fixed half-width, z-indexed above bands */
+.mc-player-info {
+position: absolute;
+top: 0;
+bottom: 0;
+width: calc(50% - 10px);
 display: flex;
 flex-direction: column;
 justify-content: space-between;
 padding: 8px 10px 7px;
-min-width: 60px;
+z-index: 2;
 overflow: hidden;
-flex-shrink: 1;
 }
 
-.mc-side-green { background: #15803d; }
-.mc-side-blue  { background: #1d4ed8; }
+.mc-player-left  { left: 0; }
+.mc-player-right { right: 0; }
 
 .mc-side-top {
 display: flex;
