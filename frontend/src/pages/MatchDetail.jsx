@@ -592,7 +592,7 @@ function OddsRail({ side, match, cloudbetMarkets, affiliateUrl }) {
   return (
     <div style={{
       position: 'sticky',
-      top: 170,
+      top: 100,
       alignSelf: 'flex-start',
       width: '100%',
       display: 'flex',
@@ -960,16 +960,12 @@ function SectionIntelligence({ match }) {
         </div>
       )}
 
-      {/* Bookmaker odds — split panel */}
-      {(() => {
+      {/* Bookmaker odds panel removed — odds shown in sticky OddsRail sidebars instead */}
+      {false && (() => {
         const mkt         = match.market || {}
         const allBk       = mkt.all_bookmakers || []
-        // Prefer Cloudbet's per-event deep link when present (Cloudbet is the
-        // affiliate where our quoted price IS the price the user gets).
-        // Fall back to BresBet's link if Cloudbet hasn't matched this fight.
         const ctaLink     = mkt.cloudbet_link || mkt.bresbet_link || null
         const ctaLabel    = mkt.cloudbet_link ? 'Bet at Cloudbet →' : 'Bet at BresBet →'
-        // Keep the legacy variable so existing JSX below doesn't break.
         const bresbetLink = ctaLink
         const p1prob = pred.prob_first_player
         const p2prob = pred.prob_second_player

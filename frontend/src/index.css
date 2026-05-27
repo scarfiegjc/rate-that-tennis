@@ -105,19 +105,16 @@ padding: 0;
 position: sticky;
 top: 0;
 z-index: 100;
-height: 60px;
-background: rgba(243, 251, 244, 0.92);
-backdrop-filter: blur(12px);
-border-bottom: 1px solid var(--border);
+height: 52px;
+background: linear-gradient(to right, #0d3b1e 0%, #0c1f3f 100%);
+border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-/* Inner wrapper aligns header content with the main page body
-(.page is max-width 1080px, padding 0 20px) so the logo sits
-flush left with the page content and the nav sits flush right. */
+/* Inner wrapper aligned to the match page 1280px frame */
 .app-header-inner {
-max-width: 1080px;
+max-width: 1280px;
 margin: 0 auto;
-padding: 0 20px;
+padding: 0 24px;
 height: 100%;
 display: flex;
 align-items: center;
@@ -141,15 +138,15 @@ line-height: 1;
 }
 
 .app-logo-ratethat {
-color: var(--text);
+color: rgba(255,255,255,0.9);
 }
 
 .app-logo-sport {
-color: var(--green-text);
+color: #4ade80;
 }
 
 .app-logo-dot {
-color: var(--green);
+color: #4ade80;
 }
 
 .app-nav {
@@ -166,18 +163,19 @@ padding: 5px 10px;
 border-radius: var(--r-sm);
 font-size: 13px;
 font-weight: 500;
-color: var(--text-2);
+color: rgba(255,255,255,0.65);
 transition: background 0.12s, color 0.12s;
+text-decoration: none;
 }
 
 .nav-link:hover {
-background: var(--bg-raised);
-color: var(--text);
+background: rgba(255,255,255,0.1);
+color: #fff;
 }
 
 .nav-link.active {
-background: var(--bg-sunken);
-color: var(--text);
+background: rgba(255,255,255,0.12);
+color: #fff;
 font-weight: 600;
 }
 

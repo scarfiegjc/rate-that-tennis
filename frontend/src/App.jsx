@@ -72,7 +72,7 @@ function Header() {
             </Link>
             {!isLoggedIn && (
               <Link to="/join" className={`nav-link ${is('/join') ? 'active' : ''}`}
-                    style={{ color:'var(--green)', fontWeight:700 }}>
+                    style={{ color:'#4ade80', fontWeight:700 }}>
                 Join free
               </Link>
             )}
@@ -87,7 +87,8 @@ function Header() {
                   style={{
                     display:'flex', alignItems:'center', gap:7,
                     padding:'5px 10px', borderRadius:'var(--r)',
-                    background:'var(--bg-raised)', fontSize:13, fontWeight:500,
+                    background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.15)',
+                    fontSize:13, fontWeight:500, color:'#fff',
                   }}
                 >
                   <span style={{
