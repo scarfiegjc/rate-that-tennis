@@ -143,7 +143,7 @@ function MomentumSquares({ momentum, form_dots }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Non-sticky header (tournament info) — full-bleed court photo background
+// Surface / court helpers (used by hero + legacy fallback)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function inferSurfaceFromName(name) {
@@ -160,151 +160,493 @@ function courtImage(surface, tournamentName = '') {
   if (s.includes('clay'))  return courtClayImg
   if (s.includes('grass')) return courtGrassImg
   if (s.includes('hard') || s.includes('indoor') || s.includes('carpet')) return courtHardImg
-  // Fallback: infer from tournament name when surface is Unknown/null
   const inferred = inferSurfaceFromName(tournamentName)
   if (inferred === 'clay')  return courtClayImg
   if (inferred === 'grass') return courtGrassImg
   return courtHardImg
 }
 
-function MatchMeta({ match }) {
-  const pred   = match.prediction || {}
+function fmtMatchDate(d) {
+  if (!d || d.length < 10) return null
+  try {
+    return new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch { return d }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PlayerAvatar — circular photo with initials fallback
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PlayerAvatar({ photoUrl, name, size = 72, accent = 'rgba(255,255,255,0.18)' }) {
+  const initials = (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name || ''}
+        style={{
+          width: size, height: size,
+          borderRadius: '50%',
+          objectFit: 'cover',
+          objectPosition: 'top center',
+          border: '2px solid rgba(255,255,255,0.55)',
+          background: 'rgba(255,255,255,0.1)',
+          flexShrink: 0,
+        }}
+        onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling && (e.currentTarget.nextSibling.style.display = 'flex') }}
+      />
+    )
+  }
+  return (
+    <div style={{
+      width: size, height: size,
+      borderRadius: '50%',
+      background: accent,
+      border: '2px solid rgba(255,255,255,0.4)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, fontWeight: 800,
+      color: 'rgba(255,255,255,0.85)',
+      flexShrink: 0,
+      letterSpacing: '0.02em',
+    }}>
+      {initials}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MatchHero — Combatrics-style gradient hero with player details + center card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MatchHero({ match }) {
+  const p1   = match.first_player  || {}
+  const p2   = match.second_player || {}
+  const pred = match.prediction    || {}
   const imgSrc = courtImage(match.surface, match.tournament)
+
+  const p1Pct = pred.prob_first_player  != null ? Math.round(pred.prob_first_player  * 100) : 50
+  const p2Pct = pred.prob_second_player != null ? Math.round(pred.prob_second_player * 100) : 50
+
+  // RTT greens + blues — darker variants for backgrounds
+  const P1_BG   = '#0d3b1e'   // deep tennis green (p1 side)
+  const P2_BG   = '#0c1f3f'   // deep navy blue (p2 side)
+  const P1_ACC  = '#16a34a'   // accent green
+  const P2_ACC  = '#1d4ed8'   // accent blue
+
+  const isFinished = /finished/i.test(match.status || '')
 
   const confidenceColor = pred.confidence === 'high'   ? '#4ade80'
                         : pred.confidence === 'medium' ? '#fbbf24'
-                        : 'rgba(255,255,255,0.5)'
+                        : 'rgba(255,255,255,0.4)'
+
+  // Stat pills shown under player name
+  const P1Pill = ({ children }) => (
+    <span style={{ fontSize: '0.68rem', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, padding: '2px 6px', color: 'rgba(255,255,255,0.75)', fontWeight: 500 }}>
+      {children}
+    </span>
+  )
 
   return (
-    <div style={{
-      position: 'relative',
-      minHeight: 170,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      textAlign: 'center',
-      overflow: 'hidden',
-      padding: '28px 32px 24px',
-      background: imgSrc ? undefined : 'var(--bg-sunken)',
-    }}>
+    <div style={{ position: 'relative', minHeight: 230, overflow: 'hidden' }}>
 
-      {/* Court photo background */}
-      {imgSrc && (
+      {/* Gradient split at p1Pct% */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: `linear-gradient(to right, ${P1_BG} ${p1Pct}%, ${P2_BG} ${p1Pct}%)`,
+      }} />
+
+      {/* Content — max-width container */}
+      <div style={{ position: 'relative', maxWidth: 1280, margin: '0 auto', padding: '0 24px' }}>
+
+        {/* ← Today back-link */}
+        <Link to="/" style={{
+          position: 'absolute', top: 12, left: 28,
+          color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 500,
+          textDecoration: 'none', zIndex: 20,
+          letterSpacing: 0.1,
+        }}>← Today</Link>
+
+        {/* ── CENTER CARD ─────────────────────────────────────────── */}
         <div style={{
-          position: 'absolute', inset: 0,
-          backgroundImage: `url(${imgSrc})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center 40%',
-        }} />
-      )}
-
-      {/* Dark gradient overlay for readability */}
-      {imgSrc && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.68) 100%)',
-        }} />
-      )}
-
-      {/* ← Today — top left */}
-      <Link to="/" style={{
-        position: 'absolute', top: 14, left: 18,
-        color: 'rgba(255,255,255,0.85)',
-        fontSize: 12, fontWeight: 500,
-        zIndex: 2,
-        textDecoration: 'none',
-        letterSpacing: 0.1,
-      }}>
-        ← Today
-      </Link>
-
-      {/* Content — centred over image */}
-      <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
-
-        {/* Surface lozenge — centred */}
-        <div style={{ marginBottom: 12 }}>
-          <SurfaceBadge surface={match.surface} light />
-        </div>
-
-        {/* Tournament name */}
-        <div style={{
-          fontSize: 22, fontWeight: 800,
-          color: '#ffffff',
-          letterSpacing: '-0.4px',
-          marginBottom: 4,
-          textShadow: '0 1px 4px rgba(0,0,0,0.4)',
-          lineHeight: 1.2,
+          position: 'absolute',
+          top: 10, bottom: 10,
+          left: '50%', transform: 'translateX(-50%)',
+          width: 200,
+          zIndex: 10,
         }}>
-          {match.tournament}
-        </div>
-
-        {/* Round */}
-        {match.round && (
           <div style={{
-            fontSize: 14, fontWeight: 600,
-            color: 'rgba(255,255,255,0.85)',
-            marginBottom: 8,
-            letterSpacing: 0.1,
-            textShadow: '0 1px 3px rgba(0,0,0,0.4)',
+            position: 'relative',
+            overflow: 'hidden',
+            background: 'rgba(6,6,10,0.93)',
+            borderRadius: 14,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '0 0 12px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.45)',
           }}>
-            {match.round}
-          </div>
-        )}
-
-        {/* Confidence pill */}
-        {pred.confidence && (
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'rgba(0,0,0,0.35)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            borderRadius: 999,
-            padding: '4px 10px',
-            fontSize: 11,
-            color: 'rgba(255,255,255,0.95)',
-            fontWeight: 600,
-            letterSpacing: 0.2,
-          }}>
-            <span style={{
-              display: 'inline-block',
-              width: 6, height: 6, borderRadius: '50%',
-              background: confidenceColor,
-            }} />
-            {pred.confidence} confidence
-          </div>
-        )}
-
-        {/* Live score banner */}
-        {match.is_live && (match.set_scores || match.game_result) && (
-          <div style={{ marginTop: 14 }}>
-            {match.set_scores && (
+            {/* Court image ghost */}
+            {imgSrc && (
               <div style={{
-                display: 'inline-block',
-                background: 'rgba(0,0,0,0.5)',
-                border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: 8,
-                padding: '6px 16px',
-                marginBottom: 4,
-              }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
-                  Live score
+                position: 'absolute', inset: 0,
+                backgroundImage: `url(${imgSrc})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center 40%',
+                opacity: 0.18,
+              }} />
+            )}
+
+            <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
+              {/* Event header */}
+              <div style={{ padding: '10px 12px 9px', borderBottom: '1px solid rgba(255,255,255,0.08)', textAlign: 'center' }}>
+                <div style={{ fontWeight: 800, fontSize: '0.77rem', color: '#fff', lineHeight: 1.25, marginBottom: 4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {match.tournament || 'Match'}
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 900, color: '#ffffff', fontVariantNumeric: 'tabular-nums', letterSpacing: 1 }}>
-                  {match.set_scores}
+                {match.round && (
+                  <div style={{ fontSize: '0.66rem', color: '#9ca3af', marginBottom: 2 }}>{match.round}</div>
+                )}
+                {match.event_date && (
+                  <div style={{ fontSize: '0.66rem', color: '#9ca3af' }}>{fmtMatchDate(match.event_date)}</div>
+                )}
+              </div>
+
+              {/* Surface + VS */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '6px 12px' }}>
+                <SurfaceBadge surface={match.surface} light />
+                <div style={{ fontWeight: 900, fontSize: '1.8rem', color: '#fff', letterSpacing: '0.2em', lineHeight: 1 }}>VS</div>
+              </div>
+
+              {/* Probability block */}
+              <div style={{ padding: '0 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 5 }}>
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: '1.5rem', color: '#4ade80', lineHeight: 1 }}>{p1Pct}%</div>
+                    <div style={{ fontSize: '0.56rem', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.07em', opacity: 0.85, marginTop: 1 }}>
+                      {(p1.name || '').split(' ').pop()}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 900, fontSize: '1.5rem', color: '#60a5fa', lineHeight: 1 }}>{p2Pct}%</div>
+                    <div style={{ fontSize: '0.56rem', color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.07em', opacity: 0.85, marginTop: 1 }}>
+                      {(p2.name || '').split(' ').pop()}
+                    </div>
+                  </div>
                 </div>
-                {match.game_result && (
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                    {match.game_result}
+                <ProbBar p1={pred.prob_first_player} p2={pred.prob_second_player} name1="" name2="" />
+                {pred.confidence && (
+                  <div style={{ textAlign: 'center', marginTop: 6 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.58rem', fontWeight: 700, color: confidenceColor, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: confidenceColor, display: 'inline-block' }} />
+                      {pred.confidence} confidence
+                    </span>
                   </div>
                 )}
               </div>
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#FCD34D', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#FCD34D', letterSpacing: 0.5 }}>IN PLAY</span>
+
+              {/* Live banner */}
+              {match.is_live && (
+                <div style={{ margin: '8px 12px 0', paddingTop: 7, borderTop: '1px solid rgba(255,255,255,0.08)', textAlign: 'center' }}>
+                  {match.set_scores && (
+                    <div style={{ fontWeight: 900, fontSize: '1.1rem', color: '#fff', fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>
+                      {match.set_scores}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 3 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FCD34D', animation: 'pulse 1.5s infinite', display: 'inline-block' }} />
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#FCD34D', letterSpacing: 0.5 }}>IN PLAY</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+        </div>
+
+        {/* ── PLAYER SIDES ─────────────────────────────────────────── */}
+        <div style={{ display: 'flex', minHeight: 230 }}>
+
+          {/* Player 1 — left */}
+          <div style={{
+            flex: 1,
+            padding: '28px 115px 24px 0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}>
+            <PlayerAvatar photoUrl={p1.logo_url} name={p1.name} size={72} accent={P1_ACC} />
+
+            <div style={{ minWidth: 0 }}>
+              <Link
+                to={playerUrl({ id: p1.player_id, name: p1.name })}
+                style={{ fontWeight: 800, fontSize: 'clamp(1.1rem, 2.2vw, 1.7rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
+              >
+                {p1.name || '—'}
+              </Link>
+              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'rgba(255,255,255,0.75)', marginTop: 3, letterSpacing: '0.02em' }}>
+                RTT {p1.ratings?.rtt_score != null ? Math.round(p1.ratings.rtt_score) : '—'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+                {p1.current_rank    && <P1Pill>#{p1.current_rank}</P1Pill>}
+                {p1.country_code    && <P1Pill>{p1.country_code}</P1Pill>}
+                {p1.hand && p1.hand !== 'Unknown' && <P1Pill>{p1.hand === 'Left' ? 'L-hand' : 'R-hand'}</P1Pill>}
+                {(p1.form_dots || []).length > 0 && (
+                  <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    {(p1.form_dots || []).slice(0, 5).map((d, i) => (
+                      <span key={i} title={d === 'W' ? 'Win' : 'Loss'} style={{
+                        display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                        background: d === 'W' ? '#4ade80' : 'rgba(255,255,255,0.25)',
+                        border: d === 'W' ? '1px solid rgba(74,222,128,0.5)' : '1px solid rgba(255,255,255,0.2)',
+                      }} />
+                    ))}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {!isFinished && p1.player_id && (
+              <div>
+                <StarPick
+                  matchId={match.match_id}
+                  playerId={p1.player_id}
+                  playerName={p1.name}
+                  ourOdds={pred.prob_first_player ? Math.round((1 / pred.prob_first_player) * 100) / 100 : null}
+                  size="sm"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Player 2 — right */}
+          <div style={{
+            flex: 1,
+            padding: '28px 0 24px 115px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: 8,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}>
+            <PlayerAvatar photoUrl={p2.logo_url} name={p2.name} size={72} accent={P2_ACC} />
+
+            <div style={{ textAlign: 'right', minWidth: 0 }}>
+              <Link
+                to={playerUrl({ id: p2.player_id, name: p2.name })}
+                style={{ fontWeight: 800, fontSize: 'clamp(1.1rem, 2.2vw, 1.7rem)', color: '#fff', lineHeight: 1.1, textDecoration: 'none', display: 'block', wordBreak: 'break-word' }}
+              >
+                {p2.name || '—'}
+              </Link>
+              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'rgba(255,255,255,0.75)', marginTop: 3, letterSpacing: '0.02em' }}>
+                RTT {p2.ratings?.rtt_score != null ? Math.round(p2.ratings.rtt_score) : '—'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5, justifyContent: 'flex-end' }}>
+                {(p2.form_dots || []).length > 0 && (
+                  <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    {(p2.form_dots || []).slice(0, 5).map((d, i) => (
+                      <span key={i} title={d === 'W' ? 'Win' : 'Loss'} style={{
+                        display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                        background: d === 'W' ? '#60a5fa' : 'rgba(255,255,255,0.25)',
+                        border: d === 'W' ? '1px solid rgba(96,165,250,0.5)' : '1px solid rgba(255,255,255,0.2)',
+                      }} />
+                    ))}
+                  </span>
+                )}
+                {p2.hand && p2.hand !== 'Unknown' && <P1Pill>{p2.hand === 'Left' ? 'L-hand' : 'R-hand'}</P1Pill>}
+                {p2.country_code    && <P1Pill>{p2.country_code}</P1Pill>}
+                {p2.current_rank    && <P1Pill>#{p2.current_rank}</P1Pill>}
+              </div>
+            </div>
+
+            {!isFinished && p2.player_id && (
+              <div>
+                <StarPick
+                  matchId={match.match_id}
+                  playerId={p2.player_id}
+                  playerName={p2.name}
+                  ourOdds={pred.prob_second_player ? Math.round((1 / pred.prob_second_player) * 100) / 100 : null}
+                  size="sm"
+                />
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Odds Rails — sticky betting sidebar (one per player)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function OddsEdgeBar({ edge }) {
+  if (edge == null) return null
+  const pct = Math.max(-25, Math.min(25, edge * 100))
+  const fillPct  = Math.min(100, Math.abs(pct) * 4)
+  const positive = pct >= 0
+  const barColor = positive ? '#16a34a' : '#dc2626'
+  const tooltip  = `${positive ? '+' : ''}${pct.toFixed(1)}% edge vs model`
+  return (
+    <div title={tooltip} style={{ position: 'relative', height: 18, background: '#18181b', borderTop: '1px solid #27272a', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, background: 'rgba(255,255,255,0.3)' }} />
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: positive ? '50%' : `${50 - fillPct / 2}%`, width: `${fillPct / 2}%`, background: barColor }} />
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.58rem', fontWeight: 700, color: '#fff', letterSpacing: '0.06em', textShadow: '0 1px 1px rgba(0,0,0,0.5)' }}>
+        {positive ? '+' : ''}{pct.toFixed(1)}% EDGE
+      </div>
+    </div>
+  )
+}
+
+function OddsSquare({ label, price, edge, affiliateUrl, accent, footer }) {
+  if (!price) return null
+  const frac = (() => {
+    if (!price || price <= 1) return null
+    const profit = price - 1
+    let bestErr = null, bestNum = 0, bestDen = 1
+    for (let den = 1; den <= 20; den++) {
+      const num = Math.round(profit * den)
+      if (num <= 0) continue
+      const err = Math.abs(profit - num / den)
+      if (bestErr === null || err < bestErr) { bestErr = err; bestNum = num; bestDen = den }
+    }
+    return bestErr === null ? null : `${bestNum}/${bestDen}`
+  })()
+
+  return (
+    <a href={affiliateUrl || '#'} target="_blank" rel="noopener noreferrer sponsored" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+      <div
+        style={{ background: '#fff', border: '1px solid #d4d4d8', borderRadius: 10, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', transition: 'box-shadow 0.15s, transform 0.15s', cursor: 'pointer' }}
+        onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 5px 18px rgba(0,0,0,0.18)'; e.currentTarget.style.transform = 'translateY(-1px)' }}
+        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)'; e.currentTarget.style.transform = 'none' }}
+      >
+        {/* Label strip */}
+        <div style={{ background: 'linear-gradient(135deg, #111 0%, #1a1a2e 100%)', padding: '5px 8px', textAlign: 'center' }}>
+          <div style={{ fontWeight: 800, fontSize: '0.6rem', color: '#fff', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{label}</div>
+        </div>
+        {/* Price */}
+        <div style={{ padding: '8px 8px 6px', textAlign: 'center' }}>
+          <div style={{ fontWeight: 900, fontSize: '1.5rem', color: accent, lineHeight: 1 }}>{price.toFixed(2)}</div>
+          {frac && <div style={{ fontSize: '0.65rem', color: '#52525b', marginTop: 2, fontWeight: 600 }}>{frac}</div>}
+          <div style={{ fontSize: '0.55rem', color: '#71717a', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>Cloudbet</div>
+        </div>
+        {/* Edge bar */}
+        <OddsEdgeBar edge={edge} />
+        {/* Footer CTA */}
+        <div style={{ background: '#111', padding: '5px 6px', textAlign: 'center' }}>
+          <span style={{ fontSize: '0.56rem', color: '#fff', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {footer || 'Bet at Cloudbet →'}
+          </span>
+        </div>
+      </div>
+    </a>
+  )
+}
+
+function OddsRail({ side, match, cloudbetMarkets, affiliateUrl }) {
+  const isRight  = side === 'right'
+  const player   = isRight ? (match.second_player || {}) : (match.first_player  || {})
+  const pred     = match.prediction || {}
+  const modelProb = isRight ? pred.prob_second_player : pred.prob_first_player
+  const accent   = isRight ? '#1d4ed8' : '#16a34a'
+  const bgAccent = isRight ? '#0c1f3f' : '#0d3b1e'
+
+  if (!cloudbetMarkets && !match.market?.cloudbet_link) return null
+
+  const mkts     = cloudbetMarkets || {}
+  const winner   = mkts.winner   || {}
+  const hdp      = mkts.handicap || {}
+  const scores   = mkts.correct_score || {}
+  const totals   = mkts.total_sets   || {}
+
+  const winPrice  = isRight ? winner.p2 : winner.p1
+  const hdpPrice  = isRight ? hdp.p2    : hdp.p1
+  const hdpLine   = hdp.line
+
+  // "Win 2-0" for each side
+  const score20   = isRight ? scores['0-2'] : scores['2-0']
+  // "Win 2-1"
+  const score21   = isRight ? scores['1-2'] : scores['2-1']
+  // Total sets: left rail = over (more sets = more action), right = under
+  const totalPrice = isRight ? totals.under : totals.over
+  const totalLine  = totals.line
+  const totalLabel = totalLine != null
+    ? (isRight ? `Under ${totalLine} Sets` : `Over ${totalLine} Sets`)
+    : (isRight ? 'Under Sets' : 'Over Sets')
+
+  const edge = (winPrice && modelProb != null)
+    ? modelProb - (1 / winPrice)
+    : null
+
+  // Hide rail entirely if no useful data
+  if (!winPrice && !hdpPrice && !score20) return null
+
+  return (
+    <div style={{
+      position: 'sticky',
+      top: 170,
+      alignSelf: 'flex-start',
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    }}>
+      {/* Player header */}
+      <div style={{
+        background: `linear-gradient(160deg, ${bgAccent} 0%, #111 120%)`,
+        borderRadius: 12,
+        padding: '10px 8px 12px',
+        textAlign: 'center',
+        color: '#fff',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
+          <PlayerAvatar photoUrl={player.logo_url} name={player.name} size={52} accent={accent} />
+        </div>
+        <div style={{ fontWeight: 800, fontSize: '0.72rem', lineHeight: 1.2, letterSpacing: '0.01em' }}>
+          {player.name || '—'}
+        </div>
+        {player.current_rank && (
+          <div style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.55)', marginTop: 2 }}>
+            Rank #{player.current_rank}
+          </div>
         )}
+      </div>
+
+      {/* To Win */}
+      {winPrice && (
+        <OddsSquare label="To Win" price={winPrice} edge={edge} affiliateUrl={affiliateUrl} accent={accent} />
+      )}
+
+      {/* Win 2-0 — clean sweep */}
+      {score20 && (
+        <OddsSquare label="Win 2-0" price={score20} affiliateUrl={affiliateUrl} accent={accent} />
+      )}
+
+      {/* Win 2-1 */}
+      {score21 && (
+        <OddsSquare label="Win 2-1" price={score21} affiliateUrl={affiliateUrl} accent={accent} />
+      )}
+
+      {/* Set handicap */}
+      {hdpPrice && (
+        <OddsSquare
+          label={hdpLine != null ? `Hcap ${hdpLine > 0 ? '+' : ''}${hdpLine}` : 'Handicap'}
+          price={hdpPrice}
+          affiliateUrl={affiliateUrl}
+          accent={accent}
+        />
+      )}
+
+      {/* Total sets */}
+      {totalPrice && (
+        <OddsSquare label={totalLabel} price={totalPrice} affiliateUrl={affiliateUrl} accent={accent} />
+      )}
+
+      {/* Responsible gambling */}
+      <div style={{ textAlign: 'center', fontSize: '0.52rem', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, lineHeight: 1.6 }}>
+        18+ · BeGambleAware
       </div>
     </div>
   )
@@ -740,7 +1082,10 @@ function SectionIntelligence({ match }) {
         const calcEdge  = (odds, prob) => (!odds || !prob) ? null : Math.round((prob - (1 / odds)) * 1000) / 1000
         const fmtEdge   = (e) => e == null ? null : (e >= 0 ? '+' : '') + (e * 100).toFixed(1) + '%'
 
-        // Best odds per player across all bookmakers
+        // all_bookmakers is now pre-filtered server-side to only books we
+        // have affiliate deals with (Pinnacle etc are excluded). So the
+        // best-priced book here is always one the punter can actually
+        // click — no anonymisation needed.
         const bestP1bk = allBk.reduce((best, bk) => (!bk.p1_odds ? best : (!best || bk.p1_odds > best.p1_odds ? bk : best)), null)
         const bestP2bk = allBk.reduce((best, bk) => (!bk.p2_odds ? best : (!best || bk.p2_odds > best.p2_odds ? bk : best)), null)
         const bestP1   = bestP1bk?.p1_odds ?? mkt.odds_first_player
@@ -2078,8 +2423,18 @@ export default function MatchDetail() {
         const edge = data.edge      || {}
         setMatch({
           ...data.match,
-          first_player:  { ...p1, player_id: p1.id },
-          second_player: { ...p2, player_id: p2.id },
+          first_player:  {
+            ...p1,
+            player_id:   p1.id,
+            logo_url:    p1.logo_url    || null,
+            current_rank: p1.current_rank || null,
+          },
+          second_player: {
+            ...p2,
+            player_id:   p2.id,
+            logo_url:    p2.logo_url    || null,
+            current_rank: p2.current_rank || null,
+          },
           prediction: {
             ...pred,
             edge_first:  edge.p1,
@@ -2097,6 +2452,7 @@ export default function MatchDetail() {
             bresbet_link:        mkt.bresbet_link || null,
             cloudbet_link:       mkt.cloudbet_link || null,
             cloudbet_event_url:  mkt.cloudbet_event_url || null,
+            cloudbet_markets:    mkt.cloudbet_markets   || null,
           },
           edge,
         })
@@ -2165,21 +2521,17 @@ export default function MatchDetail() {
   if (error)   return <div className="page"><div className="error">{error}</div></div>
   if (!match)  return null
 
-  // Odds row
-  const mkt = match.market || {}
+  const mkt             = match.market || {}
+  const cloudbetMarkets = mkt.cloudbet_markets || null
+  const affiliateUrl    = mkt.cloudbet_link || mkt.bresbet_link || null
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
-      {/* Non-sticky meta */}
-      <div style={{
-        background: 'var(--bg-card)',
-        borderBottom: '1px solid var(--border)',
-        paddingBottom: 0,
-      }}>
-        <MatchMeta match={match} />
-      </div>
 
-      {/* Sticky player + tabs bar */}
+      {/* ── HERO — Combatrics-style gradient header ── */}
+      <MatchHero match={match} />
+
+      {/* ── STICKY PLAYER + TABS BAR ── */}
       <PlayerBar
         match={match}
         activeTab={activeTab}
@@ -2187,31 +2539,60 @@ export default function MatchDetail() {
         tabRefs={refs}
       />
 
-      {/* All content sections */}
-      <div style={{ padding: '0 0 60px' }}>
-        <Section id="intelligence" sectionRef={refs.intelligence} title="Intelligence">
-          <SectionIntelligence match={match} />
-        </Section>
+      {/* ── 3-COLUMN LAYOUT: odds rail | content | odds rail ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '156px 1fr 156px',
+        gap: '0 16px',
+        maxWidth: 1280,
+        margin: '0 auto',
+        padding: '20px 16px 60px',
+        alignItems: 'start',
+      }}>
 
-        <Section id="ratings" sectionRef={refs.ratings} title="Ratings">
-          <SectionRatings match={match} />
-        </Section>
+        {/* Left rail — Player 1 odds */}
+        <OddsRail
+          side="left"
+          match={match}
+          cloudbetMarkets={cloudbetMarkets}
+          affiliateUrl={affiliateUrl}
+        />
 
-        <Section id="statistics" sectionRef={refs.statistics} title="Statistics">
-          <SectionStatistics match={match} />
-        </Section>
+        {/* Centre — all existing content sections */}
+        <div style={{ minWidth: 0 }}>
+          <Section id="intelligence" sectionRef={refs.intelligence} title="Intelligence">
+            <SectionIntelligence match={match} />
+          </Section>
 
-        <Section id="points" sectionRef={refs.points} title="Points Analysis">
-          <SectionPointsAnalysis match={match} />
-        </Section>
+          <Section id="ratings" sectionRef={refs.ratings} title="Ratings">
+            <SectionRatings match={match} />
+          </Section>
 
-        <Section id="form" sectionRef={refs.form} title="Form">
-          <SectionForm match={match} />
-        </Section>
+          <Section id="statistics" sectionRef={refs.statistics} title="Statistics">
+            <SectionStatistics match={match} />
+          </Section>
 
-        <Section id="h2h" sectionRef={refs.h2h} title="Head to head">
-          <SectionH2H match={match} />
-        </Section>
+          <Section id="points" sectionRef={refs.points} title="Points Analysis">
+            <SectionPointsAnalysis match={match} />
+          </Section>
+
+          <Section id="form" sectionRef={refs.form} title="Form">
+            <SectionForm match={match} />
+          </Section>
+
+          <Section id="h2h" sectionRef={refs.h2h} title="Head to head">
+            <SectionH2H match={match} />
+          </Section>
+        </div>
+
+        {/* Right rail — Player 2 odds */}
+        <OddsRail
+          side="right"
+          match={match}
+          cloudbetMarkets={cloudbetMarkets}
+          affiliateUrl={affiliateUrl}
+        />
+
       </div>
     </div>
   )

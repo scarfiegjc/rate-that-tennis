@@ -20,6 +20,7 @@ Setup:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import logging
@@ -47,7 +48,7 @@ API_KEY = os.environ.get(
 )
 API_BASE  = 'https://sports-api.cloudbet.com/pub/v2/odds'
 SPORT     = 'tennis'
-MARKETS   = ['tennis.winner', 'tennis.total_sets']
+MARKETS   = ['tennis.winner', 'tennis.total_sets', 'tennis.handicap', 'tennis.correct_score']
 
 # Affiliate redirect base — wraps a path on cloudbet.com so clicks drop the
 # Combatrics affiliate cookie before landing.
@@ -141,6 +142,113 @@ def extract_winner(event: dict) -> tuple[Optional[float], Optional[float]]:
     return home, away
 
 
+def extract_all_markets(event: dict, flipped: bool) -> dict:
+    """
+    Extract all available markets from a Cloudbet event into a structured dict,
+    orienting prices to our DB player order (p1 = first_player, p2 = second_player).
+
+    flipped=True means Cloudbet's home player == our second_player.
+
+    Returns a dict with keys: winner, total_sets, handicap, correct_score.
+    Each value is itself a dict of prices/lines; missing markets are omitted.
+    """
+    markets = event.get('markets') or {}
+    out: dict = {}
+
+    # ── Winner ──────────────────────────────────────────────────────────────
+    winner_m = markets.get('tennis.winner')
+    if winner_m:
+        home = away = None
+        for sel in _enabled_selections(winner_m):
+            if sel.get('outcome') == 'home':  home = sel.get('price')
+            elif sel.get('outcome') == 'away': away = sel.get('price')
+        if home or away:
+            p1, p2 = (away, home) if flipped else (home, away)
+            out['winner'] = {'p1': p1, 'p2': p2}
+
+    # ── Total sets ──────────────────────────────────────────────────────────
+    totals_m = markets.get('tennis.total_sets')
+    if totals_m:
+        over_price = under_price = line = None
+        for sm in (totals_m.get('submarkets') or {}).values():
+            for sel in (sm.get('selections') or []):
+                if sel.get('status') != 'SELECTION_ENABLED': continue
+                params = sel.get('params') or {}
+                if line is None:
+                    line = params.get('total')
+                outcome = sel.get('outcome')
+                if outcome == 'over':  over_price  = sel.get('price')
+                elif outcome == 'under': under_price = sel.get('price')
+        if over_price or under_price:
+            out['total_sets'] = {'over': over_price, 'under': under_price, 'line': line}
+
+    # ── Handicap ────────────────────────────────────────────────────────────
+    handicap_m = markets.get('tennis.handicap')
+    if handicap_m:
+        home = away = hdp_line = None
+        for sm in (handicap_m.get('submarkets') or {}).values():
+            for sel in (sm.get('selections') or []):
+                if sel.get('status') != 'SELECTION_ENABLED': continue
+                params = sel.get('params') or {}
+                if hdp_line is None:
+                    hdp_line = params.get('handicap')
+                outcome = sel.get('outcome')
+                if outcome == 'home':  home = sel.get('price')
+                elif outcome == 'away': away = sel.get('price')
+        if home or away:
+            p1, p2 = (away, home) if flipped else (home, away)
+            # Cloudbet's handicap line is from home's perspective; flip sign if needed
+            if flipped and hdp_line is not None:
+                try:
+                    hdp_line = -float(hdp_line)
+                except (TypeError, ValueError):
+                    pass
+            out['handicap'] = {'p1': p1, 'p2': p2, 'line': hdp_line}
+
+    # ── Correct score ────────────────────────────────────────────────────────
+    score_m = markets.get('tennis.correct_score')
+    if score_m:
+        scores: dict = {}
+        for sel in _enabled_selections(score_m):
+            outcome = (sel.get('outcome') or '').lower()
+            params  = sel.get('params') or {}
+            price   = sel.get('price')
+            if not price: continue
+
+            # Cloudbet uses outcome strings like 'home_2_0', 'home_2_1', 'away_0_2', 'away_1_2'
+            # OR outcome='home'/'away' + params={'score': '2:0'} — handle both.
+            score_str = str(params.get('score', '') or '').replace(':', '-')
+
+            if 'home_2_0' in outcome or (outcome == 'home' and score_str == '2-0'):
+                key = '0-2' if flipped else '2-0'
+                scores[key] = price
+            elif 'home_2_1' in outcome or (outcome == 'home' and score_str == '2-1'):
+                key = '1-2' if flipped else '2-1'
+                scores[key] = price
+            elif 'away_2_0' in outcome or 'away_0_2' in outcome or (outcome == 'away' and score_str in ('2-0', '0-2')):
+                key = '2-0' if flipped else '0-2'
+                scores[key] = price
+            elif 'away_2_1' in outcome or 'away_1_2' in outcome or (outcome == 'away' and score_str in ('2-1', '1-2')):
+                key = '2-1' if flipped else '1-2'
+                scores[key] = price
+
+        if scores:
+            out['correct_score'] = scores
+
+    return out
+
+
+def ensure_markets_column(conn) -> None:
+    """Add markets_json JSONB column to bookmaker_match_links if it doesn't exist yet."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            ALTER TABLE bookmaker_match_links
+            ADD COLUMN IF NOT EXISTS markets_json JSONB
+        """)
+    conn.commit()
+    log.info('  schema: bookmaker_match_links.markets_json ensured')
+
+
 # ── Match Cloudbet event → DB match_id ───────────────────────────────────────
 
 def _candidate_matches(conn) -> list[dict]:
@@ -225,22 +333,25 @@ def upsert_odds(conn, match_id: int, p1_price: Optional[float], p2_price: Option
             """, (match_id, player_ref, price, implied))
 
 
-def upsert_link(conn, match_id: int, cb_event_key: str):
-    """Store per-match Cloudbet deep-link URL."""
+def upsert_link(conn, match_id: int, cb_event_key: str,
+                markets_data: Optional[dict] = None):
+    """Store per-match Cloudbet deep-link URL and full markets JSON."""
     if not cb_event_key: return
     event_path = f'/en/sports/tennis/{cb_event_key}'
     event_url  = f'{PUBLIC_BASE}{event_path}'
     affiliate  = f'{AFFILIATE_BASE}{event_path}?{AFFILIATE_TRACKING}'
+    markets_json_str = json.dumps(markets_data) if markets_data else None
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO bookmaker_match_links
-                (match_id, bookmaker_key, event_url, affiliate_url, fetched_at)
-            VALUES (%s, 'cloudbet', %s, %s, NOW())
+                (match_id, bookmaker_key, event_url, affiliate_url, markets_json, fetched_at)
+            VALUES (%s, 'cloudbet', %s, %s, %s::jsonb, NOW())
             ON CONFLICT (match_id, bookmaker_key) DO UPDATE
                 SET event_url     = EXCLUDED.event_url,
                     affiliate_url = EXCLUDED.affiliate_url,
+                    markets_json  = COALESCE(EXCLUDED.markets_json, bookmaker_match_links.markets_json),
                     fetched_at    = EXCLUDED.fetched_at
-        """, (match_id, event_url, affiliate))
+        """, (match_id, event_url, affiliate, markets_json_str))
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -250,6 +361,8 @@ def run() -> None:
     conn = psycopg2.connect(DB_URL)
     try:
         ensure_affiliate_row(conn)
+        ensure_markets_column(conn)   # idempotent schema migration
+
         candidates = _candidate_matches(conn)
         log.info(f'  upcoming matches in DB: {len(candidates)}')
 
@@ -259,17 +372,21 @@ def run() -> None:
 
         wrote_odds = wrote_links = 0
         for match_id, ev, flipped in pairs:
-            home_price, away_price = extract_winner(ev)
-            if flipped:
-                p1_price, p2_price = away_price, home_price
-            else:
-                p1_price, p2_price = home_price, away_price
+            # Extract all markets (structured, player-oriented)
+            all_markets = extract_all_markets(ev, flipped)
 
+            # Write to bookmaker_odds (winner prices only — backward compat)
+            winner = all_markets.get('winner', {})
+            p1_price = winner.get('p1')
+            p2_price = winner.get('p2')
             if p1_price or p2_price:
                 upsert_odds(conn, match_id, p1_price, p2_price)
                 wrote_odds += 1
+
+            # Write deep-link + full markets JSON
             if ev.get('key'):
-                upsert_link(conn, match_id, ev['key'])
+                upsert_link(conn, match_id, ev['key'],
+                            markets_data=all_markets if all_markets else None)
                 wrote_links += 1
 
         conn.commit()

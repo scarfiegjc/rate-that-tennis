@@ -119,12 +119,18 @@ def _latest_odds(match_id: int) -> dict:
     }
     link_url is the affiliate URL if set, else homepage_url, else None.
     """
+    # Only show prices from books we have affiliate deals with. Anything
+    # else (Pinnacle, etc) is filtered out — we use those for internal edge
+    # calc historically but they pollute the UI with non-clickable books.
     rows = query(
         """
-        SELECT player_ref, bookmaker, decimal_odds, implied_prob
-        FROM bookmaker_odds
-        WHERE match_id = %s
-        ORDER BY player_ref, decimal_odds DESC
+        SELECT bo.player_ref, bo.bookmaker, bo.decimal_odds, bo.implied_prob
+        FROM bookmaker_odds bo
+        JOIN bookmaker_affiliates ba
+          ON LOWER(ba.bookmaker_key) = LOWER(bo.bookmaker)
+         AND ba.is_active = true
+        WHERE bo.match_id = %s
+        ORDER BY bo.player_ref, bo.decimal_odds DESC
         """,
         (match_id,),
     )
@@ -173,10 +179,11 @@ def _latest_odds(match_id: int) -> dict:
     # Per-match deep links — currently bresbet + cloudbet
     bresbet_link = cloudbet_link = None
     cloudbet_event_url = None
+    cloudbet_markets = None
     try:
         for row in query(
             """
-            SELECT bookmaker_key, affiliate_url, event_url
+            SELECT bookmaker_key, affiliate_url, event_url, markets_json
             FROM bookmaker_match_links
             WHERE match_id = %s
             """,
@@ -187,17 +194,19 @@ def _latest_odds(match_id: int) -> dict:
             if bk == "bresbet":
                 bresbet_link = aff
             elif bk == "cloudbet":
-                cloudbet_link     = aff
+                cloudbet_link      = aff
                 cloudbet_event_url = row.get("event_url")
+                cloudbet_markets   = row.get("markets_json")  # structured markets dict
     except Exception:
         pass  # table may not exist yet on first deploy
 
     return {
         **best,
-        "all_bookmakers": all_bk,
-        "bresbet_link":   bresbet_link,
-        "cloudbet_link":  cloudbet_link,
+        "all_bookmakers":     all_bk,
+        "bresbet_link":       bresbet_link,
+        "cloudbet_link":      cloudbet_link,
         "cloudbet_event_url": cloudbet_event_url,
+        "cloudbet_markets":   cloudbet_markets,  # {winner, total_sets, handicap, correct_score}
     }
 
 
@@ -310,11 +319,11 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
 
     # Players
     p1 = query_one(
-        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url FROM players WHERE id = %s",
+        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank FROM players WHERE id = %s",
         (p1_id,),
     ) or {}
     p2 = query_one(
-        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url FROM players WHERE id = %s",
+        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank FROM players WHERE id = %s",
         (p2_id,),
     ) or {}
 
@@ -591,16 +600,22 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             WHERE ms_inner.match_id = m.id
         ) ms ON TRUE
         LEFT JOIN LATERAL (
-            SELECT decimal_odds, implied_prob
-            FROM bookmaker_odds
-            WHERE match_id = m.id AND player_ref = 'first_player'
-            ORDER BY fetched_at DESC LIMIT 1
+            SELECT bo.decimal_odds, bo.implied_prob
+            FROM bookmaker_odds bo
+            JOIN bookmaker_affiliates ba
+              ON LOWER(ba.bookmaker_key) = LOWER(bo.bookmaker)
+             AND ba.is_active = true
+            WHERE bo.match_id = m.id AND bo.player_ref = 'first_player'
+            ORDER BY bo.fetched_at DESC LIMIT 1
         ) bo1 ON TRUE
         LEFT JOIN LATERAL (
-            SELECT decimal_odds, implied_prob
-            FROM bookmaker_odds
-            WHERE match_id = m.id AND player_ref = 'second_player'
-            ORDER BY fetched_at DESC LIMIT 1
+            SELECT bo.decimal_odds, bo.implied_prob
+            FROM bookmaker_odds bo
+            JOIN bookmaker_affiliates ba
+              ON LOWER(ba.bookmaker_key) = LOWER(bo.bookmaker)
+             AND ba.is_active = true
+            WHERE bo.match_id = m.id AND bo.player_ref = 'second_player'
+            ORDER BY bo.fetched_at DESC LIMIT 1
         ) bo2 ON TRUE
         WHERE m.event_date >= %s AND m.event_date <= %s
           AND m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover')
@@ -718,6 +733,13 @@ def get_best_bets(
 
 
 def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
+    """
+    Edge uses the BEST available price across every book we have prices for
+    (not just Cloudbet's), because that's what gives the user the most
+    visible value picks. The bet-now CTA always routes through our Cloudbet
+    affiliate regardless of which book had the best price — that's the
+    honest deal: 'here's the value, here's where we get paid if you click'.
+    """
     today  = date.today()
     cutoff = today + timedelta(days=days_ahead)
 
@@ -739,8 +761,11 @@ def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
             mp.prob_first_player,
             mp.prob_second_player,
             mp.confidence,
-            cb1.decimal_odds              AS cb_p1_odds,
-            cb2.decimal_odds              AS cb_p2_odds,
+            -- Best price across all books for each player
+            best1.decimal_odds            AS p1_price,
+            best1.bookmaker               AS p1_book,
+            best2.decimal_odds            AS p2_price,
+            best2.bookmaker               AS p2_book,
             bml.affiliate_url             AS cloudbet_link,
             bml.event_url                 AS cloudbet_event_url
         FROM matches m
@@ -750,22 +775,28 @@ def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
         LEFT JOIN surfaces s       ON s.id = t.surface_id
         LEFT JOIN model_predictions mp ON mp.match_id = m.id
         LEFT JOIN LATERAL (
-            SELECT decimal_odds FROM bookmaker_odds
-            WHERE match_id = m.id AND bookmaker = 'cloudbet' AND player_ref = 'first_player'
-            ORDER BY fetched_at DESC LIMIT 1
-        ) cb1 ON TRUE
+            SELECT bo.decimal_odds, bo.bookmaker FROM bookmaker_odds bo
+            JOIN bookmaker_affiliates ba
+              ON LOWER(ba.bookmaker_key) = LOWER(bo.bookmaker)
+             AND ba.is_active = true
+            WHERE bo.match_id = m.id AND bo.player_ref = 'first_player'
+            ORDER BY bo.decimal_odds DESC NULLS LAST LIMIT 1
+        ) best1 ON TRUE
         LEFT JOIN LATERAL (
-            SELECT decimal_odds FROM bookmaker_odds
-            WHERE match_id = m.id AND bookmaker = 'cloudbet' AND player_ref = 'second_player'
-            ORDER BY fetched_at DESC LIMIT 1
-        ) cb2 ON TRUE
+            SELECT bo.decimal_odds, bo.bookmaker FROM bookmaker_odds bo
+            JOIN bookmaker_affiliates ba
+              ON LOWER(ba.bookmaker_key) = LOWER(bo.bookmaker)
+             AND ba.is_active = true
+            WHERE bo.match_id = m.id AND bo.player_ref = 'second_player'
+            ORDER BY bo.decimal_odds DESC NULLS LAST LIMIT 1
+        ) best2 ON TRUE
         LEFT JOIN bookmaker_match_links bml
                ON bml.match_id = m.id AND bml.bookmaker_key = 'cloudbet'
         WHERE m.event_date BETWEEN %s AND %s
-          AND m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover')
+          AND (m.event_status IS NULL OR m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover'))
           AND (m.winner IS NULL OR m.winner = '')
           AND mp.prob_first_player IS NOT NULL
-          AND (cb1.decimal_odds IS NOT NULL OR cb2.decimal_odds IS NOT NULL)
+          AND (best1.decimal_odds IS NOT NULL OR best2.decimal_odds IS NOT NULL)
         """,
         (today, cutoff),
     )
@@ -774,12 +805,14 @@ def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
     for r in rows:
         p1_prob = float(r["prob_first_player"]) if r.get("prob_first_player") else None
         p2_prob = float(r["prob_second_player"]) if r.get("prob_second_player") else None
-        cb_p1   = float(r["cb_p1_odds"]) if r.get("cb_p1_odds") else None
-        cb_p2   = float(r["cb_p2_odds"]) if r.get("cb_p2_odds") else None
+        p1_price = float(r["p1_price"]) if r.get("p1_price") else None
+        p2_price = float(r["p2_price"]) if r.get("p2_price") else None
+        p1_book = r.get("p1_book")
+        p2_book = r.get("p2_book")
 
-        for side, model_p, price, pick_name, pick_country, opp_name in [
-            ("p1", p1_prob, cb_p1, r["p1_name"], r.get("p1_country"), r["p2_name"]),
-            ("p2", p2_prob, cb_p2, r["p2_name"], r.get("p2_country"), r["p1_name"]),
+        for side, model_p, price, book, pick_name, pick_country, opp_name in [
+            ("p1", p1_prob, p1_price, p1_book, r["p1_name"], r.get("p1_country"), r["p2_name"]),
+            ("p2", p2_prob, p2_price, p2_book, r["p2_name"], r.get("p2_country"), r["p1_name"]),
         ]:
             if model_p is None or price is None:
                 continue
@@ -804,7 +837,9 @@ def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
                 "implied_prob":       round(implied, 4),
                 "edge":               round(edge, 4),
                 "price":              price,
-                "book":               "Cloudbet",
+                # The book that had the best price (Pinnacle, Bet365, etc).
+                # Shown on the card as "Best market". The CTA is separate.
+                "book":               book or "Market",
                 "cloudbet_link":      r.get("cloudbet_link"),
                 "cloudbet_event_url": r.get("cloudbet_event_url"),
             })

@@ -1010,13 +1010,30 @@ def _update_one_player_bio(
     bp: dict,
 ) -> int:
     """
-    Update birthday and country_code for a single Bzzoiro player record.
-    Only touches NULL columns. Returns 1 if any update was made, else 0.
+    Update birthday, country_code and logo_url (player photo) for a single
+    Bzzoiro player record.  Only touches NULL columns (photo can overwrite
+    an existing value if the new one looks like a real URL).
+    Returns 1 if any update was made, else 0.
     """
     bzz_pid      = bp.get("id")
     dob_str      = bp.get("date_of_birth")
     country_code = bp.get("country_code") or bp.get("country")
     full_name    = bp.get("name")
+    # Bzzoiro may expose player photos under various field names
+    photo_url    = (
+        bp.get("photo_url")
+        or bp.get("photo")
+        or bp.get("image_url")
+        or bp.get("image")
+        or bp.get("avatar_url")
+        or bp.get("avatar")
+        or bp.get("headshot_url")
+        or bp.get("headshot")
+        or bp.get("picture_url")
+    )
+    # Only accept URLs that look legitimate (start with http)
+    if photo_url and not str(photo_url).startswith("http"):
+        photo_url = None
 
     if not bzz_pid:
         return 0
@@ -1031,7 +1048,7 @@ def _update_one_player_bio(
             except ValueError:
                 continue
 
-    if dob is None and not country_code:
+    if dob is None and not country_code and not photo_url:
         # Nothing to fill
         return 0
 
@@ -1074,9 +1091,9 @@ def _update_one_player_bio(
     if our_player_id is None:
         return 0
 
-    # Fetch current nulls for this player
+    # Fetch current values for this player
     cur.execute(
-        "SELECT birthday, country_code FROM players WHERE id = %s",
+        "SELECT birthday, country_code, logo_url FROM players WHERE id = %s",
         (our_player_id,),
     )
     current = cur.fetchone()
@@ -1093,6 +1110,11 @@ def _update_one_player_bio(
     if country_code and current["country_code"] is None:
         fields_to_set.append("country_code = %s")
         values.append(country_code)
+
+    # Update photo: write if we have one and the player has no photo yet
+    if photo_url and not current["logo_url"]:
+        fields_to_set.append("logo_url = %s")
+        values.append(photo_url)
 
     if not fields_to_set:
         return 0
