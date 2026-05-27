@@ -1828,6 +1828,17 @@ text-overflow: ellipsis;
 white-space: nowrap;
 }
 
+.mc-hdr-venue {
+font-size: 10px;
+font-weight: 500;
+color: rgba(255,255,255,0.45);
+flex-shrink: 0;
+overflow: hidden;
+text-overflow: ellipsis;
+white-space: nowrap;
+max-width: 120px;
+}
+
 .mc-card-edge {
 font-size: 10px;
 font-weight: 700;
