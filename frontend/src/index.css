@@ -1776,3 +1776,204 @@ flex-shrink: 0;
 .tournament-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tournament-info { gap: 5px; }
 }
+
+/* ── MatchList homepage cards (mc-card) ─────────────────── */
+
+.mc-card {
+background: var(--bg-card);
+border: 1px solid var(--border);
+border-radius: var(--r);
+overflow: hidden;
+cursor: pointer;
+display: block;
+width: 100%;
+text-align: left;
+font-family: var(--font);
+transition: box-shadow 0.15s, border-color 0.15s;
+box-shadow: var(--shadow-sm);
+}
+
+.mc-card:hover {
+box-shadow: var(--shadow);
+border-color: var(--text-3);
+}
+
+/* Court image banner for each player slot */
+.mc-card-banner {
+position: relative;
+height: 46px;
+display: flex;
+align-items: center;
+gap: 7px;
+padding: 0 10px;
+overflow: hidden;
+}
+
+/* Dark overlay so white text is legible over court photo */
+.mc-card-tint {
+position: absolute;
+inset: 0;
+background: rgba(0, 0, 0, 0.62);
+z-index: 0;
+}
+
+.mc-card-flag {
+position: relative;
+z-index: 1;
+font-size: 13px;
+flex-shrink: 0;
+}
+
+.mc-card-name {
+position: relative;
+z-index: 1;
+font-size: 13px;
+color: #fff;
+flex: 1;
+min-width: 0;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+}
+
+.mc-card-rtt {
+position: relative;
+z-index: 1;
+font-size: 10px;
+font-weight: 800;
+color: #4ade80;
+background: rgba(22,163,74,0.22);
+border: 1px solid rgba(74,222,128,0.35);
+border-radius: 4px;
+padding: 1px 5px;
+flex-shrink: 0;
+line-height: 1.4;
+}
+
+.mc-card-momentum {
+position: relative;
+z-index: 1;
+font-size: 11px;
+color: #fbbf24;
+flex-shrink: 0;
+}
+
+.mc-card-prob-wrap {
+position: relative;
+z-index: 1;
+margin-left: auto;
+flex-shrink: 0;
+}
+
+.mc-card-prob {
+font-size: 13px;
+font-weight: 700;
+color: rgba(255,255,255,0.7);
+font-variant-numeric: tabular-nums;
+}
+
+.mc-card-prob.edge {
+color: #4ade80;
+}
+
+/* Center info strip between the two player banners */
+.mc-card-strip {
+display: flex;
+align-items: center;
+justify-content: space-between;
+padding: 0 10px;
+height: 26px;
+background: var(--bg-raised);
+border-top: 1px solid var(--border-faint);
+border-bottom: 1px solid var(--border-faint);
+gap: 8px;
+overflow: hidden;
+}
+
+.mc-card-strip-left {
+display: flex;
+align-items: center;
+gap: 6px;
+flex: 1;
+min-width: 0;
+overflow: hidden;
+}
+
+.mc-card-strip-right {
+flex-shrink: 0;
+}
+
+.mc-card-time {
+font-size: 10px;
+font-weight: 600;
+color: var(--text-3);
+flex-shrink: 0;
+font-variant-numeric: tabular-nums;
+}
+
+.mc-card-info {
+font-size: 10px;
+color: var(--text-3);
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+flex: 1;
+}
+
+.mc-card-score {
+font-size: 11px;
+font-weight: 700;
+color: var(--text-2);
+font-variant-numeric: tabular-nums;
+}
+
+.mc-card-edge {
+font-size: 10px;
+font-weight: 700;
+color: var(--green-text);
+background: var(--green-bg);
+border: 1px solid var(--green-border);
+border-radius: 4px;
+padding: 1px 5px;
+}
+
+/* 2-column card grid inside tournament blocks */
+.mc-card-grid {
+display: grid;
+grid-template-columns: repeat(2, 1fr);
+gap: 8px;
+padding: 10px 12px 12px;
+}
+
+@media (max-width: 1000px) {
+.mc-card-grid { grid-template-columns: 1fr; }
+}
+
+/* Match centre header + filter bar — gradient panel */
+.mc-filter-panel {
+background: linear-gradient(135deg, #0d3b1e 0%, #0c1f3f 100%);
+border: 1px solid rgba(255,255,255,0.08);
+border-radius: var(--r);
+padding: 16px 20px 14px;
+margin-bottom: 16px;
+}
+
+.mc-filter-panel .cc-header {
+margin-bottom: 14px;
+}
+
+.mc-filter-panel .cc-title {
+color: #fff !important;
+}
+
+.mc-filter-panel .cc-subtitle {
+color: rgba(255,255,255,0.55);
+margin-top: 4px;
+}
+
+.mc-filter-label {
+font-size: 11px;
+color: rgba(255,255,255,0.5);
+margin-right: 2px;
+white-space: nowrap;
+}

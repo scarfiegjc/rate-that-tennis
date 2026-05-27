@@ -121,9 +121,9 @@ function Tickbox({ label, checked, onChange, accent }) {
   )
 }
 
-// ── Match row ─────────────────────────────────────────────────────────────────
+// ── Match card (Combatrics-style compact card) ────────────────────────────────
 
-function MatchRow({ match, showTournament }) {
+function MatchCard({ match }) {
   const navigate = useNavigate()
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
@@ -131,11 +131,6 @@ function MatchRow({ match, showTournament }) {
 
   const isLive     = /in play|live|set \d|game/i.test(match.event_status || '')
   const isFinished = /finished/i.test(match.event_status || '')
-  const edgeVal    = Math.max(pred.edge_first || 0, pred.edge_second || 0)
-  const edgeName   = (pred.edge_first || 0) >= (pred.edge_second || 0)
-    ? (p1.name || 'P1')
-    : (p2.name || 'P2')
-  const hasEdge    = edgeVal > 0.02
 
   const p1prob = pred.prob_first_player  != null ? Math.round(pred.prob_first_player  * 100) : null
   const p2prob = pred.prob_second_player != null ? Math.round(pred.prob_second_player * 100) : null
@@ -143,141 +138,114 @@ function MatchRow({ match, showTournament }) {
   const winner1 = isFinished && match.winner === 'First Player'
   const winner2 = isFinished && match.winner === 'Second Player'
 
-  let predictionCorrect = null
+  let predCorrect = null
   if (isFinished && p1prob != null) {
     const predictedSide = p1prob >= 50 ? 1 : 2
     const actualWinner  = winner1 ? 1 : winner2 ? 2 : null
-    if (actualWinner != null) predictionCorrect = predictedSide === actualWinner
+    if (actualWinner != null) predCorrect = predictedSide === actualWinner
   }
 
-  const rowCls = isLive
-    ? 'match-row match-row--live'
-    : predictionCorrect === true
-      ? 'match-row match-row--correct'
-      : predictionCorrect === false
-        ? 'match-row match-row--wrong'
-        : 'match-row'
+  const edgeVal  = Math.max(pred.edge_first || 0, pred.edge_second || 0)
+  const hasEdge  = edgeVal > 0.02
+  const edgeSide = (pred.edge_first || 0) >= (pred.edge_second || 0) ? 'p1' : 'p2'
 
-  // Live score: show set scores + current game score together (e.g. "6-4 3-2  40-30")
+  const { img } = courtStyle(match.surface, match.tournament)
+
   const liveScore = match.set_scores
     ? (match.game_result ? `${match.set_scores}  ${match.game_result}` : match.set_scores)
     : (match.game_result || match.final_result || '')
 
-  // Odds
-  const mkt    = match.market || {}
-  const p1odds = mkt.odds_first_player
-  const p2odds = mkt.odds_second_player
-  const hasOdds = !!(p1odds && p2odds)
+  const timeStr = isLive ? null
+    : isFinished ? 'FT'
+    : match.event_time?.slice(0, 5) || null
+
+  const cardBorderColor = isLive
+    ? 'rgba(251,146,60,0.55)'
+    : predCorrect === true
+      ? 'rgba(74,222,128,0.35)'
+      : predCorrect === false
+        ? 'rgba(239,68,68,0.35)'
+        : undefined
+
+  const bgStyle = img
+    ? { backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center 40%' }
+    : {}
 
   return (
-    <button className={rowCls} onClick={() => navigate(matchUrl(match))}>
-
-      {/* Time / status */}
-      <div className={`match-row-time ${isLive ? 'live' : ''}`}>
-        {isLive
-          ? <span className="live-dot" />
-          : isFinished
-            ? <span style={{ fontSize: 10, color: 'var(--text-3)' }}>FT</span>
-            : match.event_time
-              ? match.event_time.slice(0, 5)
-              : '—'
-        }
-      </div>
-
-      {/* Player 1 */}
-      <div className="match-player-cell">
-        <div
-          className={`match-player-name ${winner1 ? 'winner' : ''}`}
-          style={winner2 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
+    <button
+      className="mc-card"
+      style={cardBorderColor ? { borderColor: cardBorderColor } : undefined}
+      onClick={() => navigate(matchUrl(match))}
+    >
+      {/* P1 banner */}
+      <div className="mc-card-banner" style={bgStyle}>
+        <div className="mc-card-tint" />
+        <span className="mc-card-flag">{flagEmoji(p1.country_code)}</span>
+        <span
+          className="mc-card-name"
+          style={{ fontWeight: winner1 ? 700 : 500, opacity: winner2 ? 0.5 : 1 }}
         >
           {p1.name || '—'}
-        </div>
-        <div className="match-player-sub">
-          <span className="match-player-country" title={p1.country_code || ''}>
-            {flagEmoji(p1.country_code) || p1.country_code || ''}
-          </span>
-          <RttLozenge score={p1.rtt_score} hideIfMissing />
-          <MomentumLozenge momentum={p1.momentum} />
-        </div>
-      </div>
-
-      {/* Centre — live lozenge / score / probabilities / vs */}
-      <div className="match-centre">
-        {isLive ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <LiveLozenge />
-            {liveScore && <span className="match-live-score">{liveScore}</span>}
-          </div>
-        ) : isFinished && (match.set_scores || match.final_result) ? (
-          <span className="match-final-score">{match.set_scores || match.final_result}</span>
-        ) : p1prob != null ? (
-          <>
-            <div className="match-probs">
-              <span className="match-prob-p1">{p1prob}%</span>
-              <span style={{ color: 'var(--border)', fontWeight: 400 }}>·</span>
-              <span className="match-prob-p2">{p2prob}%</span>
-            </div>
-            <ProbBar
-              p1={pred.prob_first_player}
-              p2={pred.prob_second_player}
-              name1={p1.name?.split(' ').pop() || 'P1'}
-              name2={p2.name?.split(' ').pop() || 'P2'}
-              hideLabels
-            />
-          </>
-        ) : (
-          <span className="match-vs">vs</span>
+        </span>
+        {p1.rtt_score != null && (
+          <span className="mc-card-rtt">{Math.round(p1.rtt_score)}</span>
         )}
+        {p1.momentum === 'rising' && <span className="mc-card-momentum">↑</span>}
+        <div className="mc-card-prob-wrap">
+          {p1prob != null && (
+            <span className={`mc-card-prob${edgeSide === 'p1' && hasEdge ? ' edge' : ''}`}>
+              {p1prob}%
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Player 2 */}
-      <div className="match-player-cell right">
-        <div
-          className={`match-player-name ${winner2 ? 'winner' : ''}`}
-          style={winner1 ? { color: 'var(--text-3)', fontWeight: 500 } : {}}
+      {/* Center info strip */}
+      <div className="mc-card-strip">
+        <div className="mc-card-strip-left">
+          {isLive ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <LiveLozenge small />
+              {liveScore && <span className="mc-card-score">{liveScore}</span>}
+            </span>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {timeStr && <span className="mc-card-time">{timeStr}</span>}
+              {match.tournament && <span className="mc-card-info">{match.tournament}</span>}
+            </span>
+          )}
+        </div>
+        <div className="mc-card-strip-right">
+          {hasEdge ? (
+            <span className="mc-card-edge">+{Math.round(edgeVal * 100)}% edge</span>
+          ) : isFinished && predCorrect === true ? (
+            <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 700 }}>✓</span>
+          ) : isFinished && predCorrect === false ? (
+            <span style={{ color: 'var(--red)', fontSize: 13, fontWeight: 700 }}>✗</span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* P2 banner */}
+      <div className="mc-card-banner" style={bgStyle}>
+        <div className="mc-card-tint" />
+        <span className="mc-card-flag">{flagEmoji(p2.country_code)}</span>
+        <span
+          className="mc-card-name"
+          style={{ fontWeight: winner2 ? 700 : 500, opacity: winner1 ? 0.5 : 1 }}
         >
           {p2.name || '—'}
-        </div>
-        <div className="match-player-sub">
-          <MomentumLozenge momentum={p2.momentum} />
-          <RttLozenge score={p2.rtt_score} hideIfMissing />
-          <span className="match-player-country" title={p2.country_code || ''}>
-            {flagEmoji(p2.country_code) || p2.country_code || ''}
-          </span>
-        </div>
-      </div>
-
-      {/* Edge / meta */}
-      <div className="match-row-meta">
-        {showTournament && match.tournament && (
-          <span style={{
-            fontSize: 10, color: 'var(--text-3)', maxWidth: 120,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            marginRight: 6,
-          }}>
-            {match.tournament}
-          </span>
+        </span>
+        {p2.rtt_score != null && (
+          <span className="mc-card-rtt">{Math.round(p2.rtt_score)}</span>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-          {hasOdds && (
-            <div className="match-odds-row">
-              <span className="match-odds-val">{p1odds.toFixed(2)}</span>
-              <span className="match-odds-sep">·</span>
-              <span className="match-odds-val">{p2odds.toFixed(2)}</span>
-            </div>
+        {p2.momentum === 'rising' && <span className="mc-card-momentum">↑</span>}
+        <div className="mc-card-prob-wrap">
+          {p2prob != null && (
+            <span className={`mc-card-prob${edgeSide === 'p2' && hasEdge ? ' edge' : ''}`}>
+              {p2prob}%
+            </span>
           )}
-          {hasEdge
-            ? <EdgeBadge edge={edgeVal} playerName={edgeName} />
-            : isFinished
-              ? predictionCorrect === true
-                ? <span style={{ fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>✓</span>
-                : predictionCorrect === false
-                  ? <span style={{ fontSize: 14, color: 'var(--red)', fontWeight: 700 }}>✗</span>
-                  : null
-              : p1prob != null && !hasOdds
-                ? <span className="edge-badge neutral">—</span>
-                : null
-          }
         </div>
       </div>
     </button>
@@ -358,7 +326,7 @@ function TournamentBlock({ name, surface, matches }) {
       </button>
 
       {open && (
-        <div>
+        <div className="mc-card-grid">
           {[...matches].sort((a, b) => {
             const aLive = /in play|live|set \d|game/i.test(a.event_status || '') ? 1 : 0
             const bLive = /in play|live|set \d|game/i.test(b.event_status || '') ? 1 : 0
@@ -371,7 +339,7 @@ function TournamentBlock({ name, surface, matches }) {
             if (ta !== tb) return ta < tb ? -1 : 1
             return (a.match_id || 0) - (b.match_id || 0)
           }).map(m => (
-            <MatchRow key={m.match_id} match={m} showTournament={false} />
+            <MatchCard key={m.match_id} match={m} />
           ))}
         </div>
       )}
@@ -438,9 +406,11 @@ function WinChanceList({ matches }) {
       }}>
         Ranked by model confidence · {sorted.length} match{sorted.length !== 1 ? 'es' : ''}
       </div>
-      {sorted.map(m => (
-        <MatchRow key={m.match_id} match={m} showTournament />
-      ))}
+      <div className="mc-card-grid">
+        {sorted.map(m => (
+          <MatchCard key={m.match_id} match={m} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -953,141 +923,141 @@ export default function MatchList() {
   return (
     <div className="page">
 
-      {/* Header */}
-      <div className="cc-header">
-        <div>
-          <h1 className="cc-title">Match Centre</h1>
-          <div className="cc-subtitle">{todayLabel()}</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          <div className="cc-meta-badges">
-            {liveCount > 0 && (
-              <span className="count-badge live">
-                <span className="live-dot" />{liveCount} live
-              </span>
-            )}
-            {edgeCount > 0 && (
-              <span className="count-badge edge">
-                {edgeCount} edge{edgeCount !== 1 ? 's' : ''} identified
-              </span>
+      {/* Gradient header + filter panel */}
+      <div className="mc-filter-panel">
+
+        {/* Header row */}
+        <div className="cc-header">
+          <div>
+            <h1 className="cc-title">Match Centre</h1>
+            <div className="cc-subtitle">{todayLabel()}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <div className="cc-meta-badges">
+              {liveCount > 0 && (
+                <span className="count-badge live">
+                  <span className="live-dot" />{liveCount} live
+                </span>
+              )}
+              {edgeCount > 0 && (
+                <span className="count-badge edge">
+                  {edgeCount} edge{edgeCount !== 1 ? 's' : ''} identified
+                </span>
+              )}
+            </div>
+            <button
+              onClick={load}
+              style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', padding: '4px 6px',
+                       borderRadius: 'var(--r-sm)', transition: 'color 0.12s' }}
+              title="Refresh"
+            >↻</button>
+            {lastFetch && (
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+                Updated {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              </div>
             )}
           </div>
-          <button
-            onClick={load}
-            style={{ fontSize: 13, color: 'var(--text-3)', padding: '4px 6px',
-                     borderRadius: 'var(--r-sm)', transition: 'color 0.12s' }}
-            title="Refresh"
-          >↻</button>
-          {lastFetch && (
-            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-              Updated {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Filter + sort bar */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 12,
-        alignItems: 'center', marginBottom: 20,
-        paddingBottom: 14, borderBottom: '1px solid var(--border-faint)',
-      }}>
-
-        {/* Date */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Date</span>
-          {['All', 'Today', 'Tomorrow'].map(d => (
-            <button key={d} className={`surface-pill ${dateFilter === d ? 'active' : ''}`} onClick={() => setDateFilter(d)}>
-              {d}
-            </button>
-          ))}
         </div>
 
-        {/* Surface */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Surface</span>
-          {SURFACES.map(s => (
-            <button key={s} className={`surface-pill ${surface === s ? 'active' : ''}`} onClick={() => setSurface(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
+        {/* Filter + sort bar */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
 
-        {/* Tour */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Tour</span>
-          {GENDERS.map(g => (
-            <button key={g} className={`surface-pill ${gender === g ? 'active' : ''}`} onClick={() => setGender(g)}>
-              {g}
-            </button>
-          ))}
-        </div>
+          {/* Date */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span className="mc-filter-label">Date</span>
+            {['All', 'Today', 'Tomorrow'].map(d => (
+              <button key={d} className={`surface-pill ${dateFilter === d ? 'active' : ''}`} onClick={() => setDateFilter(d)}>
+                {d}
+              </button>
+            ))}
+          </div>
 
-        {/* Level tickboxes */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Level</span>
-          {LEVELS.map(lvl => (
+          {/* Surface */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span className="mc-filter-label">Surface</span>
+            {SURFACES.map(s => (
+              <button key={s} className={`surface-pill ${surface === s ? 'active' : ''}`} onClick={() => setSurface(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {/* Tour */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span className="mc-filter-label">Tour</span>
+            {GENDERS.map(g => (
+              <button key={g} className={`surface-pill ${gender === g ? 'active' : ''}`} onClick={() => setGender(g)}>
+                {g}
+              </button>
+            ))}
+          </div>
+
+          {/* Level tickboxes */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="mc-filter-label">Level</span>
+            {LEVELS.map(lvl => (
+              <Tickbox
+                key={lvl}
+                label={lvl}
+                checked={levels.has(lvl)}
+                onChange={() => toggleLevel(lvl)}
+              />
+            ))}
+          </div>
+
+          {/* Visibility tickboxes */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <Tickbox
-              key={lvl}
-              label={lvl}
-              checked={levels.has(lvl)}
-              onChange={() => toggleLevel(lvl)}
+              label="Upcoming only"
+              checked={upcomingOnly}
+              onChange={() => setUpcomingOnly(v => !v)}
+              accent="var(--amber, #f59e0b)"
             />
-          ))}
-        </div>
+            <Tickbox
+              label="Rated players only"
+              checked={ratedOnly}
+              onChange={() => setRatedOnly(v => !v)}
+              accent="var(--green, #4ade80)"
+            />
+            <Tickbox
+              label="Hide unidentified"
+              checked={hideUnidentified}
+              onChange={() => setHideUnidentified(v => !v)}
+              accent="var(--accent, #3b82f6)"
+            />
+          </div>
 
-        {/* Visibility tickboxes */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Tickbox
-            label="Upcoming only"
-            checked={upcomingOnly}
-            onChange={() => setUpcomingOnly(v => !v)}
-            accent="var(--amber, #f59e0b)"
-          />
-          <Tickbox
-            label="Rated players only"
-            checked={ratedOnly}
-            onChange={() => setRatedOnly(v => !v)}
-            accent="var(--green, #4ade80)"
-          />
-          <Tickbox
-            label="Hide unidentified players"
-            checked={hideUnidentified}
-            onChange={() => setHideUnidentified(v => !v)}
-            accent="var(--accent, #3b82f6)"
-          />
-        </div>
+          {/* Tournament */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span className="mc-filter-label">Tournament</span>
+            <select
+              value={tournament}
+              onChange={e => setTournament(e.target.value)}
+              style={{
+                padding: '4px 8px', borderRadius: 6,
+                border: `1px solid ${tournament ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.2)'}`,
+                fontSize: 12, background: 'rgba(0,0,0,0.3)',
+                color: tournament ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.65)',
+                fontFamily: 'inherit', cursor: 'pointer',
+                fontWeight: tournament ? 600 : 400, maxWidth: 220,
+              }}
+            >
+              <option value="">All tournaments</option>
+              {tournamentOptions.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
 
-        {/* Tournament */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Tournament</span>
-          <select
-            value={tournament}
-            onChange={e => setTournament(e.target.value)}
-            style={{
-              padding: '4px 8px', borderRadius: 6,
-              border: `1px solid ${tournament ? 'var(--accent, #3b82f6)' : 'var(--border)'}`,
-              fontSize: 12, background: 'var(--bg-card)',
-              color: tournament ? 'var(--accent, #3b82f6)' : 'var(--text-2)',
-              fontFamily: 'inherit', cursor: 'pointer',
-              fontWeight: tournament ? 600 : 400, maxWidth: 220,
-            }}
-          >
-            <option value="">All tournaments</option>
-            {tournamentOptions.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </div>
+          {/* Sort */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+            <span className="mc-filter-label">Sort</span>
+            {SORTS.map(s => (
+              <button key={s.id} className={`surface-pill ${sortBy === s.id ? 'active' : ''}`} onClick={() => setSortBy(s.id)}>
+                {s.label}
+              </button>
+            ))}
+          </div>
 
-        {/* Sort */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 2, whiteSpace: 'nowrap' }}>Sort</span>
-          {SORTS.map(s => (
-            <button key={s.id} className={`surface-pill ${sortBy === s.id ? 'active' : ''}`} onClick={() => setSortBy(s.id)}>
-              {s.label}
-            </button>
-          ))}
         </div>
-
       </div>
 
       {/* 2-column layout: match list + sidebar */}
