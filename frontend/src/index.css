@@ -2040,6 +2040,57 @@ margin-left: 4px;
   margin-left: 2px;
 }
 
+/* ── Live lozenge (red pill shown on live match cards) ───────────────────── */
+.live-lozenge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 2px 7px;
+  flex-shrink: 0;
+}
+.live-lozenge--sm {
+  font-size: 9px;
+  padding: 1px 5px;
+  gap: 3px;
+}
+.live-lozenge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+  flex-shrink: 0;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* ── Tournament footer bar (in-play cards) ───────────────────────────────── */
+.mc-card-foot {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 22px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.5);
+  background-size: cover;
+  background-position: center;
+}
+
 /* 2-col grid for live match cards within a tournament block */
 .mc-card-grid--live {
   display: grid;
