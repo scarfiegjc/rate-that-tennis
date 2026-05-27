@@ -149,7 +149,8 @@ def match_intelligence(match_id: int):
     def _form(pid):
         return safe_query(
             """
-            SELECT m.event_date, m.tournament_round AS round, t.name AS tournament,
+            SELECT DISTINCT ON (m.event_date, LEAST(m.first_player_id, m.second_player_id), GREATEST(m.first_player_id, m.second_player_id))
+                   m.event_date, m.tournament_round AS round, t.name AS tournament,
                    s.name AS surface, m.final_result,
                    CASE WHEN m.first_player_id = %s THEN p2.name ELSE p1.name END AS opp,
                    CASE WHEN (m.winner = 'First Player'  AND m.first_player_id  = %s)
@@ -163,7 +164,11 @@ def match_intelligence(match_id: int):
             WHERE (m.first_player_id = %s OR m.second_player_id = %s)
               AND m.event_status = 'Finished'
               AND m.winner IS NOT NULL
-            ORDER BY m.event_date DESC
+              AND (m.is_doubles IS NULL OR m.is_doubles = false)
+            ORDER BY m.event_date DESC,
+                     LEAST(m.first_player_id, m.second_player_id),
+                     GREATEST(m.first_player_id, m.second_player_id),
+                     m.id DESC
             LIMIT 10
             """,
             (pid, pid, pid, pid, pid),
