@@ -597,7 +597,8 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             bo2.decimal_odds AS odds_p2,
             bo2.implied_prob AS impl_p2,
             et.gender AS event_gender,
-            m.is_doubles
+            m.is_doubles,
+            m.raw_json->>'event_stadium' AS venue
         FROM matches m
         LEFT JOIN tournaments t  ON t.id = m.tournament_id
         LEFT JOIN event_types et ON et.id = m.event_type_id
@@ -671,6 +672,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             "is_live": m.get("is_live"),
             "is_doubles": bool(m.get("is_doubles")),
             "gender": m.get("event_gender"),  # 'Men' | 'Women' | None
+            "venue": m.get("venue"),
             "first_player": {
                 "id": m["first_player_id"],
                 "name": m["p1_name"],
