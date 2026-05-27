@@ -348,7 +348,10 @@ function TournamentBlock({ name, surface, matches }) {
 function DateGroup({ date, matches }) {
   const byTournament = {}
   for (const m of matches) {
-    const key = m.tournament || 'Unknown Tournament'
+    const rawKey = (m.tournament || '').trim()
+    const key = (rawKey && !['unknown tournament', 'unknown'].includes(rawKey.toLowerCase()))
+      ? rawKey
+      : '—'
     if (!byTournament[key]) byTournament[key] = { surface: m.surface, matches: [] }
     byTournament[key].matches.push(m)
   }
@@ -897,6 +900,10 @@ export default function MatchList() {
         const r1 = m.first_player?.rtt_score
         const r2 = m.second_player?.rtt_score
         if (r1 == null || r2 == null) return false
+      }
+      if (hideUnidentified) {
+        const t = (m.tournament || '').trim().toLowerCase()
+        if (!t || t === 'unknown' || t === 'unknown tournament') return false
       }
       return true
     })
