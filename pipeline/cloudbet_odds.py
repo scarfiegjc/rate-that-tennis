@@ -173,7 +173,8 @@ def extract_all_markets(event: dict, flipped: bool) -> dict:
         for sm in (totals_m.get('submarkets') or {}).values():
             for sel in (sm.get('selections') or []):
                 if sel.get('status') != 'SELECTION_ENABLED': continue
-                params = sel.get('params') or {}
+                params = sel.get('params')
+                params = params if isinstance(params, dict) else {}
                 if line is None:
                     line = params.get('total')
                 outcome = sel.get('outcome')
@@ -189,7 +190,8 @@ def extract_all_markets(event: dict, flipped: bool) -> dict:
         for sm in (handicap_m.get('submarkets') or {}).values():
             for sel in (sm.get('selections') or []):
                 if sel.get('status') != 'SELECTION_ENABLED': continue
-                params = sel.get('params') or {}
+                params = sel.get('params')
+                params = params if isinstance(params, dict) else {}
                 if hdp_line is None:
                     hdp_line = params.get('handicap')
                 outcome = sel.get('outcome')
