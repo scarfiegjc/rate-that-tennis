@@ -118,6 +118,7 @@ def fetch_tennis_events() -> list[dict]:
                 log.warning(f'  comp {ck} failed: {e}')
                 continue
             for ev in data.get('events', []):
+                ev['_competition_key'] = ck  # needed to build the correct website deep-link URL
                 out.append(ev)
     log.info(f'  → {len(out)} total tennis events from Cloudbet')
     return out
@@ -398,8 +399,11 @@ def run() -> None:
                 wrote_odds += 1
 
             # Write deep-link + full markets JSON
+            # URL path = competition_key/event_key so Cloudbet routes correctly
             if ev.get('key'):
-                upsert_link(conn, match_id, ev['key'],
+                comp_key = ev.get('_competition_key', '')
+                link_key = f'{comp_key}/{ev["key"]}' if comp_key else ev['key']
+                upsert_link(conn, match_id, link_key,
                             markets_data=all_markets if all_markets else None)
                 wrote_links += 1
 
