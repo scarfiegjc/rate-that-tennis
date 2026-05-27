@@ -2,8 +2,8 @@
  * InPlayPage — only matches currently in play.
  *
  * Auto-refreshes every 20 seconds.
- * Same green/blue split cards as the homepage — 3-col grid,
- * court photo in the header strip.
+ * Flat 3-col grid — no tournament groupings.
+ * Score-first header with big set chips, tournament at the bottom with court bg.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -72,29 +72,22 @@ function inferSurfaceFromName(name) {
 function courtBgStyle(surface, tournament) {
   const s = (surface || '').toLowerCase()
   let img = null
-  if (s.includes('clay'))  img = courtClay
-  else if (s.includes('grass')) img = courtGrass
-  else if (s.includes('hard'))  img = courtHard
+  if (s.includes('clay'))        img = courtClay
+  else if (s.includes('grass'))  img = courtGrass
+  else if (s.includes('hard'))   img = courtHard
   else {
     const inf = inferSurfaceFromName(tournament)
-    if (inf === 'clay')  img = courtClay
+    if (inf === 'clay')       img = courtClay
     else if (inf === 'grass') img = courtGrass
-    else if (inf === 'hard')  img = courtHard
+    else                      img = courtHard   // default to hard
   }
   return img
-    ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.55),rgba(0,0,0,0.55)),url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : undefined
-}
-
-// ── Live lozenge ─────────────────────────────────────────────────────────────
-
-function LiveLozenge({ small = false }) {
-  return (
-    <span className={small ? 'live-lozenge live-lozenge--sm' : 'live-lozenge'}>
-      <span className="live-lozenge-dot" />
-      LIVE
-    </span>
-  )
+    ? {
+        backgroundImage: `linear-gradient(rgba(0,0,0,0.6),rgba(0,0,0,0.6)),url(${img})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }
+    : { background: 'rgba(0,0,0,0.5)' }
 }
 
 // ── Status check ─────────────────────────────────────────────────────────────
@@ -124,19 +117,26 @@ function MatchCard({ match }) {
   const tournDisplay = rawTourn && !['unknown tournament', 'unknown'].includes(rawTourn.toLowerCase())
     ? rawTourn : null
 
-  const hdrBg = courtBgStyle(match.surface || '', match.tournament || '')
+  const footBg = courtBgStyle(match.surface || '', match.tournament || '')
 
   return (
     <button className="mc-card" onClick={() => navigate(matchUrl(match))}>
 
-      {/* Header with court background */}
-      <div className="mc-card-hdr" style={hdrBg}>
-        <LiveLozenge small />
-        {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-          <span key={i} className="mc-live-set">{set}</span>
-        ))}
-        {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
-        {!match.set_scores && tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
+      {/* Score header — dark bg, big score chips */}
+      <div className="mc-card-hdr" style={{ height: 38, gap: 5 }}>
+        <span className="live-lozenge live-lozenge--sm">
+          <span className="live-lozenge-dot" />
+          LIVE
+        </span>
+        {match.set_scores
+          ? match.set_scores.split(' ').map((set, i) => (
+              <span key={i} className="mc-live-set--lg">{set}</span>
+            ))
+          : null
+        }
+        {match.game_result && (
+          <span className="mc-live-game--lg">{match.game_result}</span>
+        )}
         {hasEdge && (
           <span className="mc-card-edge" style={{ marginLeft: 'auto', flexShrink: 0 }}>
             +{Math.round(edgeVal * 100)}% edge
@@ -179,27 +179,14 @@ function MatchCard({ match }) {
         </div>
       </div>
 
-    </button>
-  )
-}
-
-// ── Tournament group ──────────────────────────────────────────────────────────
-
-function TournamentGroup({ name, matches }) {
-  return (
-    <div className="tournament-block" style={{ marginBottom: 12 }}>
-      <div className="tournament-header" style={{ cursor: 'default' }}>
-        <span className="tournament-name">{name || 'Tournament'}</span>
-        <div className="tournament-info">
-          <span className="count-badge live">
-            <span className="live-dot" />{matches.length} live
-          </span>
+      {/* Tournament footer — court photo background */}
+      {tournDisplay && (
+        <div className="mc-card-foot" style={footBg}>
+          {tournDisplay}
         </div>
-      </div>
-      <div className="mc-card-grid">
-        {matches.map(m => <MatchCard key={m.match_id} match={m} />)}
-      </div>
-    </div>
+      )}
+
+    </button>
   )
 }
 
@@ -238,14 +225,6 @@ export default function InPlayPage() {
   if (loading) return <div className="page"><div className="loading">Loading live matches…</div></div>
   if (error)   return <div className="page"><div className="error">{error}</div></div>
 
-  const byTournament = {}
-  for (const m of matches) {
-    const key = m.tournament || 'Other'
-    if (!byTournament[key]) byTournament[key] = []
-    byTournament[key].push(m)
-  }
-  const tournamentList = Object.entries(byTournament).sort(([a], [b]) => a.localeCompare(b))
-
   return (
     <div className="page">
       <div className="cc-header">
@@ -278,9 +257,9 @@ export default function InPlayPage() {
           </div>
         </div>
       ) : (
-        tournamentList.map(([name, ms]) => (
-          <TournamentGroup key={name} name={name} matches={ms} />
-        ))
+        <div className="mc-card-grid">
+          {matches.map(m => <MatchCard key={m.match_id} match={m} />)}
+        </div>
       )}
     </div>
   )
