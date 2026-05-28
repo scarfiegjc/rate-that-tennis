@@ -277,25 +277,24 @@ def sitemap():
 
     # ── Match pages (upcoming + last 30 days) ─────────────────────────────
     try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT m.id,
-                       COALESCE(p1.player_name,'') AS p1,
-                       COALESCE(p2.player_name,'') AS p2,
-                       m.event_date
-                FROM matches m
-                LEFT JOIN players p1 ON p1.id = m.first_player_id
-                LEFT JOIN players p2 ON p2.id = m.second_player_id
-                WHERE m.event_date BETWEEN %s AND %s
-                  AND m.singles_doubles = 'S'
-                ORDER BY m.event_date DESC, m.id DESC
-                LIMIT 2000
-            """, (str(month_ago), str(week_ahead)))
-            rows = cur.fetchall()
-        conn.close()
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT m.id,
+                           COALESCE(p1.player_name,'') AS p1,
+                           COALESCE(p2.player_name,'') AS p2,
+                           m.event_date
+                    FROM matches m
+                    LEFT JOIN players p1 ON p1.id = m.first_player_id
+                    LEFT JOIN players p2 ON p2.id = m.second_player_id
+                    WHERE m.event_date BETWEEN %s AND %s
+                      AND m.singles_doubles = 'S'
+                    ORDER BY m.event_date DESC, m.id DESC
+                    LIMIT 2000
+                """, (str(month_ago), str(week_ahead)))
+                rows = cur.fetchall()
         for row in rows:
-            mid, p1, p2, edate = row
+            mid, p1, p2, edate = row['id'], row['p1'], row['p2'], row['event_date']
             # Build SEO slug matching matchUrl() helper in frontend
             slug_raw = f"{p1}-vs-{p2}".lower()
             slug = "".join(c if c.isalnum() or c == '-' else '-' for c in slug_raw)
@@ -313,18 +312,18 @@ def sitemap():
 
     # ── Player pages ──────────────────────────────────────────────────────
     try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT p.id, p.player_name
-                FROM players p
-                JOIN player_ratings pr ON pr.player_id = p.id
-                ORDER BY pr.rtt_score DESC NULLS LAST
-                LIMIT 500
-            """)
-            players = cur.fetchall()
-        conn.close()
-        for pid, name in players:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT p.id, p.player_name
+                    FROM players p
+                    JOIN player_ratings pr ON pr.player_id = p.id
+                    ORDER BY pr.rtt_score DESC NULLS LAST
+                    LIMIT 500
+                """)
+                players = cur.fetchall()
+        for row in players:
+            pid, name = row['id'], row['player_name']
             slug = "".join(c if c.isalnum() or c == '-' else '-' for c in (name or '').lower())
             slug = "-".join(p for p in slug.split('-') if p)
             slug_part = f"/{slug}" if slug else ""
@@ -376,36 +375,43 @@ def seo_match(match_id: int):
 
     row = None
     try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT m.id,
-                       COALESCE(p1.player_name,'') AS p1,
-                       COALESCE(p2.player_name,'') AS p2,
-                       COALESCE(t.name,'')         AS tournament,
-                       COALESCE(s.surface_name,'') AS surface,
-                       m.event_date,
-                       mp.p1_win_probability,
-                       mp.p2_win_probability,
-                       mp.narrative
-                FROM matches m
-                LEFT JOIN players p1         ON p1.id = m.first_player_id
-                LEFT JOIN players p2         ON p2.id = m.second_player_id
-                LEFT JOIN tournaments t      ON t.id  = m.tournament_id
-                LEFT JOIN surfaces s         ON s.id  = m.surface_id
-                LEFT JOIN model_predictions mp ON mp.match_id = m.id
-                WHERE m.id = %s
-                LIMIT 1
-            """, (match_id,))
-            row = cur.fetchone()
-        conn.close()
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT m.id,
+                           COALESCE(p1.player_name,'') AS p1,
+                           COALESCE(p2.player_name,'') AS p2,
+                           COALESCE(t.name,'')         AS tournament,
+                           COALESCE(s.surface_name,'') AS surface,
+                           m.event_date,
+                           mp.p1_win_probability,
+                           mp.p2_win_probability,
+                           mp.narrative
+                    FROM matches m
+                    LEFT JOIN players p1         ON p1.id = m.first_player_id
+                    LEFT JOIN players p2         ON p2.id = m.second_player_id
+                    LEFT JOIN tournaments t      ON t.id  = m.tournament_id
+                    LEFT JOIN surfaces s         ON s.id  = m.surface_id
+                    LEFT JOIN model_predictions mp ON mp.match_id = m.id
+                    WHERE m.id = %s
+                    LIMIT 1
+                """, (match_id,))
+                row = cur.fetchone()
     except Exception as exc:
         logging.warning("seo_match DB error: %s", exc)
 
     if not row:
         return HTMLResponse(status_code=404, content="<html><body><p>Match not found.</p></body></html>")
 
-    mid, p1, p2, tournament, surface, event_date, p1_prob, p2_prob, narrative = row
+    mid       = row['id']
+    p1        = row['p1']
+    p2        = row['p2']
+    tournament = row['tournament']
+    surface   = row['surface']
+    event_date = row['event_date']
+    p1_prob   = row['p1_win_probability']
+    p2_prob   = row['p2_win_probability']
+    narrative = row['narrative']
 
     slug = _slug(f"{p1}-vs-{p2}")
     canonical = f"https://ratethat.tennis/match/{mid}/{slug}"
@@ -492,26 +498,33 @@ def seo_player(player_id: int):
 
     row = None
     try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT p.id, p.player_name, p.country,
-                       pr.rtt_score, pr.form_score,
-                       pr.serve_rating, pr.clay_rating, pr.hard_rating, pr.grass_rating
-                FROM players p
-                LEFT JOIN player_ratings pr ON pr.player_id = p.id
-                WHERE p.id = %s
-                LIMIT 1
-            """, (player_id,))
-            row = cur.fetchone()
-        conn.close()
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT p.id, p.player_name, p.country,
+                           pr.rtt_score, pr.form_score,
+                           pr.serve_rating, pr.clay_rating, pr.hard_rating, pr.grass_rating
+                    FROM players p
+                    LEFT JOIN player_ratings pr ON pr.player_id = p.id
+                    WHERE p.id = %s
+                    LIMIT 1
+                """, (player_id,))
+                row = cur.fetchone()
     except Exception as exc:
         logging.warning("seo_player DB error: %s", exc)
 
     if not row:
         return HTMLResponse(status_code=404, content="<html><body><p>Player not found.</p></body></html>")
 
-    pid, name, country, rtt_score, form_score, serve_rating, clay, hard, grass = row
+    pid        = row['id']
+    name       = row['player_name']
+    country    = row['country']
+    rtt_score  = row['rtt_score']
+    form_score = row['form_score']
+    serve_rating = row['serve_rating']
+    clay       = row['clay_rating']
+    hard       = row['hard_rating']
+    grass      = row['grass_rating']
 
     slug = _slug(name or "")
     canonical = f"https://ratethat.tennis/player/{pid}/{slug}"
