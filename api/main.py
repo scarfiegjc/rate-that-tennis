@@ -256,7 +256,7 @@ def sitemap():
     base = "https://ratethat.tennis"
     today = datetime.date.today()
     week_ahead = today + datetime.timedelta(days=7)
-    month_ago  = today - datetime.timedelta(days=30)
+    month_ago  = today - datetime.timedelta(days=90)
 
     urls = []
 
