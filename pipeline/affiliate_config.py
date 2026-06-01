@@ -22,6 +22,15 @@ from typing import Optional
 # Keys are stable lowercase strings (e.g. "leovegas", "bet365").
 
 BOOKMAKERS: dict[str, dict] = {
+    # ── Active affiliate deals
+    "londonbet": {
+        "display_name":      "LondonBet",
+        "affiliate_enabled": True,
+        "affiliate_url":     "https://refer.london.bet/redirect?cid=6a1d82b0d12e68d7e2a2946d&oid=6819c4812b05369f73f391b3&bid=6819e4a52b05369f73f39f40&pid=6854318a9b07b5e3824c5cf7&customParameter=",
+        "sportsbook_url":    "https://london.bet/sports/tennis",
+        "notes":             "Active affiliate deal. UK sportsbook.",
+    },
+
     # ── Primary affiliate targets (apply for these — see docs/affiliate-applications.md)
     "leovegas": {
         "display_name":      "LeoVegas",
