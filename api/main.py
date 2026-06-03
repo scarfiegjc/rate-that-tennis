@@ -288,7 +288,7 @@ def sitemap():
                     LEFT JOIN players p1 ON p1.id = m.first_player_id
                     LEFT JOIN players p2 ON p2.id = m.second_player_id
                     WHERE m.event_date BETWEEN %s AND %s
-                      AND m.singles_doubles = 'S'
+                      AND m.is_doubles = false
                     ORDER BY m.event_date DESC, m.id DESC
                     LIMIT 2000
                 """, (str(month_ago), str(week_ahead)))
