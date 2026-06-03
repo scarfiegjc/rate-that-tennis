@@ -399,6 +399,7 @@ def seo_match(match_id: int):
                 row = cur.fetchone()
     except Exception as exc:
         logging.warning("seo_match DB error: %s", exc)
+        return HTMLResponse(status_code=500, content=f"<html><body><pre>DB ERROR: {exc}</pre></body></html>")
 
     if not row:
         return HTMLResponse(status_code=404, content="<html><body><p>Match not found.</p></body></html>")
