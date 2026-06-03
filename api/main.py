@@ -382,7 +382,7 @@ def seo_match(match_id: int):
                            COALESCE(p1.full_name, p1.name, '') AS p1,
                            COALESCE(p2.full_name, p2.name, '') AS p2,
                            COALESCE(t.name,'')         AS tournament,
-                           COALESCE(s.surface_name,'') AS surface,
+                           COALESCE(s.name,'') AS surface,
                            m.event_date,
                            mp.p1_win_probability,
                            mp.p2_win_probability,
