@@ -281,8 +281,8 @@ def sitemap():
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT m.id,
-                           COALESCE(p1.player_name,'') AS p1,
-                           COALESCE(p2.player_name,'') AS p2,
+                           COALESCE(p1.full_name, p1.name, '') AS p1,
+                           COALESCE(p2.full_name, p2.name, '') AS p2,
                            m.event_date
                     FROM matches m
                     LEFT JOIN players p1 ON p1.id = m.first_player_id
@@ -315,7 +315,7 @@ def sitemap():
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT p.id, p.player_name
+                    SELECT p.id, COALESCE(p.full_name, p.name) AS player_name
                     FROM players p
                     JOIN player_ratings pr ON pr.player_id = p.id
                     ORDER BY pr.rtt_score DESC NULLS LAST
@@ -379,8 +379,8 @@ def seo_match(match_id: int):
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT m.id,
-                           COALESCE(p1.player_name,'') AS p1,
-                           COALESCE(p2.player_name,'') AS p2,
+                           COALESCE(p1.full_name, p1.name, '') AS p1,
+                           COALESCE(p2.full_name, p2.name, '') AS p2,
                            COALESCE(t.name,'')         AS tournament,
                            COALESCE(s.surface_name,'') AS surface,
                            m.event_date,
@@ -501,7 +501,7 @@ def seo_player(player_id: int):
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT p.id, p.player_name, p.country,
+                    SELECT p.id, COALESCE(p.full_name, p.name) AS player_name, p.country,
                            pr.rtt_score, pr.form_score,
                            pr.serve_rating, pr.clay_rating, pr.hard_rating, pr.grass_rating
                     FROM players p
