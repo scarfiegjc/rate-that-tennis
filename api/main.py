@@ -384,8 +384,8 @@ def seo_match(match_id: int):
                            COALESCE(t.name,'')         AS tournament,
                            COALESCE(s.name,'') AS surface,
                            m.event_date,
-                           mp.p1_win_probability,
-                           mp.p2_win_probability,
+                           mp.prob_first_player  AS p1_win_probability,
+                           mp.prob_second_player AS p2_win_probability,
                            mp.narrative
                     FROM matches m
                     LEFT JOIN players p1         ON p1.id = m.first_player_id
