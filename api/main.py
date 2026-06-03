@@ -391,7 +391,7 @@ def seo_match(match_id: int):
                     LEFT JOIN players p1         ON p1.id = m.first_player_id
                     LEFT JOIN players p2         ON p2.id = m.second_player_id
                     LEFT JOIN tournaments t      ON t.id  = m.tournament_id
-                    LEFT JOIN surfaces s         ON s.id  = m.surface_id
+                    LEFT JOIN surfaces s         ON s.id  = t.surface_id
                     LEFT JOIN model_predictions mp ON mp.match_id = m.id
                     WHERE m.id = %s
                     LIMIT 1
