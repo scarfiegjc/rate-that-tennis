@@ -112,6 +112,7 @@ def players_database(
         )
         SELECT
             p.id, p.name, p.full_name, p.country, p.country_code, p.hand,
+            p.ranking_movement,
             pr.rtt_score, pr.clay_rating, pr.hard_rating, pr.grass_rating, pr.indoor_rating,
             pr.form_score, pr.momentum,
             gp.gender,
@@ -135,13 +136,14 @@ def players_database(
     out = []
     for r in rows:
         out.append({
-            "id":            r["id"],
-            "name":          r["name"],
-            "full_name":     r["full_name"],
-            "country":       r["country"],
-            "country_code":  r["country_code"],
-            "hand":          r["hand"],
-            "gender":        "M" if r.get("gender") == "Men" else ("W" if r.get("gender") == "Women" else None),
+            "id":               r["id"],
+            "name":             r["name"],
+            "full_name":        r["full_name"],
+            "country":          r["country"],
+            "country_code":     r["country_code"],
+            "hand":             r["hand"],
+            "ranking_movement": r.get("ranking_movement"),
+            "gender":           "M" if r.get("gender") == "Men" else ("W" if r.get("gender") == "Women" else None),
             "rtt_score":     float(r["rtt_score"])    if r.get("rtt_score")    is not None else None,
             "clay_rating":   float(r["clay_rating"])  if r.get("clay_rating")  is not None else None,
             "hard_rating":   float(r["hard_rating"])  if r.get("hard_rating")  is not None else None,
@@ -271,7 +273,8 @@ def get_player(player_id: int):
     player = query_one(
         """
         SELECT id, name, full_name, country, country_code, birthday,
-               hand, turned_pro, height_cm, logo_url, is_active
+               hand, turned_pro, height_cm, logo_url, is_active,
+               ranking_movement, ranking_career_best
         FROM players
         WHERE id = %s
         """,

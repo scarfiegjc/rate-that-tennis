@@ -330,11 +330,11 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
 
     # Players
     p1 = query_one(
-        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank FROM players WHERE id = %s",
+        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank, ranking_movement, ranking_career_best FROM players WHERE id = %s",
         (p1_id,),
     ) or {}
     p2 = query_one(
-        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank FROM players WHERE id = %s",
+        "SELECT id, name, full_name, country, country_code, birthday, hand, turned_pro, height_cm, logo_url, current_rank, ranking_movement, ranking_career_best FROM players WHERE id = %s",
         (p2_id,),
     ) or {}
 
@@ -481,6 +481,25 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
         (match_id,),
     )
 
+    # bzzoiro O/U prediction
+    bzzoiro_pred = None
+    try:
+        bzzoiro_pred = query_one(
+            """
+            SELECT prob_player1_wins, prob_player2_wins, predicted_winner, confidence,
+                   expected_total_sets, prob_over_2_5_sets,
+                   expected_total_games, prob_over_20_5_games, prob_over_21_5_games, prob_over_22_5_games,
+                   prob_player1_wins_first_set
+            FROM bzzoiro_predictions
+            WHERE match_id = %s
+            ORDER BY synced_at DESC
+            LIMIT 1
+            """,
+            (match_id,),
+        )
+    except Exception:
+        pass
+
     # Market odds
     odds = _latest_odds(match_id)
 
@@ -516,6 +535,7 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
             "game_result": m.get("game_result"),
             "final_result": m.get("final_result"),
             "winner": m.get("winner"),
+            "seo_preview": m.get("seo_preview"),
         },
         "players": {
             "first": {
@@ -545,6 +565,19 @@ def _build_match_payload(match_id: int, m: dict) -> dict:
         "p2_clutch_stats": p2_clutch_stats,
         "p1_serve_zones": p1_serve_zones,
         "p2_serve_zones": p2_serve_zones,
+        "bzzoiro_prediction": {
+            "prob_player1_wins": float(bzzoiro_pred["prob_player1_wins"]) if bzzoiro_pred and bzzoiro_pred.get("prob_player1_wins") else None,
+            "prob_player2_wins": float(bzzoiro_pred["prob_player2_wins"]) if bzzoiro_pred and bzzoiro_pred.get("prob_player2_wins") else None,
+            "predicted_winner": bzzoiro_pred.get("predicted_winner") if bzzoiro_pred else None,
+            "confidence": float(bzzoiro_pred["confidence"]) if bzzoiro_pred and bzzoiro_pred.get("confidence") else None,
+            "expected_total_sets": float(bzzoiro_pred["expected_total_sets"]) if bzzoiro_pred and bzzoiro_pred.get("expected_total_sets") else None,
+            "prob_over_2_5_sets": float(bzzoiro_pred["prob_over_2_5_sets"]) if bzzoiro_pred and bzzoiro_pred.get("prob_over_2_5_sets") else None,
+            "expected_total_games": float(bzzoiro_pred["expected_total_games"]) if bzzoiro_pred and bzzoiro_pred.get("expected_total_games") else None,
+            "prob_over_20_5_games": float(bzzoiro_pred["prob_over_20_5_games"]) if bzzoiro_pred and bzzoiro_pred.get("prob_over_20_5_games") else None,
+            "prob_over_21_5_games": float(bzzoiro_pred["prob_over_21_5_games"]) if bzzoiro_pred and bzzoiro_pred.get("prob_over_21_5_games") else None,
+            "prob_over_22_5_games": float(bzzoiro_pred["prob_over_22_5_games"]) if bzzoiro_pred and bzzoiro_pred.get("prob_over_22_5_games") else None,
+            "prob_player1_wins_first_set": float(bzzoiro_pred["prob_player1_wins_first_set"]) if bzzoiro_pred and bzzoiro_pred.get("prob_player1_wins_first_set") else None,
+        } if bzzoiro_pred else None,
     }
 
 
@@ -583,6 +616,8 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
             pr2.rtt_score AS p2_rtt,
             pr1.momentum AS p1_momentum,
             pr2.momentum AS p2_momentum,
+            pr1.ranking_movement AS p1_ranking_movement,
+            pr2.ranking_movement AS p2_ranking_movement,
             mp.prob_first_player,
             mp.prob_second_player,
             mp.confidence,
@@ -680,6 +715,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
                 "photo_url": m.get("p1_photo"),
                 "rtt_score": float(m["p1_rtt"]) if m.get("p1_rtt") else None,
                 "momentum": m.get("p1_momentum"),
+                "ranking_movement": m.get("p1_ranking_movement"),
                 "form_dots": form_dots_map.get(m["first_player_id"], []),
             },
             "second_player": {
@@ -689,6 +725,7 @@ def get_today_matches(days_ahead: int = Query(default=2, ge=0, le=7)):
                 "photo_url": m.get("p2_photo"),
                 "rtt_score": float(m["p2_rtt"]) if m.get("p2_rtt") else None,
                 "momentum": m.get("p2_momentum"),
+                "ranking_movement": m.get("p2_ranking_movement"),
                 "form_dots": form_dots_map.get(m["second_player_id"], []),
             },
             "prediction": {
@@ -866,6 +903,160 @@ def _get_best_bets_impl(days_ahead: int, min_edge: float, limit: int) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /matches/live
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/live")
+def matches_live():
+    """Live matches with in-play data."""
+    rows = query(
+        """
+        SELECT
+            m.id AS match_id,
+            m.event_date, m.event_time, m.event_status AS status,
+            m.first_player_id, m.second_player_id,
+            m.bzzoiro_id,
+            m.live_data,
+            p1.name AS first_player_name, p1.country_code AS first_player_country,
+            p1.current_rank AS p1_ranking,
+            p2.name AS second_player_name, p2.country_code AS second_player_country,
+            p2.current_rank AS p2_ranking,
+            t.name AS tournament, s.name AS surface,
+            et.tour_category,
+            pr1.rtt_score AS p1_rtt, pr1.ranking_movement AS p1_ranking_movement,
+            pr2.rtt_score AS p2_rtt, pr2.ranking_movement AS p2_ranking_movement,
+            mp.prob_first_player, mp.prob_second_player,
+            bo1.best_price AS p1_best_odds, bo1.best_bookmaker AS p1_best_book,
+            bo2.best_price AS p2_best_odds, bo2.best_bookmaker AS p2_best_book
+        FROM matches m
+        JOIN players p1 ON p1.id = m.first_player_id
+        JOIN players p2 ON p2.id = m.second_player_id
+        LEFT JOIN tournaments t ON t.id = m.tournament_id
+        LEFT JOIN surfaces s ON s.id = t.surface_id
+        LEFT JOIN event_types et ON et.id = m.event_type_id
+        LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
+        LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
+        LEFT JOIN model_predictions mp ON mp.match_id = m.id
+        LEFT JOIN LATERAL (
+            SELECT MAX(decimal_odds) AS best_price,
+                   (array_agg(bookmaker ORDER BY decimal_odds DESC))[1] AS best_bookmaker
+            FROM bookmaker_odds WHERE match_id = m.id AND player_ref = 'first_player'
+        ) bo1 ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT MAX(decimal_odds) AS best_price,
+                   (array_agg(bookmaker ORDER BY decimal_odds DESC))[1] AS best_bookmaker
+            FROM bookmaker_odds WHERE match_id = m.id AND player_ref = 'second_player'
+        ) bo2 ON TRUE
+        WHERE m.event_status IN ('live', 'in_play', 'Live', 'In Play', '1H', '2H')
+          AND (m.is_doubles IS NULL OR m.is_doubles = FALSE)
+          AND (et.tour_category IS NULL OR et.tour_category NOT IN ('ITF', 'Junior'))
+        ORDER BY m.event_time
+        """
+    )
+
+    result = []
+    for r in (rows or []):
+        live = r.get("live_data") or {}
+        result.append({
+            "match_id": r["match_id"],
+            "event_date": str(r["event_date"]) if r["event_date"] else None,
+            "event_time": str(r["event_time"]) if r["event_time"] else None,
+            "status": r["status"],
+            "bzzoiro_id": r.get("bzzoiro_id"),
+            "tournament": r["tournament"],
+            "surface": r["surface"],
+            "tour_category": r["tour_category"],
+            "first_player": {
+                "id": r["first_player_id"],
+                "name": r["first_player_name"],
+                "country": r["first_player_country"],
+                "rtt_score": float(r["p1_rtt"]) if r["p1_rtt"] else None,
+                "ranking": r["p1_ranking"],
+                "ranking_movement": r["p1_ranking_movement"],
+            },
+            "second_player": {
+                "id": r["second_player_id"],
+                "name": r["second_player_name"],
+                "country": r["second_player_country"],
+                "rtt_score": float(r["p2_rtt"]) if r["p2_rtt"] else None,
+                "ranking": r["p2_ranking"],
+                "ranking_movement": r["p2_ranking_movement"],
+            },
+            "prediction": {
+                "prob_first_player": float(r["prob_first_player"]) if r["prob_first_player"] else None,
+                "prob_second_player": float(r["prob_second_player"]) if r["prob_second_player"] else None,
+            } if r["prob_first_player"] else None,
+            "odds": {
+                "p1_best": float(r["p1_best_odds"]) if r["p1_best_odds"] else None,
+                "p1_best_book": r["p1_best_book"],
+                "p2_best": float(r["p2_best_odds"]) if r["p2_best_odds"] else None,
+                "p2_best_book": r["p2_best_book"],
+            },
+            # Live in-play data from live_data JSONB
+            "player1_sets": live.get("player1_sets"),
+            "player2_sets": live.get("player2_sets"),
+            "sets_detail": live.get("sets_detail"),
+            "player1_games": live.get("player1_games"),
+            "player2_games": live.get("player2_games"),
+            "current_set": live.get("current_set"),
+            "current_point": live.get("current_point"),
+            "is_serving_p1": live.get("is_serving_p1"),
+            "serve_stats": {
+                "p1_aces": live.get("p1_aces"),
+                "p1_double_faults": live.get("p1_double_faults"),
+                "p1_first_serve_pct": live.get("p1_first_serve_pct"),
+                "p1_first_serve_won_pct": live.get("p1_first_serve_won_pct"),
+                "p1_second_serve_won_pct": live.get("p1_second_serve_won_pct"),
+                "p2_aces": live.get("p2_aces"),
+                "p2_double_faults": live.get("p2_double_faults"),
+                "p2_first_serve_pct": live.get("p2_first_serve_pct"),
+                "p2_first_serve_won_pct": live.get("p2_first_serve_won_pct"),
+                "p2_second_serve_won_pct": live.get("p2_second_serve_won_pct"),
+                "aces_per_set": live.get("aces_per_set"),
+                "double_faults_per_set": live.get("double_faults_per_set"),
+            },
+        })
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /matches/{match_id}/ou-prediction
+# (Must be declared BEFORE /{match_id} so FastAPI matches the literal suffix)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/{match_id}/ou-prediction")
+def match_ou_prediction(match_id: int):
+    """bzzoiro over/under prediction for a match."""
+    row = query_one(
+        """
+        SELECT bp.*
+        FROM bzzoiro_predictions bp
+        WHERE bp.match_id = %s
+        ORDER BY bp.synced_at DESC
+        LIMIT 1
+        """,
+        (match_id,),
+    )
+
+    if not row:
+        return None
+
+    return {
+        "prob_player1_wins": float(row["prob_player1_wins"]) if row["prob_player1_wins"] else None,
+        "prob_player2_wins": float(row["prob_player2_wins"]) if row["prob_player2_wins"] else None,
+        "predicted_winner": row["predicted_winner"],
+        "confidence": float(row["confidence"]) if row["confidence"] else None,
+        "expected_total_sets": float(row["expected_total_sets"]) if row["expected_total_sets"] else None,
+        "prob_over_2_5_sets": float(row["prob_over_2_5_sets"]) if row["prob_over_2_5_sets"] else None,
+        "expected_total_games": float(row["expected_total_games"]) if row["expected_total_games"] else None,
+        "prob_over_20_5_games": float(row["prob_over_20_5_games"]) if row["prob_over_20_5_games"] else None,
+        "prob_over_21_5_games": float(row["prob_over_21_5_games"]) if row["prob_over_21_5_games"] else None,
+        "prob_over_22_5_games": float(row["prob_over_22_5_games"]) if row["prob_over_22_5_games"] else None,
+        "prob_player1_wins_first_set": float(row["prob_player1_wins_first_set"]) if row["prob_player1_wins_first_set"] else None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /matches/{id}
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -885,6 +1076,7 @@ def get_match(match_id: int):
             m.final_result,
             m.game_result,
             m.is_live,
+            m.seo_preview,
             t.name AS tournament_name,
             s.name AS surface_name,
             COALESCE(
