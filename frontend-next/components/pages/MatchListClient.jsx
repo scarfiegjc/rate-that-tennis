@@ -128,6 +128,73 @@ function fmtUtcTime(timeStr) {
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
+// ── isTimeTBC helper ─────────────────────────────────────────────────────────
+
+function isTimeTBC(match) {
+  const t = match.event_time || ''
+  return !t || t === '00:00' || t === 'TBC' || t === '--:--'
+}
+
+// ── Ranking badge with movement arrow ────────────────────────────────────────
+
+function RankingBadge({ ranking, movement, careerBest }) {
+  if (ranking == null) return null
+  const arrow = movement > 0 ? '↑' : movement < 0 ? '↓' : '→'
+  const color = movement > 0 ? 'var(--green)' : movement < 0 ? 'var(--red)' : 'var(--text-3)'
+  return (
+    <span style={{ fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+      #{ranking}
+      {movement != null && Math.abs(movement) > 0 && (
+        <span style={{ color, marginLeft: 3, fontWeight: 700 }}>{arrow}{Math.abs(movement)}</span>
+      )}
+      {careerBest && ranking <= careerBest && ranking <= 10 && (
+        <span style={{ color: 'var(--amber)', marginLeft: 3, fontWeight: 700 }}>PB</span>
+      )}
+    </span>
+  )
+}
+
+// ── O/U market pills ──────────────────────────────────────────────────────────
+
+function OuPills({ bzzoiro_ou, p1Name, p2Name }) {
+  if (!bzzoiro_ou) return null
+  const ou = bzzoiro_ou
+  const items = []
+  if (ou.total_sets_over != null && ou.total_sets_line != null) {
+    const pct = Math.round(ou.total_sets_over * 100)
+    items.push({ label: `Sets O${ou.total_sets_line}`, pct })
+  }
+  if (ou.total_games_over != null && ou.total_games_line != null) {
+    const pct = Math.round(ou.total_games_over * 100)
+    items.push({ label: `Games O${ou.total_games_line}`, pct })
+  }
+  if (ou.first_set_winner != null) {
+    const name = ou.first_set_winner === 'first' ? (p1Name || 'P1') : (p2Name || 'P2')
+    const pct  = Math.round((ou.first_set_prob || 0.5) * 100)
+    items.push({ label: `1st Set: ${name.split(' ').pop()}`, pct })
+  }
+  if (items.length === 0) return null
+  return (
+    <div style={{
+      display: 'flex', gap: 5, flexWrap: 'wrap', padding: '4px 10px 7px',
+      borderTop: '1px solid var(--border-faint)',
+    }}>
+      {items.map((item, i) => (
+        <span key={i} style={{
+          fontSize: 10, fontWeight: 600,
+          color: 'var(--text-3)',
+          background: 'var(--bg-raised)',
+          border: '1px solid var(--border-faint)',
+          borderRadius: 20, padding: '2px 7px',
+          whiteSpace: 'nowrap',
+        }}>
+          {item.label} <span style={{ color: 'var(--text-2)', fontWeight: 700 }}>[{item.pct}%]</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // ── Match card (Combatrics-style compact card) ────────────────────────────────
 // Layout: court-image header banner → P1 row → P2 row → green/blue prob bar
 
@@ -159,7 +226,8 @@ function MatchCard({ match }) {
   const edgeVal = Math.max(pred.edge_first || 0, pred.edge_second || 0)
   const hasEdge = edgeVal > 0.02
 
-  const timeStr = isFinished ? 'FT' : (match.event_time ? fmtUtcTime(match.event_time) : null)
+  const timeTBC  = !isFinished && !isLive && isTimeTBC(match)
+  const timeStr = isFinished ? 'FT' : isLive ? null : timeTBC ? 'Time TBC' : fmtUtcTime(match.event_time)
 
   // Filter out "Unknown" tournament strings — fall back to surface name
   const rawTourn = (match.tournament || '').trim()
@@ -192,7 +260,7 @@ function MatchCard({ match }) {
           </>
         ) : (
           <>
-            {timeStr && <span className="mc-hdr-time">{timeStr}</span>}
+            {timeStr && <span className="mc-hdr-time" style={timeTBC ? { color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' } : undefined}>{timeStr}</span>}
             {match.venue && <span className="mc-hdr-venue">{match.venue}</span>}
             {tournDisplay && <span className="mc-hdr-tourn">{tournDisplay}</span>}
           </>
@@ -227,6 +295,7 @@ function MatchCard({ match }) {
             <span className="mc-side-name">{p1.name || '—'}</span>
             {p1.rtt_score != null && <span className="mc-side-rtt">{Math.round(p1.rtt_score)}</span>}
           </div>
+          <RankingBadge ranking={p1.ranking} movement={p1.ranking_movement} careerBest={p1.career_best_ranking} />
           {p1prob != null && <div className="mc-side-prob">{p1prob}%</div>}
         </div>
 
@@ -241,9 +310,11 @@ function MatchCard({ match }) {
             <span className="mc-side-name">{p2.name || '—'}</span>
             {p2.rtt_score != null && <span className="mc-side-rtt">{Math.round(p2.rtt_score)}</span>}
           </div>
+          <RankingBadge ranking={p2.ranking} movement={p2.ranking_movement} careerBest={p2.career_best_ranking} />
           {p2prob != null && <div className="mc-side-prob" style={{ textAlign: 'right' }}>{p2prob}%</div>}
         </div>
       </div>
+      <OuPills bzzoiro_ou={match.bzzoiro_ou} p1Name={p1.name} p2Name={p2.name} />
     </button>
   )
 }
@@ -330,6 +401,10 @@ function TournamentBlock({ name, surface, matches }) {
             const aFin = /finished/i.test(a.event_status || '') ? 1 : 0
             const bFin = /finished/i.test(b.event_status || '') ? 1 : 0
             if (aFin !== bFin) return aFin - bFin
+            // TBC times sort last among upcoming matches
+            const aTBC = isTimeTBC(a) ? 1 : 0
+            const bTBC = isTimeTBC(b) ? 1 : 0
+            if (aTBC !== bTBC) return aTBC - bTBC
             const ta = a.event_time || '99:99'
             const tb = b.event_time || '99:99'
             if (ta !== tb) return ta < tb ? -1 : 1

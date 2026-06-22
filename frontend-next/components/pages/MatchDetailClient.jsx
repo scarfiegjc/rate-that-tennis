@@ -403,7 +403,19 @@ function MatchHero({ match }) {
                 </span>
               )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {p1.current_rank    && <P1Pill>#{p1.current_rank}</P1Pill>}
+                {p1.current_rank && (
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontVariantNumeric: 'tabular-nums' }}>
+                    #{p1.current_rank}
+                    {p1.ranking_movement != null && Math.abs(p1.ranking_movement) > 0 && (
+                      <span style={{ color: p1.ranking_movement > 0 ? '#4ade80' : '#f87171', marginLeft: 3, fontWeight: 700 }}>
+                        {p1.ranking_movement > 0 ? '↑' : '↓'}{Math.abs(p1.ranking_movement)}
+                      </span>
+                    )}
+                    {p1.career_best_ranking && p1.current_rank <= p1.career_best_ranking && p1.current_rank <= 10 && (
+                      <span style={{ color: '#fbbf24', marginLeft: 3, fontWeight: 700 }}>PB</span>
+                    )}
+                  </span>
+                )}
                 {p1.country_code    && <P1Pill>{p1.country_code}</P1Pill>}
                 {p1.hand && p1.hand !== 'Unknown' && <P1Pill>{p1.hand === 'Left' ? 'L-hand' : 'R-hand'}</P1Pill>}
                 {(p1.form_dots || []).length > 0 && (
@@ -473,7 +485,19 @@ function MatchHero({ match }) {
                 )}
                 {p2.hand && p2.hand !== 'Unknown' && <P1Pill>{p2.hand === 'Left' ? 'L-hand' : 'R-hand'}</P1Pill>}
                 {p2.country_code    && <P1Pill>{p2.country_code}</P1Pill>}
-                {p2.current_rank    && <P1Pill>#{p2.current_rank}</P1Pill>}
+                {p2.current_rank && (
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontVariantNumeric: 'tabular-nums' }}>
+                    #{p2.current_rank}
+                    {p2.ranking_movement != null && Math.abs(p2.ranking_movement) > 0 && (
+                      <span style={{ color: p2.ranking_movement > 0 ? '#4ade80' : '#f87171', marginLeft: 3, fontWeight: 700 }}>
+                        {p2.ranking_movement > 0 ? '↑' : '↓'}{Math.abs(p2.ranking_movement)}
+                      </span>
+                    )}
+                    {p2.career_best_ranking && p2.current_rank <= p2.career_best_ranking && p2.current_rank <= 10 && (
+                      <span style={{ color: '#fbbf24', marginLeft: 3, fontWeight: 700 }}>PB</span>
+                    )}
+                  </span>
+                )}
               </div>
               {!isFinished && p2.player_id && (
                 <StarPick
@@ -962,6 +986,84 @@ function SectionIntelligence({ match }) {
           ))}
         </div>
       )}
+
+      {/* Over/Under Markets section — shown when bzzoiro_prediction data is available */}
+      {match.bzzoiro_prediction && (() => {
+        const bp  = match.bzzoiro_prediction
+        const p1n = p1.name || 'P1'
+        const p2n = p2.name || 'P2'
+
+        // Build rows from whatever keys exist
+        const rows = []
+
+        if (bp.total_sets_over != null && bp.total_sets_line != null) {
+          const pct = Math.round(bp.total_sets_over * 100)
+          rows.push({ label: 'Total Sets', market: `Over ${bp.total_sets_line}`, pct })
+        }
+        if (bp.total_games_lines) {
+          for (const [line, prob] of Object.entries(bp.total_games_lines)) {
+            rows.push({ label: rows.some(r => r.label === 'Total Games') ? '' : 'Total Games', market: `Over ${line}`, pct: Math.round(prob * 100) })
+          }
+        } else if (bp.total_games_over != null && bp.total_games_line != null) {
+          rows.push({ label: 'Total Games', market: `Over ${bp.total_games_line}`, pct: Math.round(bp.total_games_over * 100) })
+        }
+        if (bp.first_set_winner != null) {
+          const name = bp.first_set_winner === 'first' ? p1n.split(' ').pop() : p2n.split(' ').pop()
+          const pct  = Math.round((bp.first_set_prob || 0.5) * 100)
+          rows.push({ label: 'First Set', market: name, pct })
+        }
+
+        if (rows.length === 0) return null
+
+        const expSets  = bp.expected_sets  != null ? bp.expected_sets.toFixed(1)  : null
+        const expGames = bp.expected_games != null ? bp.expected_games.toFixed(1) : null
+
+        return (
+          <div style={{
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-lg)', padding: 20, marginTop: 16,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-3)', marginBottom: 12 }}>
+              Over/Under Markets <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(bzzoiro model)</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {rows.map((row, idx) => (
+                <div key={idx} style={{
+                  display: 'grid', gridTemplateColumns: '90px 80px 40px 1fr',
+                  alignItems: 'center', gap: 10,
+                  padding: '4px 0',
+                  borderTop: idx > 0 ? '1px solid var(--border-faint)' : 'none',
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>{row.label}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text)' }}>{row.market}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
+                    {row.pct}%
+                  </span>
+                  <div style={{ position: 'relative', height: 8, background: 'var(--bg-sunken)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{
+                      position: 'absolute', left: 0, top: 0, bottom: 0,
+                      width: `${row.pct}%`,
+                      background: row.pct >= 60 ? 'var(--green)' : row.pct >= 45 ? 'var(--amber)' : 'var(--text-3)',
+                      borderRadius: 99,
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {(expSets || expGames) && (
+              <div style={{
+                marginTop: 12, paddingTop: 10,
+                borderTop: '1px solid var(--border-faint)',
+                fontSize: 12, color: 'var(--text-3)',
+                display: 'flex', gap: 16,
+              }}>
+                {expSets  && <span>Expected <strong style={{ color: 'var(--text-2)' }}>{expSets} sets</strong></span>}
+                {expGames && <span>Expected <strong style={{ color: 'var(--text-2)' }}>{expGames} games</strong></span>}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {error && (
         <div className="error" style={{ marginTop: 12 }}>
