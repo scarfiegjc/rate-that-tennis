@@ -182,6 +182,138 @@ def run_bzzoiro_player_bios():
 
 
 # ─────────────────────────────────────────────
+# BZZOIRO.PY JOB WRAPPERS
+# (fixtures with bzzoiro_id, live data, odds, O/U predictions, H2H)
+# ─────────────────────────────────────────────
+
+def _import_bzzoiro_new():
+    """Import shim for pipeline/bzzoiro.py (the BzzoiroClient-based module)."""
+    try:
+        from pipeline.bzzoiro import (
+            sync_fixtures, sync_live, sync_rankings as bzz_rankings,
+            sync_odds, sync_predictions as bzz_predictions,
+            sync_h2h_upcoming, get_db_conn,
+        )
+    except ImportError:
+        from bzzoiro import (
+            sync_fixtures, sync_live, sync_rankings as bzz_rankings,
+            sync_odds, sync_predictions as bzz_predictions,
+            sync_h2h_upcoming, get_db_conn,
+        )
+    return sync_fixtures, sync_live, bzz_rankings, sync_odds, bzz_predictions, sync_h2h_upcoming, get_db_conn
+
+
+def run_bzzoiro_fixtures():
+    """Sync bzzoiro upcoming fixtures (next 7 days) — stores bzzoiro_id on matches."""
+    log.info("Scheduled: bzzoiro fixtures sync")
+    try:
+        sync_fixtures, _, _, _, _, _, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            sync_fixtures(conn, days_ahead=7)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro fixtures sync failed: {e}")
+
+
+def run_bzzoiro_live():
+    """Sync bzzoiro live match data (scores, serve stats → live_data JSONB)."""
+    try:
+        _, sync_live, _, _, _, _, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            sync_live(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro live sync failed: {e}")
+
+
+def run_bzzoiro_odds():
+    """Fetch per-bookmaker odds for upcoming matches via bzzoiro /matches/{id}/odds/."""
+    log.info("Scheduled: bzzoiro odds sync")
+    try:
+        _, _, _, sync_odds, _, _, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            sync_odds(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro odds sync failed: {e}")
+
+
+def run_bzzoiro_ou_predictions():
+    """Sync bzzoiro O/U predictions → bzzoiro_predictions table."""
+    log.info("Scheduled: bzzoiro O/U predictions sync")
+    try:
+        _, _, _, _, bzz_predictions, _, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            bzz_predictions(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro O/U predictions sync failed: {e}")
+
+
+def run_bzzoiro_rankings_new():
+    """Sync ATP+WTA rankings with movement (ranking_movement, ranking_career_best)."""
+    log.info("Scheduled: bzzoiro rankings sync (with movement)")
+    try:
+        _, _, bzz_rankings, _, _, _, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            bzz_rankings(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro rankings (new) sync failed: {e}")
+
+
+def run_bzzoiro_h2h():
+    """Sync H2H data for upcoming matches that don't have it yet."""
+    log.info("Scheduled: bzzoiro H2H sync")
+    try:
+        _, _, _, _, _, sync_h2h_upcoming, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            sync_h2h_upcoming(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro H2H sync failed: {e}")
+
+
+# ─────────────────────────────────────────────
+# SEO CONTENT GENERATION WRAPPER
+# ─────────────────────────────────────────────
+
+def run_seo_previews():
+    """Generate Anthropic-powered 250-word SEO match previews for upcoming matches."""
+    log.info("Scheduled: SEO match preview generation")
+    try:
+        try:
+            from pipeline.content_gen import generate_previews, append_results, get_db_conn as content_db_conn
+        except ImportError:
+            from content_gen import generate_previews, append_results, get_db_conn as content_db_conn
+
+        conn = content_db_conn()
+        try:
+            result = generate_previews(conn, limit=50)
+            log.info(f"  SEO previews generated: {result}")
+            result2 = append_results(conn, days_back=3)
+            log.info(f"  SEO results appended: {result2}")
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"SEO preview generation failed: {e}")
+        import traceback
+        log.error(traceback.format_exc())
+
+
+# ─────────────────────────────────────────────
 # Import shim — works both as a `pipeline.*` package locally and as flat
 # files inside the Docker image (Dockerfile copies pipeline/*.py into /app).
 # ─────────────────────────────────────────────
@@ -599,6 +731,17 @@ if __name__ == "__main__":
     # Bzzoiro weekly syncs — Monday morning
     schedule.every().monday.at("07:00").do(run_bzzoiro_rankings)   # player rankings
     schedule.every().monday.at("07:05").do(run_bzzoiro_player_bios)  # player bios
+    # bzzoiro.py — fixtures, live, odds, O/U predictions, H2H (BzzoiroClient module)
+    schedule.every().day.at("06:30").do(run_bzzoiro_fixtures)      # after morning fixtures + predictions
+    schedule.every().day.at("18:30").do(run_bzzoiro_fixtures)      # after evening fixtures + predictions
+    schedule.every(60).seconds.do(run_bzzoiro_live)                 # live scores every 60s
+    schedule.every().day.at("07:00").do(run_bzzoiro_rankings_new)  # rankings with movement (daily)
+    schedule.every().day.at("07:30").do(run_bzzoiro_odds)          # bookmaker odds morning
+    schedule.every().day.at("19:30").do(run_bzzoiro_odds)          # bookmaker odds evening
+    schedule.every().day.at("08:00").do(run_bzzoiro_ou_predictions)  # O/U predictions daily
+    schedule.every().day.at("07:45").do(run_bzzoiro_h2h)           # H2H for upcoming matches
+    # SEO content generation — after fixtures + predictions are in
+    schedule.every().day.at("09:00").do(run_seo_previews)          # generate match previews
     # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
     def _player_sync_weekly():
         try:
@@ -625,6 +768,12 @@ if __name__ == "__main__":
         "Bzzoiro matches at 06:15 and 18:15 UTC. "
         "Bzzoiro predictions at 06:20 and 18:20 UTC. "
         "Bzzoiro rankings/bios every Monday 07:00/07:05 UTC. "
+        "bzzoiro.py fixtures at 06:30/18:30 UTC. "
+        "bzzoiro.py live every 60s. "
+        "bzzoiro.py rankings daily 07:00. "
+        "bzzoiro.py odds at 07:30/19:30 UTC. "
+        "bzzoiro.py O/U predictions daily 08:00 UTC. "
+        "SEO previews daily 09:00 UTC. "
         "Odds at 07:00, 12:00, and 19:00 UTC. "
         "Ratings every day 01:00 and 08:00 UTC. "
         "Livescore every 5 minutes."
