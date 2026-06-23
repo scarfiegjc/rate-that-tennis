@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { api } from '../../lib/api'
 import SurfaceBadge from '../SurfaceBadge'
 import FormChart from '../FormChart'
@@ -1037,6 +1037,9 @@ function StatsTab({ stats }) {
 
 export default function PlayerPageClient({ initialPlayer = null, playerId }) {
 const router = useRouter()
+  const params = useParams()
+  const slug = params?.slug ? (Array.isArray(params.slug) ? params.slug.join('/') : params.slug) : ''
+  const id = playerId  // alias for legacy references below
   const [data, setData] = useState(null)
   const [formData, setFormData] = useState(null)
   const [stats, setStats] = useState(null)
