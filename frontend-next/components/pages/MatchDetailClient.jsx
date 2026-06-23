@@ -269,16 +269,12 @@ function StickyHeader({ match }) {
     <div style={{ position: 'sticky', top: 0, zIndex: 50, background: '#fff', borderBottom: '1px solid #e5e9f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '0 20px' }}>
 
-        {/* Breadcrumb + context row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0 4px', flexWrap: 'wrap' }}>
+        {/* Breadcrumb row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 5px', flexWrap: 'wrap' }}>
           <Link href="/" style={{ fontSize: 11, color: '#6b7280', textDecoration: 'none', fontWeight: 500 }}>← Today</Link>
           <span style={{ color: '#d1d5db', fontSize: 11 }}>·</span>
           {match.surface && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
-              color: '#fff', background: surfaceAccent,
-              padding: '1px 6px', borderRadius: 4,
-            }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#fff', background: surfaceAccent, padding: '1px 6px', borderRadius: 4 }}>
               {match.surface}
             </span>
           )}
@@ -287,140 +283,109 @@ function StickyHeader({ match }) {
               {match.tournament}
             </span>
           )}
-          {match.round && (
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>{match.round}</span>
-          )}
-          {match.event_date && (
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>{fmtMatchDate(match.event_date)}</span>
-          )}
+          {match.round && <span style={{ fontSize: 11, color: '#9ca3af' }}>{match.round}</span>}
+          {match.event_date && <span style={{ fontSize: 11, color: '#9ca3af' }}>{fmtMatchDate(match.event_date)}</span>}
           {isLive && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              background: '#f43f5e', color: '#fff',
-              fontSize: 10, fontWeight: 800, letterSpacing: '0.5px',
-              padding: '2px 7px', borderRadius: 4,
-            }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f43f5e', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.5px', padding: '2px 7px', borderRadius: 4 }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
               LIVE
             </span>
           )}
         </div>
 
-        {/* Main row: players + prob on left, edge/O/U on right */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center', paddingBottom: 10 }}>
+        {/* Facing-players matchup row */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', paddingBottom: 10 }}>
 
-          {/* Players + prob */}
+          {/* P1 — left side */}
           <div style={{ minWidth: 0 }}>
-            {/* Player rows */}
-            {[
-              { p: p1, prob: p1Pct, side: 'p1', odds: p1odds, e: e1 },
-              { p: p2, prob: p2Pct, side: 'p2', odds: p2odds, e: e2 },
-            ].map(({ p, prob, side, odds, e }) => (
-              <div key={side} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                {/* Country flag-like code */}
-                {p.country_code && (
-                  <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, minWidth: 24, flexShrink: 0 }}>{p.country_code}</span>
-                )}
-                {/* Name */}
-                <Link href={playerUrl(p)} style={{
-                  fontWeight: 700, fontSize: 14, color: '#111827', textDecoration: 'none',
-                  flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {p.name || '—'}
-                </Link>
-                {/* RTT badge */}
-                <RttBadge score={p.ratings?.rtt_score} />
-                {/* Probability */}
-                <span style={{
-                  fontSize: 18, fontWeight: 800, color: '#111827',
-                  fontVariantNumeric: 'tabular-nums', minWidth: 42, textAlign: 'right', flexShrink: 0,
-                }}>
-                  {prob}%
-                </span>
-                {/* StarPick */}
-                {!isFinished && p.player_id && (
-                  <StarPick
-                    matchId={match.match_id}
-                    playerId={p.player_id}
-                    playerName={p.name}
-                    ourOdds={prob ? Math.round((1/(prob/100))*100)/100 : null}
-                    size="sm"
-                  />
-                )}
-              </div>
-            ))}
+            {p1.country_code && (
+              <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, marginBottom: 2 }}>{p1.country_code}</div>
+            )}
+            <Link href={playerUrl(p1)} style={{ fontWeight: 700, fontSize: 15, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p1.name || '—'}
+            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <RttBadge score={p1.ratings?.rtt_score} />
+              {!isFinished && p1.player_id && (
+                <StarPick matchId={match.match_id} playerId={p1.player_id} playerName={p1.name} ourOdds={p1Pct ? Math.round((1/(p1Pct/100))*100)/100 : null} size="sm" />
+              )}
+            </div>
+          </div>
 
-            {/* Prob bar */}
-            <div style={{ marginTop: 6 }}>
-              <div style={{ height: 5, borderRadius: 99, background: '#e5e9f0', overflow: 'hidden', display: 'flex' }}>
-                <div style={{ width: `${p1Pct}%`, background: '#0d9488', transition: 'width 0.5s ease' }} />
-                <div style={{ flex: 1, background: '#e5e9f0' }} />
+          {/* Centre — prob + bar + chips */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 160 }}>
+            {/* Live score or prob percentages */}
+            {isLive && (match.set_scores || match.game_result) ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+                  <span key={i} style={{ fontSize: 18, fontWeight: 900, color: '#111827', fontVariantNumeric: 'tabular-nums', background: '#f4f6f9', borderRadius: 5, padding: '2px 8px' }}>{set}</span>
+                ))}
+                {match.game_result && (
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>{match.game_result}</span>
+                )}
               </div>
-              {/* Pre-match note if not live */}
-              {!isLive && pred.confidence && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px',
-                    color: pred.confidence === 'high' ? '#15803d' : pred.confidence === 'medium' ? '#b45309' : '#6b7280',
-                  }}>
-                    {pred.confidence} confidence
-                  </span>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p1Pct}%</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af' }}>vs</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p2Pct}%</span>
+              </div>
+            )}
+
+            {/* Probability bar */}
+            <div style={{ width: '100%', height: 6, borderRadius: 99, background: '#e5e9f0', overflow: 'hidden', display: 'flex' }}>
+              <div style={{ width: `${p1Pct}%`, background: '#0d9488', transition: 'width 0.5s ease' }} />
+              <div style={{ flex: 1, background: '#6366f1' }} />
+            </div>
+
+            {/* Confidence or live indicator */}
+            {!isLive && pred.confidence && (
+              <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: pred.confidence === 'high' ? '#15803d' : pred.confidence === 'medium' ? '#b45309' : '#6b7280' }}>
+                {pred.confidence} confidence
+              </div>
+            )}
+
+            {/* Edge + O/U chips */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {bestEdge != null && (
+                <div style={{
+                  background: bestEdge > 0.02 ? '#dcfce7' : bestEdge > 0 ? '#fef9c3' : '#f3f4f6',
+                  border: `1px solid ${bestEdge > 0.02 ? '#86efac' : bestEdge > 0 ? '#fcd34d' : '#e5e7eb'}`,
+                  borderRadius: 7, padding: '4px 9px', textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: bestEdge > 0.02 ? '#15803d' : bestEdge > 0 ? '#b45309' : '#6b7280', fontVariantNumeric: 'tabular-nums' }}>
+                    {bestEdge > 0 ? '+' : ''}{(bestEdge * 100).toFixed(1)}%
+                  </div>
+                  <div style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    RTT edge{bestPlayer ? ` · ${bestPlayer}` : ''}
+                  </div>
                 </div>
               )}
-              {/* Live: swing + game score */}
-              {isLive && (match.set_scores || match.game_result) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-                    <span key={i} style={{
-                      fontSize: 13, fontWeight: 800, color: '#111827',
-                      fontVariantNumeric: 'tabular-nums',
-                      background: '#f4f6f9', borderRadius: 4, padding: '1px 6px',
-                    }}>{set}</span>
-                  ))}
-                  {match.game_result && (
-                    <span style={{ fontSize: 12, color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>{match.game_result}</span>
-                  )}
+              {ouLine != null && ouOver != null && (
+                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 7, padding: '4px 9px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#0369a1', fontVariantNumeric: 'tabular-nums' }}>O{ouLine} {ouOver}%</div>
+                  <div style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>over {ouLabel}</div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right column: edge + O/U */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
-            {/* Edge badge */}
-            {bestEdge != null && (
-              <div style={{
-                background: bestEdge > 0.02 ? '#dcfce7' : bestEdge > 0 ? '#fef9c3' : '#f3f4f6',
-                border: `1px solid ${bestEdge > 0.02 ? '#86efac' : bestEdge > 0 ? '#fcd34d' : '#e5e7eb'}`,
-                borderRadius: 8, padding: '6px 10px', textAlign: 'center', minWidth: 90,
-              }}>
-                <div style={{
-                  fontSize: 12, fontWeight: 800,
-                  color: bestEdge > 0.02 ? '#15803d' : bestEdge > 0 ? '#b45309' : '#6b7280',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {bestEdge > 0 ? '+' : ''}{(bestEdge * 100).toFixed(1)}%
-                </div>
-                <div style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  RTT edge{bestPlayer ? ` · ${bestPlayer}` : ''}
-                </div>
-              </div>
+          {/* P2 — right side */}
+          <div style={{ minWidth: 0, textAlign: 'right' }}>
+            {p2.country_code && (
+              <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, marginBottom: 2 }}>{p2.country_code}</div>
             )}
-            {/* O/U */}
-            {ouLine != null && ouOver != null && (
-              <div style={{
-                background: '#f0f9ff', border: '1px solid #bae6fd',
-                borderRadius: 8, padding: '6px 10px', textAlign: 'center', minWidth: 90,
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: '#0369a1', fontVariantNumeric: 'tabular-nums' }}>
-                  O{ouLine} {ouOver}%
-                </div>
-                <div style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  over {ouLabel}
-                </div>
-              </div>
-            )}
+            <Link href={playerUrl(p2)} style={{ fontWeight: 700, fontSize: 15, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p2.name || '—'}
+            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, justifyContent: 'flex-end' }}>
+              {!isFinished && p2.player_id && (
+                <StarPick matchId={match.match_id} playerId={p2.player_id} playerName={p2.name} ourOdds={p2Pct ? Math.round((1/(p2Pct/100))*100)/100 : null} size="sm" />
+              )}
+              <RttBadge score={p2.ratings?.rtt_score} />
+            </div>
           </div>
+
         </div>
       </div>
     </div>
