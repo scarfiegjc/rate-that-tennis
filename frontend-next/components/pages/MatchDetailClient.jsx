@@ -234,8 +234,16 @@ function StickyHeader({ match }) {
   const mkt  = match.market        || {}
   const edge = match.edge          || {}
 
-  const isLive     = !!match.is_live
+  const isLive     = !!match.is_live || liveData !== null
   const isFinished = /finished/i.test(match.status || '')
+
+  // Live set scores: prefer bzzoiro sets_detail over DB set_scores
+  const bzzSetScores = liveData?.sets_detail
+    ? liveData.sets_detail.map(s => `${s.p1}-${s.p2}`).join(' ')
+    : null
+  const liveSetScores  = bzzSetScores || match.set_scores
+  const p1SetsWon      = liveData?.player1_sets ?? null
+  const p2SetsWon      = liveData?.player2_sets ?? null
 
   const p1Prob = pred.prob_first_player  != null ? pred.prob_first_player  : 0.5
   const p2Prob = pred.prob_second_player != null ? pred.prob_second_player : 0.5
@@ -328,9 +336,9 @@ function StickyHeader({ match }) {
           {/* Centre — prob + bar + chips */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 160 }}>
             {/* Live score or prob percentages */}
-            {isLive && (match.set_scores || match.game_result) ? (
+            {isLive && (liveSetScores || match.game_result) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+                {liveSetScores && liveSetScores.split(' ').map((set, i) => (
                   <span key={i} style={{ fontSize: 18, fontWeight: 900, color: '#111827', fontVariantNumeric: 'tabular-nums', background: '#f4f6f9', borderRadius: 5, padding: '2px 8px' }}>{set}</span>
                 ))}
                 {match.game_result && (
@@ -1231,6 +1239,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [activeSection, setActiveSection] = useState('section-intel')
+  const [liveData,       setLiveData]       = useState(null)
 
   useEffect(() => {
     api.match(matchId)
@@ -1279,6 +1288,26 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
       })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [matchId])
+
+  // Live score polling — when this is a bzzoiro match, poll /api/v1/live every 30s
+  useEffect(() => {
+    const bzzId = match?.bzzoiro_id
+    if (!bzzId) return
+    const fetchLive = () => {
+      fetch('/api/v1/live')
+        .then(r => r.json())
+        .then(matches => {
+          const live = Array.isArray(matches)
+            ? matches.find(m => String(m.id) === String(bzzId) || m.internal_id === Number(matchId))
+            : null
+          setLiveData(live || null)
+        })
+        .catch(() => {})
+    }
+    fetchLive()
+    const timer = setInterval(fetchLive, 30_000)
+    return () => clearInterval(timer)
+  }, [match?.bzzoiro_id, matchId])
 
   // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
   useEffect(() => {
