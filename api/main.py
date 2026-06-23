@@ -150,7 +150,8 @@ def live_matches():
                 except Exception as db_err:
                     log.warning(f"bzzoiro live: DB enrichment failed: {db_err}")
 
-        return matches
+        # Only return matches we can serve a detail page for
+        return [m for m in matches if m.get("internal_id")]
     except Exception as e:
         log.warning(f"bzzoiro live proxy failed: {e}")
         return []
