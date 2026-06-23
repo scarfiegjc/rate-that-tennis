@@ -60,7 +60,9 @@ function matchUrl(match) {
   const p1         = toSlug(match.first_player?.name  || match.player1?.name || 'player')
   const p2         = toSlug(match.second_player?.name || match.player2?.name || 'player')
   const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
-  const id         = match.match_id || match.id
+  // internal_id is injected by the FastAPI /api/v1/live proxy (our DB primary key)
+  // fall back to bzzoiro match_id only if we have no internal_id
+  const id         = match.internal_id || match.match_id || match.id
   return `/match/${id}/${slug}`
 }
 
