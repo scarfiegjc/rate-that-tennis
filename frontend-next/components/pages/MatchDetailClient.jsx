@@ -270,7 +270,7 @@ function StickyHeader({ match }) {
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '0 20px' }}>
 
         {/* Breadcrumb row — centred */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '7px 0 5px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0 6px', flexWrap: 'wrap' }}>
           <Link href="/" style={{ fontSize: 11, color: '#6b7280', textDecoration: 'none', fontWeight: 500 }}>← Today</Link>
           <span style={{ color: '#d1d5db', fontSize: 11 }}>·</span>
           {match.surface && (
@@ -294,16 +294,16 @@ function StickyHeader({ match }) {
         </div>
 
         {/* Facing-players matchup row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', paddingBottom: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 16, alignItems: 'center', paddingBottom: 14 }}>
 
           {/* P1 — left side */}
-          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
             {/* Photo */}
             <div style={{ flexShrink: 0 }}>
               {p1.logo_url ? (
-                <img src={p1.logo_url} alt="" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e5e9f0' }} />
+                <img src={p1.logo_url} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e5e9f0' }} />
               ) : (
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f0f9ff', border: '2px solid #bae6fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#0369a1' }}>
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#f0f9ff', border: '2px solid #bae6fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#0369a1' }}>
                   {(p1.name || '?')[0].toUpperCase()}
                 </div>
               )}
@@ -311,12 +311,12 @@ function StickyHeader({ match }) {
             {/* Name + badges */}
             <div style={{ minWidth: 0 }}>
               {p1.country_code && (
-                <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, marginBottom: 1 }}>{p1.country_code}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, marginBottom: 2 }}>{p1.country_code}</div>
               )}
-              <Link href={playerUrl(p1)} style={{ fontWeight: 700, fontSize: 14, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Link href={playerUrl(p1)} style={{ fontWeight: 700, fontSize: 17, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p1.name || '—'}
               </Link>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
                 <RttBadge score={p1.ratings?.rtt_score} />
                 {!isFinished && p1.player_id && (
                   <StarPick matchId={match.match_id} playerId={p1.player_id} playerName={p1.name} ourOdds={p1Pct ? Math.round((1/(p1Pct/100))*100)/100 : null} size="sm" />
@@ -338,10 +338,10 @@ function StickyHeader({ match }) {
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 22, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p1Pct}%</span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af' }}>vs</span>
-                <span style={{ fontSize: 22, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p2Pct}%</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 26, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p1Pct}%</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af' }}>vs</span>
+                <span style={{ fontSize: 26, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{p2Pct}%</span>
               </div>
             )}
 
@@ -384,16 +384,16 @@ function StickyHeader({ match }) {
           </div>
 
           {/* P2 — right side */}
-          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
             {/* Name + badges */}
             <div style={{ minWidth: 0, textAlign: 'right' }}>
               {p2.country_code && (
-                <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, marginBottom: 1 }}>{p2.country_code}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, marginBottom: 2 }}>{p2.country_code}</div>
               )}
-              <Link href={playerUrl(p2)} style={{ fontWeight: 700, fontSize: 14, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Link href={playerUrl(p2)} style={{ fontWeight: 700, fontSize: 17, color: '#111827', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p2.name || '—'}
               </Link>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, justifyContent: 'flex-end' }}>
                 {!isFinished && p2.player_id && (
                   <StarPick matchId={match.match_id} playerId={p2.player_id} playerName={p2.name} ourOdds={p2Pct ? Math.round((1/(p2Pct/100))*100)/100 : null} size="sm" />
                 )}
@@ -403,9 +403,9 @@ function StickyHeader({ match }) {
             {/* Photo */}
             <div style={{ flexShrink: 0 }}>
               {p2.logo_url ? (
-                <img src={p2.logo_url} alt="" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e5e9f0' }} />
+                <img src={p2.logo_url} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e5e9f0' }} />
               ) : (
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f5f3ff', border: '2px solid #c4b5fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#6d28d9' }}>
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#f5f3ff', border: '2px solid #c4b5fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, color: '#6d28d9' }}>
                   {(p2.name || '?')[0].toUpperCase()}
                 </div>
               )}
