@@ -54,8 +54,9 @@ function toSlug(str) {
     .replace(/^-+|-+$/g, '')
 }
 function matchUrl(match) {
-  const date       = (match.event_date || '').slice(0, 10)
-  const tournament = toSlug(match.tournament || '')
+  const date       = (match.event_date || match.match_date || '').slice(0, 10)
+  const tournName  = typeof match.tournament === 'object' ? match.tournament?.name : match.tournament
+  const tournament = toSlug(tournName || match.tournament_name || '')
   const p1         = toSlug(match.first_player?.name  || match.player1?.name || 'player')
   const p2         = toSlug(match.second_player?.name || match.player2?.name || 'player')
   const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
@@ -166,13 +167,16 @@ function LiveMatchCard({ match }) {
   const router = useRouter()
 
   // Normalise both our API shape and bzzoiro direct shape
+  // bzzoiro sends player1/player2 objects; our API sends first_player/second_player
   const p1Name = match.first_player?.name  || match.player1?.name || '—'
   const p2Name = match.second_player?.name || match.player2?.name || '—'
-  const p1Flag = match.first_player?.country_code  || match.player1?.country || ''
-  const p2Flag = match.second_player?.country_code || match.player2?.country || ''
+  const p1Flag = match.first_player?.country_code  || match.player1?.country_code || match.player1?.country || ''
+  const p2Flag = match.second_player?.country_code || match.player2?.country_code || match.player2?.country || ''
 
-  const tournament = match.tournament || match.tournament_name || ''
-  const surface    = match.surface    || match.tournament_surface || ''
+  // bzzoiro sends tournament as an object {id, name, surface, ...}; our API sends a string
+  const tournObj   = typeof match.tournament === 'object' ? match.tournament : null
+  const tournament = tournObj?.name || match.tournament_name || (typeof match.tournament === 'string' ? match.tournament : '') || ''
+  const surface    = match.surface || tournObj?.surface || match.tournament_surface || ''
 
   // Scores
   const p1Sets = match.player1_sets ?? match.first_player_sets  ?? null
