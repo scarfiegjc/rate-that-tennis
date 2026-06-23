@@ -227,7 +227,7 @@ function MomentumSquares({ momentum, form_dots }) {
 // Sticky header
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StickyHeader({ match }) {
+function StickyHeader({ match, liveData = null }) {
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
   const pred = match.prediction    || {}
@@ -1368,7 +1368,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     <div style={{ background: '#f4f6f9', minHeight: '100vh' }}>
 
       {/* STICKY HEADER */}
-      <StickyHeader match={match} />
+      <StickyHeader match={match} liveData={liveData} />
 
       {/* STICKY ANCHOR NAV */}
       <AnchorNav activeSection={activeSection} />
