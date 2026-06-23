@@ -432,11 +432,11 @@ function StickyHeader({ match }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NAV_TABS = [
+  { id: 'section-intel',     label: 'Intelligence' },
   { id: 'section-overview',  label: 'Overview'     },
   { id: 'section-form',      label: 'Form'         },
   { id: 'section-h2h',       label: 'H2H'          },
   { id: 'section-serve',     label: 'Serve'        },
-  { id: 'section-intel',     label: 'Intelligence' },
 ]
 
 function scrollToSection(id) {
@@ -1239,7 +1239,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const [match,   setMatch]   = useState(initialMatch)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
-  const [activeSection, setActiveSection] = useState('section-overview')
+  const [activeSection, setActiveSection] = useState('section-intel')
 
   useEffect(() => {
     api.match(matchId)
@@ -1304,7 +1304,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
 
   // IntersectionObserver — track active section for nav highlight
   useEffect(() => {
-    const sections = ['section-overview','section-form','section-h2h','section-serve','section-intel']
+    const sections = ['section-intel','section-overview','section-form','section-h2h','section-serve']
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(e => { if (e.isIntersecting) setActiveSection(e.target.id) })
@@ -1356,8 +1356,13 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
       {/* SCROLLING CONTENT */}
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '16px 20px 60px' }}>
 
-        <section id="section-overview" style={{ scrollMarginTop: SCROLL_MARGIN }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12, marginTop: 8 }}>Overview</div>
+        <section id="section-intel" style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>Intelligence</div>
+          <SectionIntelligence match={match} />
+        </section>
+
+        <section id="section-overview" style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 28 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>Overview</div>
           <SectionOverview match={match} />
         </section>
 
@@ -1374,11 +1379,6 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
         <section id="section-serve" style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 28 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>Serve</div>
           <SectionServe match={match} />
-        </section>
-
-        <section id="section-intel" style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 28 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>Intelligence</div>
-          <SectionIntelligence match={match} />
         </section>
 
       </div>
