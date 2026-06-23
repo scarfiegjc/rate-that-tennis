@@ -142,7 +142,6 @@ function EmptyState() {
 
 function ServeRow({ label, p1Val, p2Val, asPercent = true }) {
   const fmt = v => v == null ? '—' : asPercent ? `${Math.round(v * 100)}%` : String(v)
-  // bar color: green for p1 side, blue for p2 side
   return (
     <div style={{ display: 'contents' }}>
       {/* P1 bar + value */}
@@ -151,7 +150,7 @@ function ServeRow({ label, p1Val, p2Val, asPercent = true }) {
         <ProgressBar value={asPercent ? p1Val : (p1Val / 20)} color="#16a34a" height={5} />
       </div>
       {/* Label */}
-      <div style={{ fontSize: 10, color: 'var(--text-3)', textAlign: 'center', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 4px' }}>{label}</div>
+      <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 4px' }}>{label}</div>
       {/* P2 bar + value */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <ProgressBar value={asPercent ? p2Val : (p2Val / 20)} color="#1d4ed8" height={5} />
@@ -228,23 +227,23 @@ function LiveMatchCard({ match }) {
       style={{
         display: 'flex', flexDirection: 'column',
         width: '100%', textAlign: 'left',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-lg)',
+        background: '#fff',
+        border: '1px solid #e5e9f0',
+        borderRadius: 10,
         overflow: 'hidden',
         cursor: 'pointer',
-        fontFamily: 'var(--font)',
+        fontFamily: 'inherit',
         transition: 'box-shadow 0.15s, transform 0.15s',
-        boxShadow: 'var(--shadow)',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
       }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 6px 24px rgba(0,0,0,0.13)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
-      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow)'; e.currentTarget.style.transform = 'none' }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'; e.currentTarget.style.transform = 'none' }}
     >
 
-      {/* ── Court header with tournament name ── */}
+      {/* ── Tournament header ── */}
       <div style={{
         ...hdrStyle,
-        padding: '8px 12px',
+        padding: '7px 12px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
       }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -266,34 +265,30 @@ function LiveMatchCard({ match }) {
         </span>
       </div>
 
-      {/* ── Score strip ── */}
-      <div style={{
-        background: '#0f172a',
-        padding: '10px 14px',
-        display: 'flex', alignItems: 'center', gap: 0,
-      }}>
+      {/* ── Score strip — light background ── */}
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 0 }}>
         {/* P1 name + serving ball + sets */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p1Flag && <span style={{ marginRight: 4 }}>{flagEmoji(p1Flag)}</span>}
               {p1Name}
             </span>
             {p1Serving === true && (
-              <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
+              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             {setsDetail.map((s, i) => {
               const sp1 = s.p1 ?? 0
               const sp2 = s.p2 ?? 0
               const won = sp1 > sp2
               return (
                 <span key={i} style={{
-                  fontSize: 14, fontWeight: 900,
-                  color: won ? '#4ade80' : 'rgba(255,255,255,0.45)',
+                  fontSize: 15, fontWeight: 900,
+                  color: won ? '#15803d' : '#9ca3af',
                   fontVariantNumeric: 'tabular-nums',
-                  minWidth: 16, textAlign: 'center',
+                  minWidth: 14, textAlign: 'center',
                 }}>
                   {sp1}
                 </span>
@@ -301,9 +296,9 @@ function LiveMatchCard({ match }) {
             })}
             {p1Games != null && (
               <span style={{
-                fontSize: 16, fontWeight: 900, color: '#fff',
+                fontSize: 17, fontWeight: 900, color: '#111827',
                 fontVariantNumeric: 'tabular-nums',
-                background: 'rgba(255,255,255,0.1)', borderRadius: 6,
+                background: '#f4f6f9', borderRadius: 5,
                 padding: '1px 7px', minWidth: 24, textAlign: 'center',
               }}>
                 {p1Games}
@@ -313,37 +308,34 @@ function LiveMatchCard({ match }) {
         </div>
 
         {/* Centre: current point */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '0 12px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '0 12px', flexShrink: 0 }}>
           {currentPoint && (
-            <span style={{
-              fontSize: 13, fontWeight: 800, color: '#fbbf24',
-              letterSpacing: '0.02em', whiteSpace: 'nowrap',
-            }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
               {currentPoint}
             </span>
           )}
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          <span style={{ fontSize: 9, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
             {setsDetail.length > 0 ? `Set ${setsDetail.length}` : 'Live'}
           </span>
         </div>
 
         {/* P2 name + serving ball + sets */}
         <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, justifyContent: 'flex-end' }}>
             {p1Serving === false && (
-              <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
+              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
             )}
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p2Name}
               {p2Flag && <span style={{ marginLeft: 4 }}>{flagEmoji(p2Flag)}</span>}
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
             {p2Games != null && (
               <span style={{
-                fontSize: 16, fontWeight: 900, color: '#fff',
+                fontSize: 17, fontWeight: 900, color: '#111827',
                 fontVariantNumeric: 'tabular-nums',
-                background: 'rgba(255,255,255,0.1)', borderRadius: 6,
+                background: '#f4f6f9', borderRadius: 5,
                 padding: '1px 7px', minWidth: 24, textAlign: 'center',
               }}>
                 {p2Games}
@@ -355,10 +347,10 @@ function LiveMatchCard({ match }) {
               const won = sp2 > sp1
               return (
                 <span key={i} style={{
-                  fontSize: 14, fontWeight: 900,
-                  color: won ? '#60a5fa' : 'rgba(255,255,255,0.45)',
+                  fontSize: 15, fontWeight: 900,
+                  color: won ? '#1d4ed8' : '#9ca3af',
                   fontVariantNumeric: 'tabular-nums',
-                  minWidth: 16, textAlign: 'center',
+                  minWidth: 14, textAlign: 'center',
                 }}>
                   {sp2}
                 </span>
@@ -369,42 +361,32 @@ function LiveMatchCard({ match }) {
       </div>
 
       {/* ── Win probability bar ── */}
-      <div style={{ padding: '0 14px 10px', background: '#0f172a' }}>
-        <div style={{ position: 'relative', height: 20, borderRadius: 99, overflow: 'hidden', background: 'rgba(255,255,255,0.08)' }}>
-          {/* P1 side */}
+      <div style={{ padding: '0 14px 10px' }}>
+        <div style={{ position: 'relative', height: 18, borderRadius: 99, overflow: 'hidden', background: '#e5e9f0', display: 'flex' }}>
           <div style={{
-            position: 'absolute', left: 0, top: 0, bottom: 0,
             width: `${p1ProbPct}%`, background: 'linear-gradient(to right, #15803d, #16a34a)',
-            borderRadius: '99px 0 0 99px',
             transition: 'width 0.5s ease',
           }} />
-          {/* P2 side */}
-          <div style={{
-            position: 'absolute', right: 0, top: 0, bottom: 0,
-            width: `${p2ProbPct}%`, background: 'linear-gradient(to left, #1d4ed8, #2563eb)',
-            borderRadius: '0 99px 99px 0',
-            transition: 'width 0.5s ease',
-          }} />
+          <div style={{ flex: 1, background: 'linear-gradient(to right, #2563eb, #1d4ed8)' }} />
           {/* Labels */}
           <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '0 8px',
           }}>
-            <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: '0.04em' }}>{p1ProbPct}%</span>
-            <span style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Win prob</span>
-            <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: '0.04em' }}>{p2ProbPct}%</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{p1ProbPct}%</span>
+            <span style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Win prob</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{p2ProbPct}%</span>
           </div>
         </div>
       </div>
 
       {/* ── Serve stats panel ── */}
       {hasServeStats && (
-        <div style={{ padding: '10px 14px 12px', borderTop: '1px solid var(--border-faint)' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8, textAlign: 'center' }}>
+        <div style={{ padding: '10px 14px 12px', borderTop: '1px solid #e5e9f0' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af', marginBottom: 8, textAlign: 'center' }}>
             Serve stats
           </div>
-          {/* 3-column grid: p1 | label | p2 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '5px 6px', alignItems: 'center' }}>
             <ServeRow label="1st Srv" p1Val={p1_1stPct}  p2Val={p2_1stPct} />
             {p1_1stWon != null && <ServeRow label="1st Won" p1Val={p1_1stWon} p2Val={p2_1stWon} />}
@@ -416,33 +398,33 @@ function LiveMatchCard({ match }) {
             <div style={{
               display: 'flex', justifyContent: 'space-between',
               marginTop: 8, padding: '6px 0 0',
-              borderTop: '1px solid var(--border-faint)',
+              borderTop: '1px solid #e5e9f0',
             }}>
               <div style={{ display: 'flex', gap: 10 }}>
                 {p1Aces != null && (
-                  <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>
                     <span style={{ fontWeight: 700, color: '#15803d' }}>{p1Aces}</span>
-                    <span style={{ color: 'var(--text-3)', marginLeft: 2 }}>Aces</span>
+                    <span style={{ marginLeft: 2 }}>Aces</span>
                   </span>
                 )}
                 {p1Dfs != null && (
-                  <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--red)' }}>{p1Dfs}</span>
-                    <span style={{ color: 'var(--text-3)', marginLeft: 2 }}>DFs</span>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>
+                    <span style={{ fontWeight: 700, color: '#dc2626' }}>{p1Dfs}</span>
+                    <span style={{ marginLeft: 2 }}>DFs</span>
                   </span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 {p2Dfs != null && (
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', textAlign: 'right' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--red)' }}>{p2Dfs}</span>
-                    <span style={{ color: 'var(--text-3)', marginLeft: 2 }}>DFs</span>
+                  <span style={{ fontSize: 11, color: '#6b7280', textAlign: 'right' }}>
+                    <span style={{ fontWeight: 700, color: '#dc2626' }}>{p2Dfs}</span>
+                    <span style={{ marginLeft: 2 }}>DFs</span>
                   </span>
                 )}
                 {p2Aces != null && (
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', textAlign: 'right' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280', textAlign: 'right' }}>
                     <span style={{ fontWeight: 700, color: '#1d4ed8' }}>{p2Aces}</span>
-                    <span style={{ color: 'var(--text-3)', marginLeft: 2 }}>Aces</span>
+                    <span style={{ marginLeft: 2 }}>Aces</span>
                   </span>
                 )}
               </div>
