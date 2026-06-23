@@ -111,6 +111,30 @@ def health():
         return {"status": "error", "db": str(e)}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Live matches — proxy bzzoiro (browser can't call bzzoiro directly due to CORS)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/live")
+def live_matches():
+    """
+    Returns currently in-play tennis matches from bzzoiro.
+    Proxied here because bzzoiro does not send CORS headers the browser needs.
+    """
+    import urllib.request, urllib.error, json as _json
+    BZZ_TOKEN = os.environ.get("BZZOIRO_API_KEY", "4426945bd65f0798e817976bbef975bbb9d0e606")
+    BZZ_URL   = "https://sports.bzzoiro.com/tennis/api/v2/matches/?status=live"
+    try:
+        req = urllib.request.Request(BZZ_URL, headers={"Authorization": f"Token {BZZ_TOKEN}"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = _json.loads(resp.read())
+        matches = data if isinstance(data, list) else data.get("results", data.get("matches", []))
+        return matches
+    except Exception as e:
+        log.warning(f"bzzoiro live proxy failed: {e}")
+        return []
+
+
 @app.get("/diagnostics")
 def diagnostics():
     """
