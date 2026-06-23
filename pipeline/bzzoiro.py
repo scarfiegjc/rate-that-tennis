@@ -809,7 +809,14 @@ def _upsert_bzzoiro_prediction(cur, pred: dict) -> bool:
     Returns True if written, False if skipped.
     """
     bzz_pred_id = pred.get("id")
-    bzz_match_id = pred.get("match") or pred.get("match_id")
+    bzz_match_raw = pred.get("match") or pred.get("match_id")
+    if not bzz_match_raw:
+        return False
+    # "match" may be a nested dict (with id, player1, player2, ...) or a bare int
+    if isinstance(bzz_match_raw, dict):
+        bzz_match_id = bzz_match_raw.get("id")
+    else:
+        bzz_match_id = bzz_match_raw
     if not bzz_match_id:
         return False
 
