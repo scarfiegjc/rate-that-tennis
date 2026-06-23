@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '../../lib/api'
 import SurfaceBadge from '../SurfaceBadge'
@@ -2399,6 +2399,8 @@ function _toSlug(s) {
 
 export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const router = useRouter()
+  const params = useParams()
+  const slug = params?.slug ? (Array.isArray(params.slug) ? params.slug.join('/') : params.slug) : ''
   const [match,   setMatch]   = useState(initialMatch)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
