@@ -120,6 +120,8 @@ def live_matches():
     """
     Returns currently in-play tennis matches from bzzoiro.
     Proxied here because bzzoiro does not send CORS headers the browser needs.
+    Each match is enriched with internal_id (our DB primary key) so the frontend
+    can build correct /match/<internal_id>/... URLs.
     """
     import urllib.request, urllib.error, json as _json
     BZZ_TOKEN = os.environ.get("BZZOIRO_API_KEY", "4426945bd65f0798e817976bbef975bbb9d0e606")
@@ -129,6 +131,25 @@ def live_matches():
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = _json.loads(resp.read())
         matches = data if isinstance(data, list) else data.get("results", data.get("matches", []))
+
+        # Enrich with internal DB IDs so the frontend can build correct detail-page URLs
+        if matches:
+            bzz_ids = [m.get("match_id") or m.get("id") for m in matches if m.get("match_id") or m.get("id")]
+            if bzz_ids:
+                try:
+                    from api.db import query
+                    rows = query(
+                        "SELECT bzzoiro_id, id FROM matches WHERE bzzoiro_id = ANY(%s)",
+                        (bzz_ids,)
+                    )
+                    id_map = {str(r["bzzoiro_id"]): r["id"] for r in rows}
+                    for m in matches:
+                        bzz_id = str(m.get("match_id") or m.get("id") or "")
+                        if bzz_id in id_map:
+                            m["internal_id"] = id_map[bzz_id]
+                except Exception as db_err:
+                    log.warning(f"bzzoiro live: DB enrichment failed: {db_err}")
+
         return matches
     except Exception as e:
         log.warning(f"bzzoiro live proxy failed: {e}")
