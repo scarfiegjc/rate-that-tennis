@@ -6,11 +6,11 @@ import Script from 'next/script'
 export const revalidate = 86400
 
 export async function generateMetadata({ params }) {
-  const player = await apiFetch(`/api/v1/players/${params.id}`, { revalidate: 86400 })
-  if (!player) return { title: 'Player | RateThatTennis' }
-  const name = player.name || 'Player'
-  const rtt = player.ratings?.rtt_score ? ` RTT ${Math.round(player.ratings.rtt_score)}.` : ''
-  const rank = player.ranking ? ` Ranked #${player.ranking}.` : ''
+  const raw = await apiFetch(`/api/v1/players/${params.id}`, { revalidate: 86400 })
+  if (!raw) return { title: 'Player | RateThatTennis' }
+  const name = raw.player?.full_name || raw.player?.name || 'Player'
+  const rtt = raw.ratings?.rtt_score ? ` RTT ${Math.round(raw.ratings.rtt_score)}.` : ''
+  const rank = raw.player?.ranking ? ` Ranked #${raw.player.ranking}.` : ''
   const title = `${name} — Tennis Stats, Form & Predictions`
   const description = `${name} tennis stats, RTT player rating, form, H2H record and ML predictions.${rtt}${rank} Free betting intelligence.`
   const canonical = `https://ratethat.tennis/player/${params.id}`
