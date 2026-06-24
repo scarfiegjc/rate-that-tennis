@@ -4,16 +4,16 @@ import { notFound } from 'next/navigation'
 import Script from 'next/script'
 
 export async function generateMetadata({ params }) {
-  const match = await apiFetch(`/api/v1/matches/${params.id}`)
-  if (!match) return { title: 'Match | RateThatTennis' }
-  const p1 = match.first_player?.name || match.players?.first?.name || 'Player 1'
-  const p2 = match.second_player?.name || match.players?.second?.name || 'Player 2'
-  const tournament = match.tournament || ''
-  const date = match.event_date
-    ? new Date(match.event_date + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const raw = await apiFetch(`/api/v1/matches/${params.id}`)
+  if (!raw) return { title: 'Match | RateThatTennis' }
+  const p1 = raw.players?.first?.name || raw.match?.first_player?.name || 'Player 1'
+  const p2 = raw.players?.second?.name || raw.match?.second_player?.name || 'Player 2'
+  const tournament = raw.match?.tournament || ''
+  const date = raw.match?.event_date
+    ? new Date(raw.match.event_date + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
     : ''
-  const title = `${p1} vs ${p2} — ${tournament}${date ? ` ${date}` : ''}`
-  const description = `ML prediction, RTT ratings and bookmaker odds for ${p1} vs ${p2} at ${tournament}. Free tennis betting intelligence.`
+  const title = `${p1} vs ${p2}${tournament ? ` — ${tournament}` : ''}${date ? ` · ${date}` : ''}`
+  const description = `ML prediction, RTT ratings and bookmaker odds for ${p1} vs ${p2}${tournament ? ` at ${tournament}` : ''}. Free tennis betting intelligence.`
   const canonical = `https://ratethat.tennis/match/${params.id}`
   return {
     title,
