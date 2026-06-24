@@ -1318,7 +1318,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     return () => clearInterval(timer)
   }, [match?.bzzoiro_id, matchId])
 
-  // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
+  // Silently update URL to canonical slug without triggering remount
   useEffect(() => {
     if (!match) return
     const p1    = match.first_player?.name  || ''
@@ -1326,10 +1326,10 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     const date  = (match.event_date || '').slice(0, 10)
     const tourn = match.tournament || ''
     const expectedSlug = [date, _toSlug(tourn), `${_toSlug(p1)}-vs-${_toSlug(p2)}`].filter(Boolean).join('-')
-    if (expectedSlug && slug !== expectedSlug) {
-      router.replace(`/match/${matchId}/${expectedSlug}`)
+    if (expectedSlug && slug !== expectedSlug && typeof window !== 'undefined') {
+      window.history.replaceState(null, '', `/match/${matchId}/${expectedSlug}`)
     }
-  }, [match, matchId, slug, router])
+  }, [match, matchId, slug])
 
   // IntersectionObserver — track active section for nav highlight
   useEffect(() => {
