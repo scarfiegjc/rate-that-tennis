@@ -1241,7 +1241,11 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const [activeSection, setActiveSection] = useState('section-intel')
   const [liveData,       setLiveData]       = useState(null)
 
+  const _lastFetchedMatch = useRef(null)
   useEffect(() => {
+    // Guard against double-fetch caused by slug-redirect remount
+    if (_lastFetchedMatch.current === String(matchId)) return
+    _lastFetchedMatch.current = String(matchId)
     api.match(matchId)
       .then(data => {
         const p1   = data.players?.first  || {}
@@ -1249,8 +1253,13 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
         const pred = data.prediction || {}
         const mkt  = data.market    || {}
         const edge = data.edge      || {}
+        // Overlay bzzoiro tournament/surface for matches without a DB tournament link
+        const bzzTourn = data.match?.live_data?.tournament?.name || null
+        const bzzSurf  = data.match?.live_data?.tournament?.surface || null
         setMatch({
           ...data.match,
+          tournament: data.match?.tournament || bzzTourn || null,
+          surface:    data.match?.surface    || bzzSurf  || null,
           first_player: {
             ...p1,
             player_id:    p1.id,
