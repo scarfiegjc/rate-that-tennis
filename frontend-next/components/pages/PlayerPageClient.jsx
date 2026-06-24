@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter, useParams } from 'next/navigation'
 import { api } from '../../lib/api'
@@ -1047,7 +1047,11 @@ const router = useRouter()
   const [error, setError] = useState(null)
   const [tab, setTab] = useState('Overview')
 
+  const _lastFetchedPlayer = useRef(null)
   useEffect(() => {
+    // Guard against double-fetch caused by slug-redirect remount
+    if (_lastFetchedPlayer.current === String(playerId)) return
+    _lastFetchedPlayer.current = String(playerId)
     let on = true
     setLoading(true); setError(null)
     Promise.all([
