@@ -1082,13 +1082,13 @@ const router = useRouter()
   const expectedSlug = _toPlayerSlug(playerName)
   const canonicalPath = expectedSlug ? `/player/${id}/${expectedSlug}` : `/player/${id}`
 
-  // Redirect bare /player/<id> → /player/<id>/<name-slug> when we know the name
+  // Silently update URL to canonical slug without triggering remount
   useEffect(() => {
-    if (!expectedSlug) return
-    if (slug !== expectedSlug) {
-      router.replace(canonicalPath)
+    if (!expectedSlug || slug === expectedSlug) return
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', canonicalPath)
     }
-  }, [expectedSlug, slug, canonicalPath, router])
+  }, [expectedSlug, slug, canonicalPath])
 
   if (loading) {
     return (
