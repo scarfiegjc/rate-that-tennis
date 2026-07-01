@@ -254,7 +254,7 @@ function MatchCard({ match }) {
           <>
             <LiveLozenge small />
             {match.set_scores && match.set_scores.split(' ').map((set, i) => (
-              <span key={i} className="mc-live-set">{set}</span>
+              <span key={i} className="mc-live-set">{fmtSetScore(set)}</span>
             ))}
             {match.game_result && <span className="mc-live-game">{match.game_result}</span>}
           </>
@@ -874,6 +874,14 @@ function todayLabel() {
 }
 
 // ── Tour-level classifier — drives the Slam/Masters / Challenger / ITF tickboxes
+
+// Convert api-tennis tiebreak scores: "7.7-6.4" → "7-6(4)", "6-4" stays "6-4"
+function fmtSetScore(raw) {
+  if (!raw) return raw
+  return raw.replace(/(\d+)\.(\d+)-(\d+)\.(\d+)/g, (_, a, b, c, d) => {
+    return `${a}-${c}(${Math.min(Number(b), Number(d))})`
+  })
+}
 
 function detectLevel(match) {
   const t  = (match.tournament || '').trim()

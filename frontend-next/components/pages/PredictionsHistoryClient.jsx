@@ -125,7 +125,7 @@ export default function PredictionsHistoryClient() {
                       return (
                         <Link
                           key={p.match_id}
-                          to={`/match/${p.match_id}`}
+                          href={`/match/${p.match_id}`}
                           style={{
                             display: 'grid',
                             gridTemplateColumns: '40px 1fr 110px 50px',

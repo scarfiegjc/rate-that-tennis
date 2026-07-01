@@ -42,7 +42,7 @@ function PredictionRow({ p }) {
 
   return (
     <Link
-      to={`/match/${p.match_id}`}
+      href={`/match/${p.match_id}`}
       className="match-row"
       style={{ ...outcomeStyle, gridTemplateColumns: '60px 1fr auto 1fr 110px' }}
     >

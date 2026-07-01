@@ -278,7 +278,7 @@ function WeeklyBars({ items }) {
         return (
           <Link
             key={p.match_id}
-            to={matchUrl(p)}
+            href={matchUrl(p)}
             title={`${p.pick_name} (${pct}%) vs ${p.opp_name} · ${p.tournament || ''} · ${p.surface || ''} · ${p.score || '—'}`}
             style={{
               flex: '1 0 70px', minWidth: 70, maxWidth: 130,
@@ -398,7 +398,7 @@ function RecentPicksTable({ items }) {
         ) : visible.map((p) => (
           <Link
             key={p.match_id}
-            to={matchUrl(p)}
+            href={matchUrl(p)}
             style={{
               display: 'grid',
               gridTemplateColumns: '70px 1fr 1fr 130px 90px 80px 70px 70px',
@@ -729,7 +729,7 @@ function SystemCard({ sys }) {
         }}>
           <span>Recent results</span>
           <Link
-            to={`/systems/${sys.code}`}
+            href={`/systems/${sys.code}`}
             style={{ fontSize: 9, color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}
             onClick={e => e.stopPropagation()}
           >
@@ -751,7 +751,7 @@ function SystemCard({ sys }) {
             return (
               <Link
                 key={p.pick_id}
-                to={matchUrl({
+                href={matchUrl({
                   match_id: p.match_id,
                   event_date: p.event_date,
                   tournament: p.tournament,
@@ -865,7 +865,7 @@ function HighlightCard({ title, pick, accent, mode }) {
   const won = pick.won
   return (
     <Link
-      to={matchUrl(pick)}
+      href={matchUrl(pick)}
       className="card"
       style={{
         padding: 12, display: 'block',
@@ -929,7 +929,7 @@ function TodayRow({ p }) {
 
   return (
     <Link
-      to={matchUrl(p)}
+      href={matchUrl(p)}
       style={{
         display: 'grid',
         gridTemplateColumns: '50px 1fr 90px 1fr 90px 24px',

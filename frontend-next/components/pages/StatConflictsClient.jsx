@@ -318,7 +318,7 @@ function ConflictCard({ item }) {
         display: 'flex', justifyContent: 'flex-end',
       }}>
         <Link
-          to={item.match_url}
+          href={item.match_url}
           onClick={e => e.stopPropagation()}
           style={{
             fontSize: 12, fontWeight: 600, color: 'var(--green)',

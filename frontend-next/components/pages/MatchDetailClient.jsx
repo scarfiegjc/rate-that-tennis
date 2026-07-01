@@ -25,6 +25,15 @@ function _toSlug(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+// Convert api-tennis tiebreak scores: "7.7-6.4" → "7-6(4)", "6-4" stays "6-4"
+function fmtSetScore(raw) {
+  if (!raw) return raw
+  return raw.replace(/(\d+)\.(\d+)-(\d+)\.(\d+)/g, (_, a, b, c, d) => {
+    // e.g. 7.7 - 6.4 → 7-6(4)  (higher side won the tiebreak)
+    return `${a}-${c}(${Math.min(Number(b), Number(d))})`
+  })
+}
+
 function fmt(val, d = 0) {
   if (val == null) return '—'
   return Number(val).toFixed(d)
@@ -227,23 +236,15 @@ function MomentumSquares({ momentum, form_dots }) {
 // Sticky header
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StickyHeader({ match, liveData = null }) {
+function StickyHeader({ match }) {
   const p1   = match.first_player  || {}
   const p2   = match.second_player || {}
   const pred = match.prediction    || {}
   const mkt  = match.market        || {}
   const edge = match.edge          || {}
 
-  const isLive     = !!match.is_live || liveData !== null
-  const isFinished = /finished/i.test(match.status || '')
-
-  // Live set scores: prefer bzzoiro sets_detail over DB set_scores
-  const bzzSetScores = liveData?.sets_detail
-    ? liveData.sets_detail.map(s => `${s.p1}-${s.p2}`).join(' ')
-    : null
-  const liveSetScores  = bzzSetScores || match.set_scores
-  const p1SetsWon      = liveData?.player1_sets ?? null
-  const p2SetsWon      = liveData?.player2_sets ?? null
+  const isFinished = /finished/i.test(match.status || '') || !!match.winner
+  const isLive     = !!match.is_live && !isFinished
 
   const p1Prob = pred.prob_first_player  != null ? pred.prob_first_player  : 0.5
   const p2Prob = pred.prob_second_player != null ? pred.prob_second_player : 0.5
@@ -335,13 +336,13 @@ function StickyHeader({ match, liveData = null }) {
 
           {/* Centre — prob + bar + chips */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 160 }}>
-            {/* Live score or prob percentages */}
-            {isLive && (liveSetScores || match.game_result) ? (
+            {/* Live/finished score or prob percentages */}
+            {(isLive || isFinished) && (match.set_scores || match.game_result) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {liveSetScores && liveSetScores.split(' ').map((set, i) => (
-                  <span key={i} style={{ fontSize: 18, fontWeight: 900, color: '#111827', fontVariantNumeric: 'tabular-nums', background: '#f4f6f9', borderRadius: 5, padding: '2px 8px' }}>{set}</span>
+                {match.set_scores && match.set_scores.split(' ').map((set, i) => (
+                  <span key={i} style={{ fontSize: 18, fontWeight: 900, color: '#111827', fontVariantNumeric: 'tabular-nums', background: '#f4f6f9', borderRadius: 5, padding: '2px 8px' }}>{fmtSetScore(set)}</span>
                 ))}
-                {match.game_result && (
+                {isLive && match.game_result && (
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>{match.game_result}</span>
                 )}
               </div>
@@ -710,7 +711,8 @@ function SectionOverview({ match }) {
   const r1 = p1.ratings || {}
   const r2 = p2.ratings || {}
   const surface = (match.surface || '').toLowerCase()
-  const isLive  = !!match.is_live
+  const isFinished2 = /finished/i.test(match.status || '') || !!match.winner
+  const isLive  = !!match.is_live && !isFinished2
 
   const surfaceKey   = surface.includes('clay') ? 'clay_rating' : surface.includes('grass') ? 'grass_rating' : surface.includes('indoor') || surface.includes('carpet') ? 'indoor_rating' : 'hard_rating'
   const surfaceLabel = surface.includes('clay') ? 'Clay' : surface.includes('grass') ? 'Grass' : surface.includes('indoor') || surface.includes('carpet') ? 'Indoor' : 'Hard'
@@ -802,9 +804,9 @@ function SectionOverview({ match }) {
                         fontSize: 22, fontWeight: 800, color: '#111827',
                         fontVariantNumeric: 'tabular-nums',
                         background: '#f4f6f9', borderRadius: 6, padding: '4px 10px',
-                      }}>{set}</div>
+                      }}>{fmtSetScore(set)}</div>
                     ))}
-                    {match.game_result && (
+                    {isLive && match.game_result && (
                       <div style={{ fontSize: 16, fontWeight: 700, color: '#6b7280', alignSelf: 'center', paddingLeft: 4 }}>{match.game_result}</div>
                     )}
                   </div>
@@ -1239,13 +1241,8 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [activeSection, setActiveSection] = useState('section-intel')
-  const [liveData,       setLiveData]       = useState(null)
 
-  const _lastFetchedMatch = useRef(null)
   useEffect(() => {
-    // Guard against double-fetch caused by slug-redirect remount
-    if (_lastFetchedMatch.current === String(matchId)) return
-    _lastFetchedMatch.current = String(matchId)
     api.match(matchId)
       .then(data => {
         const p1   = data.players?.first  || {}
@@ -1253,13 +1250,8 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
         const pred = data.prediction || {}
         const mkt  = data.market    || {}
         const edge = data.edge      || {}
-        // Overlay bzzoiro tournament/surface for matches without a DB tournament link
-        const bzzTourn = data.match?.live_data?.tournament?.name || null
-        const bzzSurf  = data.match?.live_data?.tournament?.surface || null
         setMatch({
           ...data.match,
-          tournament: data.match?.tournament || bzzTourn || null,
-          surface:    data.match?.surface    || bzzSurf  || null,
           first_player: {
             ...p1,
             player_id:    p1.id,
@@ -1298,27 +1290,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
       .catch(e => { setError(e.message); setLoading(false) })
   }, [matchId])
 
-  // Live score polling — when this is a bzzoiro match, poll /api/v1/live every 30s
-  useEffect(() => {
-    const bzzId = match?.bzzoiro_id
-    if (!bzzId) return
-    const fetchLive = () => {
-      fetch('/api/v1/live')
-        .then(r => r.json())
-        .then(matches => {
-          const live = Array.isArray(matches)
-            ? matches.find(m => String(m.id) === String(bzzId) || m.internal_id === Number(matchId))
-            : null
-          setLiveData(live || null)
-        })
-        .catch(() => {})
-    }
-    fetchLive()
-    const timer = setInterval(fetchLive, 30_000)
-    return () => clearInterval(timer)
-  }, [match?.bzzoiro_id, matchId])
-
-  // Silently update URL to canonical slug without triggering remount
+  // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
   useEffect(() => {
     if (!match) return
     const p1    = match.first_player?.name  || ''
@@ -1326,10 +1298,10 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     const date  = (match.event_date || '').slice(0, 10)
     const tourn = match.tournament || ''
     const expectedSlug = [date, _toSlug(tourn), `${_toSlug(p1)}-vs-${_toSlug(p2)}`].filter(Boolean).join('-')
-    if (expectedSlug && slug !== expectedSlug && typeof window !== 'undefined') {
-      window.history.replaceState(null, '', `/match/${matchId}/${expectedSlug}`)
+    if (expectedSlug && slug !== expectedSlug) {
+      router.replace(`/match/${matchId}/${expectedSlug}`)
     }
-  }, [match, matchId, slug])
+  }, [match, matchId, slug, router])
 
   // IntersectionObserver — track active section for nav highlight
   useEffect(() => {
@@ -1377,7 +1349,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     <div style={{ background: '#f4f6f9', minHeight: '100vh' }}>
 
       {/* STICKY HEADER */}
-      <StickyHeader match={match} liveData={liveData} />
+      <StickyHeader match={match} />
 
       {/* STICKY ANCHOR NAV */}
       <AnchorNav activeSection={activeSection} />
