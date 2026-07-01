@@ -123,13 +123,18 @@ def live_matches():
     Each match is enriched with internal_id (our DB primary key) so the frontend
     can build correct /match/<internal_id>/... URLs.
     """
-    import urllib.request, urllib.error, json as _json
+    import requests as _requests
+    import json as _json
     BZZ_TOKEN = os.environ.get("BZZOIRO_API_KEY", "4426945bd65f0798e817976bbef975bbb9d0e606")
     BZZ_URL   = "https://sports.bzzoiro.com/tennis/api/v2/matches/?status=live"
     try:
-        req = urllib.request.Request(BZZ_URL, headers={"Authorization": f"Token {BZZ_TOKEN}"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = _json.loads(resp.read())
+        resp = _requests.get(
+            BZZ_URL,
+            headers={"Authorization": f"Token {BZZ_TOKEN}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         matches = data if isinstance(data, list) else data.get("results", data.get("matches", []))
 
         # Enrich with internal DB IDs so the frontend can build correct detail-page URLs
@@ -150,11 +155,42 @@ def live_matches():
                 except Exception as db_err:
                     log.warning(f"bzzoiro live: DB enrichment failed: {db_err}")
 
-        # Only return matches we can serve a detail page for
-        return [m for m in matches if m.get("internal_id")]
+        return matches
     except Exception as e:
-        log.warning(f"bzzoiro live proxy failed: {e}")
+        log.error(f"bzzoiro live proxy failed: {type(e).__name__}: {e}")
+        import traceback
+        log.error(traceback.format_exc())
         return []
+
+
+@app.get("/api/v1/live/debug")
+def live_matches_debug():
+    """Diagnostic version of /api/v1/live that surfaces errors."""
+    import requests as _requests
+    BZZ_TOKEN = os.environ.get("BZZOIRO_API_KEY", "4426945bd65f0798e817976bbef975bbb9d0e606")
+    BZZ_URL   = "https://sports.bzzoiro.com/tennis/api/v2/matches/?status=live"
+    try:
+        resp = _requests.get(
+            BZZ_URL,
+            headers={"Authorization": f"Token {BZZ_TOKEN}"},
+            timeout=10,
+        )
+        return {
+            "status_code": resp.status_code,
+            "match_count": len(resp.json().get("results", []) if resp.status_code == 200 else []),
+            "token_prefix": BZZ_TOKEN[:8] + "...",
+            "token_source": "env" if os.environ.get("BZZOIRO_API_KEY") else "hardcoded",
+            "response_preview": str(resp.text[:300]),
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc().splitlines()[-8:],
+            "token_prefix": BZZ_TOKEN[:8] + "...",
+            "token_source": "env" if os.environ.get("BZZOIRO_API_KEY") else "hardcoded",
+        }
 
 
 @app.get("/diagnostics")
