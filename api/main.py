@@ -139,10 +139,12 @@ def live_matches():
 
         # Enrich with internal DB IDs so the frontend can build correct detail-page URLs
         if matches:
+            from api.db import query
+
+            # Strategy 1: match by bzzoiro_id (fast, exact)
             bzz_ids = [m.get("match_id") or m.get("id") for m in matches if m.get("match_id") or m.get("id")]
             if bzz_ids:
                 try:
-                    from api.db import query
                     rows = query(
                         "SELECT bzzoiro_id, id FROM matches WHERE bzzoiro_id = ANY(%s)",
                         (bzz_ids,)
@@ -153,7 +155,36 @@ def live_matches():
                         if bzz_id in id_map:
                             m["internal_id"] = id_map[bzz_id]
                 except Exception as db_err:
-                    log.warning(f"bzzoiro live: DB enrichment failed: {db_err}")
+                    log.warning(f"bzzoiro live: bzzoiro_id enrichment failed: {db_err}")
+
+            # Strategy 2: for matches still missing internal_id, match by player names + date
+            unlinked = [m for m in matches if not m.get("internal_id")]
+            if unlinked:
+                try:
+                    for m in unlinked:
+                        p1_name = (m.get("player1") or {}).get("name", "")
+                        p2_name = (m.get("player2") or {}).get("name", "")
+                        match_date = (m.get("match_date") or "")[:10]
+                        if not (p1_name and p2_name and match_date):
+                            continue
+                        row = query(
+                            """
+                            SELECT m.id FROM matches m
+                            JOIN players p1 ON p1.id = m.first_player_id
+                            JOIN players p2 ON p2.id = m.second_player_id
+                            WHERE m.event_date = %s
+                              AND (p1.full_name ILIKE %s OR p1.name ILIKE %s)
+                              AND (p2.full_name ILIKE %s OR p2.name ILIKE %s)
+                            LIMIT 1
+                            """,
+                            (match_date,
+                             f"%{p1_name.split()[-1]}%", f"%{p1_name.split()[-1]}%",
+                             f"%{p2_name.split()[-1]}%", f"%{p2_name.split()[-1]}%"),
+                        )
+                        if row:
+                            m["internal_id"] = row[0]["id"]
+                except Exception as db_err:
+                    log.warning(f"bzzoiro live: name-based enrichment failed: {db_err}")
 
         return matches
     except Exception as e:
