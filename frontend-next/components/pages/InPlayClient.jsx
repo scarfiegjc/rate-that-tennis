@@ -226,10 +226,11 @@ function LiveMatchCard({ match }) {
   const hasServeStats = p1_1stPct != null || p1_1stWon != null
 
   const hdrStyle = courtBg(surface, tournament)
+  const hasLink = !!match.internal_id
 
   return (
     <button
-      onClick={() => router.push(matchUrl(match))}
+      onClick={() => hasLink && router.push(matchUrl(match))}
       style={{
         display: 'flex', flexDirection: 'column',
         width: '100%', textAlign: 'left',
@@ -237,12 +238,12 @@ function LiveMatchCard({ match }) {
         border: '1px solid #e5e9f0',
         borderRadius: 10,
         overflow: 'hidden',
-        cursor: 'pointer',
+        cursor: hasLink ? 'pointer' : 'default',
         fontFamily: 'inherit',
         transition: 'box-shadow 0.15s, transform 0.15s',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
       }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+      onMouseEnter={e => { if (hasLink) { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; e.currentTarget.style.transform = 'translateY(-2px)' }}}
       onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'; e.currentTarget.style.transform = 'none' }}
     >
 
