@@ -705,6 +705,308 @@ function RatingRow({ label, v1, v2 }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LiveMatchBox — comprehensive in-play dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+function LiveMatchBox({ match, liveData }) {
+  const p1 = match.first_player  || {}
+  const p2 = match.second_player || {}
+  const ld = liveData || {}
+  const dbLive = match.live_data || {}
+
+  // ── Score data ──────────────────────────────────────────────────────────
+  const p1Sets = ld.player1_sets ?? dbLive.player1_sets ?? 0
+  const p2Sets = ld.player2_sets ?? dbLive.player2_sets ?? 0
+  const setsDetail = ld.sets_detail || dbLive.sets_detail || []
+  const p1Games = ld.player1_games ?? dbLive.player1_games
+  const p2Games = ld.player2_games ?? dbLive.player2_games
+  const currentPoint = ld.current_point ?? dbLive.current_point
+  const serveRaw = dbLive.serve
+  const isServingP1 = ld.is_serving_p1 ?? (serveRaw === 1 || serveRaw === '1' || serveRaw === 'player1' || serveRaw === 'first' ? true : serveRaw === 2 || serveRaw === '2' || serveRaw === 'player2' || serveRaw === 'second' ? false : null)
+
+  // ── Serve stats (from DB live_data.serve_stats or top-level) ────────────
+  const ss = ld.serve_stats || dbLive.serve_stats || {}
+  const hasServeStats = !!(ss.p1_aces != null || ss.p1_first_serve_pct != null || ss.p2_aces != null)
+
+  // ── Momentum from enrichment ────────────────────────────────────────────
+  const momentum = ld.momentum || null
+
+  // ── RTT from enrichment ─────────────────────────────────────────────────
+  const rtt = ld.rtt || {}
+
+  // ── Prediction + edge ───────────────────────────────────────────────────
+  const pred = ld.prediction || match.prediction || {}
+  const probP1 = pred.prob_p1 ?? pred.prob_first_player
+  const probP2 = pred.prob_p2 ?? pred.prob_second_player
+  const edge = ld.edge || {}
+
+  // Player short names
+  const p1Short = (p1.name || 'P1').split(' ').pop()
+  const p2Short = (p2.name || 'P2').split(' ').pop()
+
+  // Momentum colour/icon
+  const momDir = momentum?.direction
+  const momLabel = momentum?.label || 'Level match'
+  const momColor = momDir === 'p1' ? '#0d9488' : momDir === 'p2' ? '#6366f1' : '#9ca3af'
+  const momPlayer = momDir === 'p1' ? p1Short : momDir === 'p2' ? p2Short : null
+
+  return (
+    <div style={{ ...cardStyle, border: '2px solid #f43f5e', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
+      {/* Live badge */}
+      <div style={{ position: 'absolute', top: 0, right: 0, background: '#f43f5e', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.5px', padding: '4px 12px 4px 16px', borderBottomLeftRadius: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', animation: 'pulse 1.5s infinite' }} />
+        IN PLAY
+      </div>
+
+      <div style={{ ...sectionLabelStyle, marginBottom: 16 }}>Live Match Centre</div>
+
+      {/* ── SCOREBOARD ───────────────────────────────────────────────── */}
+      <div style={{ background: '#111827', borderRadius: 10, padding: '16px 20px', marginBottom: 16, color: '#fff' }}>
+        {/* Player names + serving indicator */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {isServingP1 === true && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} title="Serving" />}
+            <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p1.name || 'Player 1'}</span>
+          </div>
+          <span style={{ fontSize: 10, color: '#6b7280', fontWeight: 600 }}>vs</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>{p2.name || 'Player 2'}</span>
+            {isServingP1 === false && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} title="Serving" />}
+          </div>
+        </div>
+
+        {/* Sets row */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, alignItems: 'center' }}>
+          {/* P1 set scores */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {setsDetail.map((s, i) => (
+              <span key={i} style={{ fontSize: 28, fontWeight: 900, fontVariantNumeric: 'tabular-nums', color: (s.p1 ?? 0) > (s.p2 ?? 0) ? '#fff' : '#6b7280' }}>{s.p1 ?? 0}</span>
+            ))}
+          </div>
+          {/* Centre: current game + point */}
+          <div style={{ textAlign: 'center' }}>
+            {(p1Games != null && p2Games != null) && (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#fbbf24', fontVariantNumeric: 'tabular-nums' }}>{p1Games}-{p2Games}</div>
+            )}
+            {currentPoint && (
+              <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, marginTop: 2 }}>{currentPoint}</div>
+            )}
+          </div>
+          {/* P2 set scores */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+            {setsDetail.map((s, i) => (
+              <span key={i} style={{ fontSize: 28, fontWeight: 900, fontVariantNumeric: 'tabular-nums', color: (s.p2 ?? 0) > (s.p1 ?? 0) ? '#fff' : '#6b7280' }}>{s.p2 ?? 0}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Sets won */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>Sets: {p1Sets}</div>
+          <div />
+          <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textAlign: 'right' }}>Sets: {p2Sets}</div>
+        </div>
+      </div>
+
+      {/* ── MOMENTUM + SCORE FLOW ────────────────────────────────────── */}
+      {momentum && (
+        <div style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: 16, padding: '12px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Momentum</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: momColor, background: `${momColor}18`, padding: '2px 8px', borderRadius: 6 }}>
+                {momentum.swing ? '⟳ ' : momDir === 'p1' ? '↑ ' : momDir === 'p2' ? '↑ ' : '= '}
+                {momPlayer ? `${momPlayer} — ` : ''}{momLabel}
+              </span>
+            </div>
+            {momentum.strength && (
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>{momentum.strength}</span>
+            )}
+          </div>
+
+          {/* Score flow chart — visual set-by-set bars */}
+          {setsDetail.length > 0 && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 48 }}>
+              {setsDetail.map((s, i) => {
+                const total = (s.p1 || 0) + (s.p2 || 0)
+                const pct1 = total > 0 ? (s.p1 || 0) / total : 0.5
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', marginBottom: 2 }}>S{i+1}</div>
+                    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 1, height: 32 }}>
+                      <div style={{ height: `${pct1 * 100}%`, background: '#0d9488', borderRadius: '3px 3px 0 0', minHeight: 2, transition: 'height 0.3s' }} />
+                      <div style={{ height: `${(1 - pct1) * 100}%`, background: '#6366f1', borderRadius: '0 0 3px 3px', minHeight: 2, transition: 'height 0.3s' }} />
+                    </div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: '#374151', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{s.p1}-{s.p2}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, fontWeight: 600 }}>
+            <span style={{ color: '#0d9488' }}>{p1Short}</span>
+            <span style={{ color: '#6366f1' }}>{p2Short}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODEL VS MARKET ──────────────────────────────────────────── */}
+      {probP1 != null && (
+        <div style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: 16, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Model Prediction</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#0d9488' }}>{p1Short}</span>
+            <div style={{ flex: 1, height: 10, borderRadius: 5, overflow: 'hidden', display: 'flex', background: '#e5e7eb' }}>
+              <div style={{ width: `${Math.round((probP1 || 0.5) * 100)}%`, background: '#0d9488', borderRadius: '5px 0 0 5px', transition: 'width 0.5s' }} />
+              <div style={{ flex: 1, background: '#6366f1', borderRadius: '0 5px 5px 0' }} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#6366f1' }}>{p2Short}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ color: '#0d9488' }}>{Math.round((probP1 || 0.5) * 100)}%</span>
+            <span style={{ color: '#6366f1' }}>{Math.round((probP2 || 0.5) * 100)}%</span>
+          </div>
+          {edge.edge_pct != null && (
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>Edge</span>
+              <span style={{
+                fontSize: 12, fontWeight: 800,
+                color: edge.edge_pct > 0 ? '#166534' : edge.edge_pct < -3 ? '#991b1b' : '#92400e',
+                background: edge.edge_pct > 0 ? '#bbf0d0' : edge.edge_pct < -3 ? '#fecaca' : '#fef3c7',
+                padding: '2px 8px', borderRadius: 6,
+              }}>
+                {edge.edge_pct > 0 ? '+' : ''}{edge.edge_pct}% on {edge.player === 'p1' ? p1Short : p2Short}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── LIVE SERVE STATISTICS ────────────────────────────────────── */}
+      {hasServeStats && (
+        <div style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: 0, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Match Statistics</div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* P1 column */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#0d9488', marginBottom: 8 }}>{p1Short}</div>
+              {[
+                { label: 'Aces', val: ss.p1_aces },
+                { label: 'Double faults', val: ss.p1_double_faults },
+                { label: '1st serve %', val: ss.p1_first_serve_pct, pct: true },
+                { label: '1st serve won', val: ss.p1_first_serve_won_pct, pct: true },
+                { label: '2nd serve won', val: ss.p1_second_serve_won_pct, pct: true },
+              ].map(({ label, val, pct }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
+                    {val != null ? (pct ? `${Math.round(val)}%` : val) : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* P2 column */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6366f1', marginBottom: 8 }}>{p2Short}</div>
+              {[
+                { label: 'Aces', val: ss.p2_aces },
+                { label: 'Double faults', val: ss.p2_double_faults },
+                { label: '1st serve %', val: ss.p2_first_serve_pct, pct: true },
+                { label: '1st serve won', val: ss.p2_first_serve_won_pct, pct: true },
+                { label: '2nd serve won', val: ss.p2_second_serve_won_pct, pct: true },
+              ].map(({ label, val, pct }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
+                    {val != null ? (pct ? `${Math.round(val)}%` : val) : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Comparison bars for key stats */}
+          {(ss.p1_first_serve_pct != null && ss.p2_first_serve_pct != null) && (
+            <div style={{ marginTop: 12 }}>
+              {[
+                { label: '1st Serve %', v1: ss.p1_first_serve_pct, v2: ss.p2_first_serve_pct },
+                { label: '1st Serve Won', v1: ss.p1_first_serve_won_pct, v2: ss.p2_first_serve_won_pct },
+                ...(ss.p1_aces != null ? [{ label: 'Aces', v1: ss.p1_aces, v2: ss.p2_aces, raw: true }] : []),
+              ].map(({ label, v1, v2, raw }) => {
+                if (v1 == null || v2 == null) return null
+                const max = raw ? Math.max(v1, v2, 1) : 100
+                return (
+                  <div key={label} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 600, color: '#6b7280', marginBottom: 3 }}>
+                      <span>{raw ? v1 : `${Math.round(v1)}%`}</span>
+                      <span>{label}</span>
+                      <span>{raw ? v2 : `${Math.round(v2)}%`}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 2, height: 6 }}>
+                      <div style={{ flex: v1 / max, background: '#0d9488', borderRadius: '3px 0 0 3px', transition: 'flex 0.5s' }} />
+                      <div style={{ flex: v2 / max, background: '#6366f1', borderRadius: '0 3px 3px 0', transition: 'flex 0.5s' }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── No serve stats fallback — show RTT comparison ─────────────── */}
+      {!hasServeStats && rtt.p1_score != null && (
+        <div style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: 0, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Player Ratings</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* P1 */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#0d9488', marginBottom: 6 }}>{p1Short}</div>
+              {[
+                { label: 'RTT Score', val: rtt.p1_score },
+                { label: 'Form', val: rtt.p1_form },
+                { label: 'Serve', val: rtt.p1_serve },
+                { label: 'Return', val: rtt.p1_return },
+                { label: 'Pressure', val: rtt.p1_pressure },
+              ].map(({ label, val }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>{val != null ? Math.round(val) : '—'}</span>
+                </div>
+              ))}
+            </div>
+            {/* P2 */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6366f1', marginBottom: 6 }}>{p2Short}</div>
+              {[
+                { label: 'RTT Score', val: rtt.p2_score },
+                { label: 'Form', val: rtt.p2_form },
+                { label: 'Serve', val: rtt.p2_serve },
+                { label: 'Return', val: rtt.p2_return },
+                { label: 'Pressure', val: rtt.p2_pressure },
+              ].map(({ label, val }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>{val != null ? Math.round(val) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overview section
+// ─────────────────────────────────────────────────────────────────────────────
+
 function SectionOverview({ match }) {
   const p1 = match.first_player  || {}
   const p2 = match.second_player || {}
@@ -756,90 +1058,6 @@ function SectionOverview({ match }) {
 
   return (
     <div>
-      {/* In-play block */}
-      {isLive && (
-        <div style={{ ...cardStyle, marginBottom: 16 }}>
-          <div style={sectionLabelStyle}>In-play</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {/* Court SVG + toggles */}
-            <div>
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                {/* Player toggle */}
-                {[['p1', (p1.name||'P1').split(' ').pop()], ['p2', (p2.name||'P2').split(' ').pop()]].map(([k, label]) => (
-                  <button key={k} onClick={() => setSvPlayer(k)} style={{
-                    padding: '3px 8px', fontSize: 11, fontWeight: 600,
-                    background: svPlayer === k ? '#0d9488' : '#f3f4f6',
-                    color: svPlayer === k ? '#fff' : '#6b7280',
-                    border: 'none', borderRadius: 5, cursor: 'pointer',
-                  }}>{label}</button>
-                ))}
-                {[1, 2].map(n => (
-                  <button key={n} onClick={() => setSvNum(n)} style={{
-                    padding: '3px 8px', fontSize: 11, fontWeight: 600,
-                    background: svNum === n ? '#374151' : '#f3f4f6',
-                    color: svNum === n ? '#fff' : '#6b7280',
-                    border: 'none', borderRadius: 5, cursor: 'pointer',
-                  }}>{n === 1 ? '1st' : '2nd'}</button>
-                ))}
-                {['deuce','ad'].map(s => (
-                  <button key={s} onClick={() => setSvSide(s)} style={{
-                    padding: '3px 8px', fontSize: 11, fontWeight: 600, textTransform: 'capitalize',
-                    background: svSide === s ? '#374151' : '#f3f4f6',
-                    color: svSide === s ? '#fff' : '#6b7280',
-                    border: 'none', borderRadius: 5, cursor: 'pointer',
-                  }}>{s}</button>
-                ))}
-              </div>
-              <CourtSVG sv={svNum} side={svSide} zoneData={zoneData} />
-            </div>
-
-            {/* Live stats */}
-            <div>
-              {match.set_scores && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={sectionLabelStyle}>Score</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {match.set_scores.split(' ').map((set, i) => (
-                      <div key={i} style={{
-                        fontSize: 22, fontWeight: 800, color: '#111827',
-                        fontVariantNumeric: 'tabular-nums',
-                        background: '#f4f6f9', borderRadius: 6, padding: '4px 10px',
-                      }}>{fmtSetScore(set)}</div>
-                    ))}
-                    {isLive && match.game_result && (
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#6b7280', alignSelf: 'center', paddingLeft: 4 }}>{match.game_result}</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Live serve stats if available */}
-              {currentPlayer.stats?.overall && (() => {
-                const s = currentPlayer.stats.overall
-                return (
-                  <div>
-                    <div style={sectionLabelStyle}>{(currentPlayer.name || '').split(' ').pop()} — serve</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                      {[
-                        { label: '1st serve %', v: s.first_serve_pct != null ? `${(s.first_serve_pct*100).toFixed(0)}%` : '—' },
-                        { label: 'Aces/match',  v: s.aces_per_match  != null ? Number(s.aces_per_match).toFixed(1) : '—' },
-                        { label: 'Serve rating', v: currentPlayer.ratings?.serve_rating != null ? Math.round(currentPlayer.ratings.serve_rating) : '—' },
-                        { label: 'BP saved',    v: s.bp_saved_pct != null ? `${(s.bp_saved_pct*100).toFixed(0)}%` : '—' },
-                      ].map(({ label, v }) => (
-                        <div key={label} style={{ background: '#f4f6f9', borderRadius: 8, padding: '8px 10px' }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>{v}</div>
-                          <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Ratings comparison */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
@@ -1241,6 +1459,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [activeSection, setActiveSection] = useState('section-intel')
+  const [liveData, setLiveData] = useState(null)   // enriched live data from /api/v1/live
 
   useEffect(() => {
     api.match(matchId)
@@ -1289,6 +1508,28 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
       })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [matchId])
+
+  // ── Live data polling (when match is in play) ──────────────────────────
+  useEffect(() => {
+    if (!match) return
+    const isLive = !!match.is_live && !/finished/i.test(match.status || '') && !match.winner
+    if (!isLive) return
+
+    const fetchLive = () => {
+      api.liveProxy().then(all => {
+        if (!Array.isArray(all)) return
+        const mid = match.match_id || match.id || parseInt(matchId)
+        const found = all.find(m =>
+          m.internal_id === mid ||
+          m.internal_id === parseInt(matchId)
+        )
+        if (found) setLiveData(found)
+      }).catch(() => {})
+    }
+    fetchLive()
+    const interval = setInterval(fetchLive, 30000)
+    return () => clearInterval(interval)
+  }, [match?.is_live, match?.status, match?.winner, matchId]) // eslint-disable-line
 
   // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
   useEffect(() => {
@@ -1356,6 +1597,16 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
 
       {/* SCROLLING CONTENT */}
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '16px 20px 60px' }}>
+
+        {/* In-play match centre — shown above everything when match is live */}
+        {(() => {
+          const _isLive = !!match.is_live && !/finished/i.test(match.status || '') && !match.winner
+          return _isLive ? (
+            <section style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 8, marginBottom: 20 }}>
+              <LiveMatchBox match={match} liveData={liveData} />
+            </section>
+          ) : null
+        })()}
 
         <section id="section-intel" style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>Intelligence</div>

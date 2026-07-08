@@ -87,5 +87,6 @@ export const api = {
   createPick:        (body)   => clientPost('/api/v1/picks', body),
   deletePick:        (id)     => clientDel(`/api/v1/picks/${id}`),
   liveMatches:       ()       => clientFetch("/api/v1/matches/live"),
+  liveProxy:         ()       => clientFetch("/api/v1/live"),
   matchOuPrediction: (id)     => clientFetch(`/api/v1/matches/${id}/ou-prediction`),
 }
