@@ -1512,7 +1512,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
   // ── Live data polling (when match is in play) ──────────────────────────
   useEffect(() => {
     if (!match) return
-    const isLive = !!match.is_live && !/finished/i.test(match.status || '') && !match.winner
+    const isLive = (!!match.is_live || match.status === 'live') && !/finished/i.test(match.status || '')
     if (!isLive) return
 
     const fetchLive = () => {
@@ -1529,7 +1529,7 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
     fetchLive()
     const interval = setInterval(fetchLive, 30000)
     return () => clearInterval(interval)
-  }, [match?.is_live, match?.status, match?.winner, matchId]) // eslint-disable-line
+  }, [match?.is_live, match?.status, matchId]) // eslint-disable-line
 
   // Redirect bare /match/<id> → /match/<id>/<slug> once data is available
   useEffect(() => {
@@ -1600,7 +1600,8 @@ export default function MatchDetailClient({ initialMatch = null, matchId }) {
 
         {/* In-play match centre — shown above everything when match is live */}
         {(() => {
-          const _isLive = !!match.is_live && !/finished/i.test(match.status || '') && !match.winner
+          // Trust is_live + status over the winner column (winner can be set prematurely by pipeline)
+          const _isLive = (!!match.is_live || match.status === 'live') && !/finished/i.test(match.status || '')
           return _isLive ? (
             <section style={{ scrollMarginTop: SCROLL_MARGIN, marginTop: 8, marginBottom: 20 }}>
               <LiveMatchBox match={match} liveData={liveData} />
