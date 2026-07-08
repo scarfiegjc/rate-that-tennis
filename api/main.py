@@ -115,16 +115,105 @@ def health():
 # Live matches — proxy bzzoiro (browser can't call bzzoiro directly due to CORS)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _compute_momentum(sets_detail, p1_sets, p2_sets):
+    """
+    Compute live momentum from score progression.
+    Returns a dict with momentum direction, description, and score flow.
+    """
+    if not sets_detail:
+        return None
+
+    completed = [s for s in sets_detail if (s.get("p1", 0) + s.get("p2", 0)) >= 6]
+    if not completed:
+        # First set in progress — check game margin
+        current = sets_detail[-1] if sets_detail else {}
+        g1 = current.get("p1", 0)
+        g2 = current.get("p2", 0)
+        diff = g1 - g2
+        if abs(diff) >= 3:
+            return {
+                "direction": "p1" if diff > 0 else "p2",
+                "strength": "strong",
+                "label": "Dominant" if abs(diff) >= 4 else "In control",
+                "game_flow": [{"p1": g1, "p2": g2}],
+            }
+        elif abs(diff) >= 1:
+            return {
+                "direction": "p1" if diff > 0 else "p2",
+                "strength": "slight",
+                "label": "Edging ahead",
+                "game_flow": [{"p1": g1, "p2": g2}],
+            }
+        return {
+            "direction": "neutral",
+            "strength": "even",
+            "label": "On serve",
+            "game_flow": [{"p1": g1, "p2": g2}],
+        }
+
+    # Multiple sets — look at trajectory
+    set_margins = []
+    for s in completed:
+        margin = s.get("p1", 0) - s.get("p2", 0)
+        set_margins.append(margin)
+
+    # Recent set performance
+    last_margin = set_margins[-1]
+    prev_margin = set_margins[-2] if len(set_margins) >= 2 else 0
+
+    # Current set in progress
+    current = sets_detail[-1] if sets_detail else {}
+    current_g1 = current.get("p1", 0)
+    current_g2 = current.get("p2", 0)
+    current_margin = current_g1 - current_g2
+
+    # Was the last set a turnaround?
+    swing = False
+    if len(set_margins) >= 2:
+        swing = (prev_margin > 0 and last_margin < 0) or (prev_margin < 0 and last_margin > 0)
+
+    # Determine direction based on recent trajectory
+    if swing:
+        winner_of_last = "p1" if last_margin > 0 else "p2"
+        return {
+            "direction": winner_of_last,
+            "strength": "shifting",
+            "label": "Momentum shift",
+            "swing": True,
+            "game_flow": [{"p1": s.get("p1", 0), "p2": s.get("p2", 0)} for s in sets_detail],
+        }
+
+    # Consistent domination
+    p1_total = sum(1 for m in set_margins if m > 0)
+    p2_total = sum(1 for m in set_margins if m > 0)
+    total_sets = len(set_margins)
+
+    if current_margin != 0:
+        direction = "p1" if current_margin > 0 else "p2"
+        label = "Building pressure" if abs(current_margin) >= 2 else "Edging ahead"
+    elif last_margin != 0:
+        direction = "p1" if last_margin > 0 else "p2"
+        label = "Carrying momentum"
+    else:
+        direction = "neutral"
+        label = "Level match"
+
+    return {
+        "direction": direction,
+        "strength": "strong" if abs(current_margin) >= 3 else "moderate" if abs(current_margin) >= 1 else "even",
+        "label": label,
+        "game_flow": [{"p1": s.get("p1", 0), "p2": s.get("p2", 0)} for s in sets_detail],
+    }
+
+
 @app.get("/api/v1/live")
 def live_matches():
     """
-    Returns currently in-play tennis matches from bzzoiro.
-    Proxied here because bzzoiro does not send CORS headers the browser needs.
-    Each match is enriched with internal_id (our DB primary key) so the frontend
-    can build correct /match/<internal_id>/... URLs.
+    Returns currently in-play tennis matches from bzzoiro, enriched with
+    our DB data: RTT scores, model predictions, edge calculations, and
+    live momentum indicators.
     """
     import requests as _requests
-    import json as _json
     BZZ_TOKEN = os.environ.get("BZZOIRO_API_KEY", "4426945bd65f0798e817976bbef975bbb9d0e606")
     BZZ_URL   = "https://sports.bzzoiro.com/tennis/api/v2/matches/?status=live"
     try:
@@ -137,54 +226,183 @@ def live_matches():
         data = resp.json()
         matches = data if isinstance(data, list) else data.get("results", data.get("matches", []))
 
-        # Enrich with internal DB IDs so the frontend can build correct detail-page URLs
-        if matches:
-            from api.db import query
+        if not matches:
+            return []
 
-            # Strategy 1: match by bzzoiro_id (fast, exact)
-            bzz_ids = [m.get("match_id") or m.get("id") for m in matches if m.get("match_id") or m.get("id")]
-            if bzz_ids:
-                try:
-                    rows = query(
-                        "SELECT bzzoiro_id, id FROM matches WHERE bzzoiro_id = ANY(%s)",
-                        (bzz_ids,)
-                    )
-                    id_map = {str(r["bzzoiro_id"]): r["id"] for r in rows}
-                    for m in matches:
-                        bzz_id = str(m.get("match_id") or m.get("id") or "")
-                        if bzz_id in id_map:
-                            m["internal_id"] = id_map[bzz_id]
-                except Exception as db_err:
-                    log.warning(f"bzzoiro live: bzzoiro_id enrichment failed: {db_err}")
+        from api.db import query
 
-            # Strategy 2: for matches still missing internal_id, match by player names + date
-            unlinked = [m for m in matches if not m.get("internal_id")]
-            if unlinked:
-                try:
-                    for m in unlinked:
-                        p1_name = (m.get("player1") or {}).get("name", "")
-                        p2_name = (m.get("player2") or {}).get("name", "")
-                        match_date = (m.get("match_date") or "")[:10]
-                        if not (p1_name and p2_name and match_date):
-                            continue
+        # ── Step 1: Resolve internal IDs ───────────────────────────────────
+        # Strategy 1: match by negative api_event_key (bzzoiro convention)
+        bzz_ids = [m.get("match_id") or m.get("id") for m in matches if m.get("match_id") or m.get("id")]
+        neg_keys = [-abs(int(bid)) for bid in bzz_ids if bid]
+
+        enrichment = {}  # internal_id → row dict
+        if neg_keys:
+            try:
+                rows = query(
+                    """
+                    SELECT
+                        m.id, m.api_event_key,
+                        m.first_player_id, m.second_player_id,
+                        m.live_data,
+                        pr1.rtt_score AS p1_rtt, pr1.form_score AS p1_form,
+                        pr1.serve_rating AS p1_serve_rating,
+                        pr1.return_rating AS p1_return_rating,
+                        pr1.pressure_rating AS p1_pressure_rating,
+                        pr1.momentum AS p1_momentum,
+                        pr2.rtt_score AS p2_rtt, pr2.form_score AS p2_form,
+                        pr2.serve_rating AS p2_serve_rating,
+                        pr2.return_rating AS p2_return_rating,
+                        pr2.pressure_rating AS p2_pressure_rating,
+                        pr2.momentum AS p2_momentum,
+                        p1.current_rank AS p1_ranking,
+                        p2.current_rank AS p2_ranking,
+                        mp.prob_first_player, mp.prob_second_player,
+                        mp.key_factors
+                    FROM matches m
+                    JOIN players p1 ON p1.id = m.first_player_id
+                    JOIN players p2 ON p2.id = m.second_player_id
+                    LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
+                    LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
+                    LEFT JOIN model_predictions mp ON mp.match_id = m.id
+                    WHERE m.api_event_key = ANY(%s)
+                    """,
+                    (neg_keys,),
+                )
+                for r in rows:
+                    key = r["api_event_key"]
+                    enrichment[key] = r
+            except Exception as db_err:
+                log.warning(f"bzzoiro live enrichment failed: {db_err}")
+
+        # Strategy 2: name-based fallback for unmatched
+        # (also try bzzoiro_id column)
+        if bzz_ids:
+            try:
+                rows2 = query(
+                    "SELECT bzzoiro_id, id FROM matches WHERE bzzoiro_id = ANY(%s)",
+                    (bzz_ids,)
+                )
+                bzz_id_map = {str(r["bzzoiro_id"]): r["id"] for r in (rows2 or [])}
+            except Exception:
+                bzz_id_map = {}
+        else:
+            bzz_id_map = {}
+
+        # ── Step 2: Merge enrichment into each match ───────────────────────
+        for m in matches:
+            bzz_id = m.get("match_id") or m.get("id")
+            neg_key = -abs(int(bzz_id)) if bzz_id else None
+
+            # Resolve internal_id
+            enrich = enrichment.get(neg_key, {}) if neg_key else {}
+            if enrich:
+                m["internal_id"] = enrich.get("id")
+            elif str(bzz_id) in bzz_id_map:
+                m["internal_id"] = bzz_id_map[str(bzz_id)]
+            else:
+                # Name-based fallback
+                p1_name = (m.get("player1") or {}).get("name", "")
+                p2_name = (m.get("player2") or {}).get("name", "")
+                match_date = (m.get("match_date") or "")[:10]
+                if p1_name and p2_name and match_date:
+                    try:
                         row = query(
-                            """
-                            SELECT m.id FROM matches m
-                            JOIN players p1 ON p1.id = m.first_player_id
-                            JOIN players p2 ON p2.id = m.second_player_id
-                            WHERE m.event_date = %s
-                              AND (p1.full_name ILIKE %s OR p1.name ILIKE %s)
-                              AND (p2.full_name ILIKE %s OR p2.name ILIKE %s)
-                            LIMIT 1
-                            """,
+                            """SELECT m.id FROM matches m
+                               JOIN players p1 ON p1.id = m.first_player_id
+                               JOIN players p2 ON p2.id = m.second_player_id
+                               WHERE m.event_date = %s
+                                 AND (p1.full_name ILIKE %s OR p1.name ILIKE %s)
+                                 AND (p2.full_name ILIKE %s OR p2.name ILIKE %s)
+                               LIMIT 1""",
                             (match_date,
                              f"%{p1_name.split()[-1]}%", f"%{p1_name.split()[-1]}%",
                              f"%{p2_name.split()[-1]}%", f"%{p2_name.split()[-1]}%"),
                         )
                         if row:
                             m["internal_id"] = row[0]["id"]
-                except Exception as db_err:
-                    log.warning(f"bzzoiro live: name-based enrichment failed: {db_err}")
+                    except Exception:
+                        pass
+
+            # RTT scores and ratings
+            if enrich:
+                m["rtt"] = {
+                    "p1_score": float(enrich["p1_rtt"]) if enrich.get("p1_rtt") else None,
+                    "p2_score": float(enrich["p2_rtt"]) if enrich.get("p2_rtt") else None,
+                    "p1_form": float(enrich["p1_form"]) if enrich.get("p1_form") else None,
+                    "p2_form": float(enrich["p2_form"]) if enrich.get("p2_form") else None,
+                    "p1_serve": float(enrich["p1_serve_rating"]) if enrich.get("p1_serve_rating") else None,
+                    "p2_serve": float(enrich["p2_serve_rating"]) if enrich.get("p2_serve_rating") else None,
+                    "p1_return": float(enrich["p1_return_rating"]) if enrich.get("p1_return_rating") else None,
+                    "p2_return": float(enrich["p2_return_rating"]) if enrich.get("p2_return_rating") else None,
+                    "p1_pressure": float(enrich["p1_pressure_rating"]) if enrich.get("p1_pressure_rating") else None,
+                    "p2_pressure": float(enrich["p2_pressure_rating"]) if enrich.get("p2_pressure_rating") else None,
+                    "p1_pre_match_momentum": enrich.get("p1_momentum"),
+                    "p2_pre_match_momentum": enrich.get("p2_momentum"),
+                }
+                m["prediction"] = {
+                    "prob_p1": float(enrich["prob_first_player"]) if enrich.get("prob_first_player") else None,
+                    "prob_p2": float(enrich["prob_second_player"]) if enrich.get("prob_second_player") else None,
+                    "key_factors": enrich.get("key_factors"),
+                }
+
+                # Edge: model prob vs implied odds prob
+                prob_p1 = float(enrich["prob_first_player"]) if enrich.get("prob_first_player") else None
+                odds_p1 = m.get("odds_player1")
+                odds_p2 = m.get("odds_player2")
+                if prob_p1 and odds_p1 and odds_p1 > 1:
+                    implied = 1.0 / odds_p1
+                    m["edge"] = {
+                        "player": "p1",
+                        "model_prob": prob_p1,
+                        "implied_prob": round(implied, 3),
+                        "edge_pct": round((prob_p1 - implied) * 100, 1),
+                    }
+                elif prob_p1 and odds_p2 and odds_p2 > 1:
+                    prob_p2_model = 1.0 - prob_p1
+                    implied = 1.0 / odds_p2
+                    m["edge"] = {
+                        "player": "p2",
+                        "model_prob": round(prob_p2_model, 4),
+                        "implied_prob": round(implied, 3),
+                        "edge_pct": round((prob_p2_model - implied) * 100, 1),
+                    }
+
+                # Merge any live_data from DB (serve stats etc from sync_live)
+                live = enrich.get("live_data") or {}
+                if live:
+                    ss = live.get("serve_stats") or {}
+                    if ss:
+                        m["serve_stats"] = {
+                            "p1_aces": ss.get("p1_aces"),
+                            "p1_double_faults": ss.get("p1_double_faults"),
+                            "p1_first_serve_pct": ss.get("p1_first_serve_pct"),
+                            "p1_first_serve_won_pct": ss.get("p1_first_serve_won_pct"),
+                            "p2_aces": ss.get("p2_aces"),
+                            "p2_double_faults": ss.get("p2_double_faults"),
+                            "p2_first_serve_pct": ss.get("p2_first_serve_pct"),
+                            "p2_first_serve_won_pct": ss.get("p2_first_serve_won_pct"),
+                        }
+                    # Game scores and serving (if sync_live captured them)
+                    if live.get("player1_games") is not None:
+                        m.setdefault("player1_games", live["player1_games"])
+                    if live.get("player2_games") is not None:
+                        m.setdefault("player2_games", live["player2_games"])
+                    if live.get("current_point"):
+                        m.setdefault("current_point", live["current_point"])
+                    if live.get("serve") is not None:
+                        serve_val = live["serve"]
+                        # Normalise: bzzoiro may send 1/2 or "player1"/"player2"
+                        if serve_val in (1, "1", "player1", "first"):
+                            m["is_serving_p1"] = True
+                        elif serve_val in (2, "2", "player2", "second"):
+                            m["is_serving_p1"] = False
+
+            # ── Compute live momentum from score ──────────────────────────
+            sets_detail = m.get("sets_detail") or []
+            p1_sets = m.get("player1_sets")
+            p2_sets = m.get("player2_sets")
+            m["momentum"] = _compute_momentum(sets_detail, p1_sets, p2_sets)
 
         return matches
     except Exception as e:

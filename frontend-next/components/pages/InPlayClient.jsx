@@ -5,7 +5,8 @@
  * Fetches /api/v1/live (FastAPI proxy) every 30 seconds.
  * Falls back to bzzoiro directly if the endpoint returns nothing.
  * Each card shows: set chips, current game score, serving indicator,
- * win probability bar (from live odds), and a 2-col serve stats panel.
+ * win probability bar, momentum indicator, RTT ratings, model edge,
+ * and a 2-col serve stats panel.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -60,20 +61,12 @@ function matchUrl(match) {
   const p1         = toSlug(match.first_player?.name  || match.player1?.name || 'player')
   const p2         = toSlug(match.second_player?.name || match.player2?.name || 'player')
   const slug       = [date, tournament, `${p1}-vs-${p2}`].filter(Boolean).join('-')
-  // internal_id is injected by the FastAPI /api/v1/live proxy (our DB primary key)
-  // fall back to bzzoiro match_id only if we have no internal_id
   const id         = match.internal_id || match.match_id || match.id
   return `/match/${id}/${slug}`
 }
 
 // ── Court background ──────────────────────────────────────────────────────────
 
-function inferSurface(name) {
-  const n = (name || '').toLowerCase()
-  if (/roland.?garros|french open|monte.?carlo|barcelona|madrid|clay/i.test(n)) return 'clay'
-  if (/wimbledon|queen.?s club|halle|eastbourne|nottingham|grass/i.test(n))     return 'grass'
-  return null
-}
 function courtBg(surface, tournament) {
   const s = (surface || '').toLowerCase()
   let img = s.includes('clay')  ? courtClay
@@ -81,8 +74,10 @@ function courtBg(surface, tournament) {
            : s.includes('hard')  ? courtHard
            : null
   if (!img) {
-    const inf = inferSurface(tournament)
-    img = inf === 'clay' ? courtClay : inf === 'grass' ? courtGrass : courtHard
+    const n = (tournament || '').toLowerCase()
+    img = /wimbledon|queen|halle|eastbourne|grass/i.test(n) ? courtGrass
+        : /roland|french|monte.?carlo|barcelona|madrid|clay/i.test(n) ? courtClay
+        : courtHard
   }
   return {
     backgroundImage: `linear-gradient(rgba(0,0,0,0.55),rgba(0,0,0,0.55)),url(${img})`,
@@ -112,6 +107,111 @@ function ProgressBar({ value, max = 1, color = '#059669', height = 6 }) {
   )
 }
 
+// ── RTT Score badge ──────────────────────────────────────────────────────────
+
+function RttBadge({ score, side = 'left' }) {
+  if (score == null) return null
+  const color = score >= 85 ? '#15803d' : score >= 70 ? '#2563eb' : score >= 55 ? '#9333ea' : '#6b7280'
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 2,
+      fontSize: 9, fontWeight: 800, color,
+      background: `${color}15`, borderRadius: 4,
+      padding: '1px 4px', letterSpacing: '0.03em',
+    }}>
+      RTT {Math.round(score)}
+    </span>
+  )
+}
+
+// ── Momentum indicator ───────────────────────────────────────────────────────
+
+function MomentumBadge({ momentum, p1Name, p2Name }) {
+  if (!momentum) return null
+
+  const { direction, strength, label, swing } = momentum
+
+  let color, icon, text
+  if (direction === 'neutral' || direction === 'even') {
+    color = '#6b7280'
+    icon = '='
+    text = label
+  } else if (swing) {
+    color = '#f59e0b'
+    icon = '⇄'  // ⇄
+    text = label
+  } else if (direction === 'p1') {
+    color = strength === 'strong' ? '#15803d' : '#22c55e'
+    icon = '↑'  // ↑
+    text = `${(p1Name || '').split(' ').pop()} ${label.toLowerCase()}`
+  } else {
+    color = strength === 'strong' ? '#1d4ed8' : '#3b82f6'
+    icon = '↑'  // ↑
+    text = `${(p2Name || '').split(' ').pop()} ${label.toLowerCase()}`
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 4,
+      padding: '3px 8px', borderRadius: 6,
+      background: `${color}12`, border: `1px solid ${color}30`,
+    }}>
+      <span style={{ fontSize: 11, color }}>{icon}</span>
+      <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: '0.02em' }}>{text}</span>
+    </div>
+  )
+}
+
+// ── Edge badge ───────────────────────────────────────────────────────────────
+
+function EdgeBadge({ edge }) {
+  if (!edge || !edge.edge_pct) return null
+  const val = edge.edge_pct
+  if (Math.abs(val) < 2) return null
+  const positive = val > 0
+  const color = positive ? '#15803d' : '#dc2626'
+  return (
+    <span style={{
+      fontSize: 9, fontWeight: 800, color,
+      background: `${color}12`, borderRadius: 4,
+      padding: '1px 5px', letterSpacing: '0.03em',
+    }}>
+      {positive ? '+' : ''}{val.toFixed(1)}% edge
+    </span>
+  )
+}
+
+// ── Score flow mini-chart ────────────────────────────────────────────────────
+
+function ScoreFlow({ sets }) {
+  if (!sets || sets.length <= 1) return null
+  // Show game margins per set as a tiny bar chart
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 2,
+      padding: '4px 0',
+    }}>
+      {sets.map((s, i) => {
+        const g1 = s.p1 ?? 0
+        const g2 = s.p2 ?? 0
+        const total = g1 + g2
+        if (total === 0) return null
+        const p1Pct = Math.round((g1 / total) * 100)
+        return (
+          <div key={i} style={{
+            flex: 1, height: 4, borderRadius: 2,
+            background: '#e5e9f0', overflow: 'hidden',
+            display: 'flex',
+          }}>
+            <div style={{ width: `${p1Pct}%`, background: '#15803d', borderRadius: '2px 0 0 2px' }} />
+            <div style={{ flex: 1, background: '#1d4ed8', borderRadius: '0 2px 2px 0' }} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Animated "No matches" empty state ────────────────────────────────────────
 
 function EmptyState() {
@@ -124,7 +224,7 @@ function EmptyState() {
       <div style={{
         fontSize: 48, lineHeight: 1,
         animation: 'bounce 2s ease-in-out infinite',
-      }}>🎾</div>
+      }}>&#127934;</div>
       <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
         No matches in play right now
       </div>
@@ -147,14 +247,11 @@ function ServeRow({ label, p1Val, p2Val, asPercent = true }) {
   const fmt = v => v == null ? '—' : asPercent ? `${Math.round(v * 100)}%` : String(v)
   return (
     <div style={{ display: 'contents' }}>
-      {/* P1 bar + value */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(p1Val)}</span>
         <ProgressBar value={asPercent ? p1Val : (p1Val / 20)} color="#16a34a" height={5} />
       </div>
-      {/* Label */}
       <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 4px' }}>{label}</div>
-      {/* P2 bar + value */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <ProgressBar value={asPercent ? p2Val : (p2Val / 20)} color="#1d4ed8" height={5} />
         <span style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8', minWidth: 28, fontVariantNumeric: 'tabular-nums' }}>{fmt(p2Val)}</span>
@@ -169,60 +266,65 @@ function LiveMatchCard({ match }) {
   const router = useRouter()
 
   // Normalise both our API shape and bzzoiro direct shape
-  // bzzoiro sends player1/player2 objects; our API sends first_player/second_player
   const p1Name = match.first_player?.name  || match.player1?.name || '—'
   const p2Name = match.second_player?.name || match.player2?.name || '—'
   const p1Flag = match.first_player?.country_code  || match.player1?.country_code || match.player1?.country || ''
   const p2Flag = match.second_player?.country_code || match.player2?.country_code || match.player2?.country || ''
 
-  // bzzoiro sends tournament as an object {id, name, surface, ...}; our API sends a string
   const tournObj   = typeof match.tournament === 'object' ? match.tournament : null
   const tournament = tournObj?.name || match.tournament_name || (typeof match.tournament === 'string' ? match.tournament : '') || ''
   const surface    = match.surface || tournObj?.surface || match.tournament_surface || ''
+  const roundName  = match.round_name || match.round || ''
 
   // Scores
-  const p1Sets = match.player1_sets ?? match.first_player_sets  ?? null
-  const p2Sets = match.player2_sets ?? match.second_player_sets ?? null
-
-  // sets_detail: array of {p1, p2} or [{set,p1,p2}]
+  const p1Sets = match.player1_sets ?? null
+  const p2Sets = match.player2_sets ?? null
   const setsDetail = match.sets_detail || []
-
-  // Current game score
   const currentPoint = match.current_point || match.point_score || null
-  const p1Games      = match.player1_games ?? match.current_game_p1 ?? null
-  const p2Games      = match.player2_games ?? match.current_game_p2 ?? null
+  const p1Games = match.player1_games ?? null
+  const p2Games = match.player2_games ?? null
+  const p1Serving = match.is_serving_p1 ?? null
 
-  // Serving indicator
-  const p1Serving    = match.is_serving_p1 ?? match.server === 'first' ?? null
+  // RTT data
+  const rtt = match.rtt || {}
+  const prediction = match.prediction || {}
+  const edge = match.edge || null
+  const momentum = match.momentum || null
 
-  // Odds → implied probability (normalised)
-  const odds1 = match.odds_player1 ?? match.odds_first  ?? null
-  const odds2 = match.odds_player2 ?? match.odds_second ?? null
-  let p1Prob = impliedProb(odds1)
-  let p2Prob = impliedProb(odds2)
+  // Rankings
+  const p1Rank = match.player1?.current_ranking?.position || null
+  const p2Rank = match.player2?.current_ranking?.position || null
+
+  // Odds → implied probability
+  const odds1 = match.odds_player1 ?? null
+  const odds2 = match.odds_player2 ?? null
+  let p1Prob = prediction.prob_p1 || impliedProb(odds1)
+  let p2Prob = prediction.prob_p2 || impliedProb(odds2)
   if (p1Prob != null && p2Prob != null) {
     const tot = p1Prob + p2Prob
     p1Prob = p1Prob / tot
     p2Prob = p2Prob / tot
+  } else if (p1Prob != null) {
+    p2Prob = 1 - p1Prob
   } else {
     p1Prob = 0.5; p2Prob = 0.5
   }
   const p1ProbPct = Math.round(p1Prob * 100)
   const p2ProbPct = Math.round(p2Prob * 100)
+  const probSource = prediction.prob_p1 ? 'Model' : (odds1 ? 'Market' : null)
 
-  // Serve stats
-  const p1_1stPct  = match.p1_first_serve_pct       ?? null
-  const p1_1stWon  = match.p1_first_serve_won_pct   ?? null
-  const p1_2ndWon  = match.p1_second_serve_won_pct  ?? null
-  const p1Aces     = match.p1_aces                   ?? null
-  const p1Dfs      = match.p1_double_faults          ?? null
-
-  const p2_1stPct  = match.p2_first_serve_pct       ?? null
-  const p2_1stWon  = match.p2_first_serve_won_pct   ?? null
-  const p2_2ndWon  = match.p2_second_serve_won_pct  ?? null
-  const p2Aces     = match.p2_aces                   ?? null
-  const p2Dfs      = match.p2_double_faults          ?? null
-
+  // Serve stats (from merged DB data or top-level bzzoiro)
+  const ss = match.serve_stats || {}
+  const p1_1stPct  = ss.p1_first_serve_pct       ?? match.p1_first_serve_pct       ?? null
+  const p1_1stWon  = ss.p1_first_serve_won_pct   ?? match.p1_first_serve_won_pct   ?? null
+  const p1_2ndWon  = ss.p1_second_serve_won_pct  ?? match.p1_second_serve_won_pct  ?? null
+  const p1Aces     = ss.p1_aces                   ?? match.p1_aces                   ?? null
+  const p1Dfs      = ss.p1_double_faults          ?? match.p1_double_faults          ?? null
+  const p2_1stPct  = ss.p2_first_serve_pct       ?? match.p2_first_serve_pct       ?? null
+  const p2_1stWon  = ss.p2_first_serve_won_pct   ?? match.p2_first_serve_won_pct   ?? null
+  const p2_2ndWon  = ss.p2_second_serve_won_pct  ?? match.p2_second_serve_won_pct  ?? null
+  const p2Aces     = ss.p2_aces                   ?? match.p2_aces                   ?? null
+  const p2Dfs      = ss.p2_double_faults          ?? match.p2_double_faults          ?? null
   const hasServeStats = p1_1stPct != null || p1_1stWon != null
 
   const hdrStyle = courtBg(surface, tournament)
@@ -253,47 +355,63 @@ function LiveMatchCard({ match }) {
         padding: '7px 12px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {tournament || 'Live Match'}
-        </span>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          background: 'rgba(220,38,38,0.85)', color: '#fff',
-          borderRadius: 20, padding: '2px 8px',
-          fontSize: 10, fontWeight: 800, letterSpacing: '0.07em',
-          flexShrink: 0,
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', flex: 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {tournament || 'Live Match'}
+          </span>
+          {roundName && (
+            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {roundName}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {edge && <EdgeBadge edge={edge} />}
           <span style={{
-            width: 5, height: 5, borderRadius: '50%', background: '#fff',
-            animation: 'livePulse 1.2s ease-in-out infinite',
-            display: 'inline-block', flexShrink: 0,
-          }} />
-          LIVE
-        </span>
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: 'rgba(220,38,38,0.85)', color: '#fff',
+            borderRadius: 20, padding: '2px 8px',
+            fontSize: 10, fontWeight: 800, letterSpacing: '0.07em',
+            flexShrink: 0,
+          }}>
+            <span style={{
+              width: 5, height: 5, borderRadius: '50%', background: '#fff',
+              animation: 'livePulse 1.2s ease-in-out infinite',
+              display: 'inline-block', flexShrink: 0,
+            }} />
+            LIVE
+          </span>
+        </div>
       </div>
 
-      {/* ── Score strip — light background ── */}
+      {/* ── Score strip ── */}
       <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 0 }}>
         {/* P1 name + serving ball + sets */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p1Flag && <span style={{ marginRight: 4 }}>{flagEmoji(p1Flag)}</span>}
               {p1Name}
             </span>
             {p1Serving === true && (
-              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
+              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">&#127934;</span>
             )}
+          </div>
+          {/* Rank + RTT */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 5 }}>
+            {p1Rank && <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600 }}>#{p1Rank}</span>}
+            <RttBadge score={rtt.p1_score} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             {setsDetail.map((s, i) => {
               const sp1 = s.p1 ?? 0
               const sp2 = s.p2 ?? 0
               const won = sp1 > sp2
+              const complete = (sp1 + sp2) >= 6
               return (
                 <span key={i} style={{
                   fontSize: 15, fontWeight: 900,
-                  color: won ? '#15803d' : '#9ca3af',
+                  color: complete ? (won ? '#15803d' : '#9ca3af') : '#111827',
                   fontVariantNumeric: 'tabular-nums',
                   minWidth: 14, textAlign: 'center',
                 }}>
@@ -314,7 +432,7 @@ function LiveMatchCard({ match }) {
           </div>
         </div>
 
-        {/* Centre: current point */}
+        {/* Centre: current point + set indicator */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '0 12px', flexShrink: 0 }}>
           {currentPoint && (
             <span style={{ fontSize: 13, fontWeight: 800, color: '#f59e0b', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
@@ -328,14 +446,19 @@ function LiveMatchCard({ match }) {
 
         {/* P2 name + serving ball + sets */}
         <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, justifyContent: 'flex-end' }}>
             {p1Serving === false && (
-              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">🎾</span>
+              <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }} title="Serving">&#127934;</span>
             )}
             <span style={{ fontSize: 12, fontWeight: 700, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p2Name}
               {p2Flag && <span style={{ marginLeft: 4 }}>{flagEmoji(p2Flag)}</span>}
             </span>
+          </div>
+          {/* Rank + RTT */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 5, justifyContent: 'flex-end' }}>
+            <RttBadge score={rtt.p2_score} side="right" />
+            {p2Rank && <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600 }}>#{p2Rank}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
             {p2Games != null && (
@@ -352,10 +475,11 @@ function LiveMatchCard({ match }) {
               const sp2 = s.p2 ?? 0
               const sp1 = s.p1 ?? 0
               const won = sp2 > sp1
+              const complete = (sp1 + sp2) >= 6
               return (
                 <span key={i} style={{
                   fontSize: 15, fontWeight: 900,
-                  color: won ? '#1d4ed8' : '#9ca3af',
+                  color: complete ? (won ? '#1d4ed8' : '#9ca3af') : '#111827',
                   fontVariantNumeric: 'tabular-nums',
                   minWidth: 14, textAlign: 'center',
                 }}>
@@ -367,6 +491,16 @@ function LiveMatchCard({ match }) {
         </div>
       </div>
 
+      {/* ── Momentum + Score flow ── */}
+      {(momentum || setsDetail.length > 1) && (
+        <div style={{ padding: '0 14px 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <MomentumBadge momentum={momentum} p1Name={p1Name} p2Name={p2Name} />
+          <div style={{ flex: 1 }}>
+            <ScoreFlow sets={setsDetail} />
+          </div>
+        </div>
+      )}
+
       {/* ── Win probability bar ── */}
       <div style={{ padding: '0 14px 10px' }}>
         <div style={{ position: 'relative', height: 18, borderRadius: 99, overflow: 'hidden', background: '#e5e9f0', display: 'flex' }}>
@@ -375,14 +509,15 @@ function LiveMatchCard({ match }) {
             transition: 'width 0.5s ease',
           }} />
           <div style={{ flex: 1, background: 'linear-gradient(to right, #2563eb, #1d4ed8)' }} />
-          {/* Labels */}
           <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '0 8px',
           }}>
             <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{p1ProbPct}%</span>
-            <span style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Win prob</span>
+            <span style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {probSource ? `${probSource} prob` : 'Win prob'}
+            </span>
             <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{p2ProbPct}%</span>
           </div>
         </div>
@@ -399,8 +534,6 @@ function LiveMatchCard({ match }) {
             {p1_1stWon != null && <ServeRow label="1st Won" p1Val={p1_1stWon} p2Val={p2_1stWon} />}
             {p1_2ndWon != null && <ServeRow label="2nd Won" p1Val={p1_2ndWon} p2Val={p2_2ndWon} />}
           </div>
-
-          {/* Aces / Double faults */}
           {(p1Aces != null || p1Dfs != null) && (
             <div style={{
               display: 'flex', justifyContent: 'space-between',
@@ -447,7 +580,7 @@ function LiveMatchCard({ match }) {
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchLiveMatches() {
-  // Try our FastAPI proxy first
+  // Try our FastAPI proxy first (enriched with RTT, predictions, momentum)
   try {
     const res = await fetch(`${API_BASE}/api/v1/live`, { cache: 'no-store' })
     if (res.ok) {
@@ -457,7 +590,7 @@ async function fetchLiveMatches() {
     }
   } catch {}
 
-  // Fallback: hit bzzoiro directly
+  // Fallback: hit bzzoiro directly (no enrichment)
   try {
     const res = await fetch(BZZOIRO_URL, {
       headers: { Authorization: `Token ${BZZOIRO_TOKEN}` },
@@ -472,6 +605,20 @@ async function fetchLiveMatches() {
   return []
 }
 
+// ── Sort helpers ─────────────────────────────────────────────────────────────
+
+function tournamentTier(match) {
+  const tourn = typeof match.tournament === 'object' ? match.tournament : { name: match.tournament || '' }
+  const name = (tourn.name || '').toLowerCase()
+  const cat = (tourn.category || '').toLowerCase()
+  if (/wimbledon|roland|australian|us open/i.test(name) || cat === 'grand_slam') return 0
+  if (/masters|1000/i.test(name) || cat === 'masters') return 1
+  if (/500|queen|halle|barcelona/i.test(name)) return 2
+  if (/250|atp|wta/i.test(name)) return 3
+  if (/challenger/i.test(name) || cat === 'challenger') return 4
+  return 5
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function InPlayClient() {
@@ -479,11 +626,21 @@ export default function InPlayClient() {
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
   const [lastFetch, setLastFetch] = useState(null)
-  const [tick,      setTick]      = useState(0)   // countdown display
+  const [tick,      setTick]      = useState(0)
 
   const load = useCallback(async () => {
     try {
       const data = await fetchLiveMatches()
+      // Sort: Slams/Masters first, then by RTT score sum
+      data.sort((a, b) => {
+        const ta = tournamentTier(a)
+        const tb = tournamentTier(b)
+        if (ta !== tb) return ta - tb
+        // Higher combined RTT scores = more interesting match
+        const rttA = ((a.rtt?.p1_score || 0) + (a.rtt?.p2_score || 0))
+        const rttB = ((b.rtt?.p1_score || 0) + (b.rtt?.p2_score || 0))
+        return rttB - rttA
+      })
       setMatches(data)
       setLastFetch(new Date())
       setLoading(false)
@@ -500,7 +657,6 @@ export default function InPlayClient() {
     return () => clearInterval(interval)
   }, [load])
 
-  // Countdown ticker
   useEffect(() => {
     const t = setInterval(() => setTick(n => Math.max(0, n - 1)), 1000)
     return () => clearInterval(t)
@@ -517,6 +673,9 @@ export default function InPlayClient() {
       <div className="error">Error loading live data: {error}</div>
     </div>
   )
+
+  // Count matches with edge
+  const withEdge = matches.filter(m => m.edge && Math.abs(m.edge.edge_pct) >= 2).length
 
   return (
     <div className="page">
@@ -540,7 +699,9 @@ export default function InPlayClient() {
             In Play
           </h1>
           <div className="cc-subtitle">
-            {matches.length} match{matches.length !== 1 ? 'es' : ''} in progress · refreshes every 30s
+            {matches.length} match{matches.length !== 1 ? 'es' : ''} in progress
+            {withEdge > 0 && ` · ${withEdge} with model edge`}
+            {' · refreshes every 30s'}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -568,11 +729,7 @@ export default function InPlayClient() {
           <EmptyState />
         </div>
       ) : (
-        <div style={{
-          display: 'grid',
-          gap: 16,
-          gridTemplateColumns: '1fr',
-        }}>
+        <div style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr' }}>
           <style>{`
             @keyframes livePulse {
               0%, 100% { opacity: 1; transform: scale(1); }
