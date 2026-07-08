@@ -23,8 +23,17 @@ function getToken() {
   try { return localStorage.getItem('rtt_token') } catch { return null }
 }
 
+function getClientBase() {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL
+  // In production, call the API directly (CORS-enabled) instead of relying
+  // on the Next.js rewrite proxy which is unreliable on Railway standalone.
+  if (typeof window !== 'undefined' && window.location.hostname === 'ratethat.tennis')
+    return 'https://luminous-essence-production-ad00.up.railway.app'
+  return ''  // local dev — use same-origin proxy
+}
+
 async function clientFetch(path, init = {}) {
-  const base = process.env.NEXT_PUBLIC_API_URL || ''
+  const base = getClientBase()
   const headers = { ...(init.headers || {}) }
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
