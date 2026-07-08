@@ -230,8 +230,16 @@ def live_matches():
         if not matches:
             return []
 
-        # ── Resolve internal IDs (same logic as before) ───────────────────
-        _enrich_live_matches(matches)
+        # ── Enrich with DB data (timeout-protected) ──────────────────────
+        import concurrent.futures
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_enrich_live_matches, matches)
+                future.result(timeout=8)  # 8s max for enrichment
+        except concurrent.futures.TimeoutError:
+            log.warning("bzzoiro live enrichment timed out after 8s — returning raw data")
+        except Exception as enrich_err:
+            log.warning(f"bzzoiro live enrichment failed: {enrich_err}")
 
         # ── Compute momentum for all matches ──────────────────────────────
         for m in matches:
@@ -287,31 +295,8 @@ def _enrich_live_matches(matches: list):
             if neg_key in neg_key_map:
                 m["internal_id"] = neg_key_map[neg_key]
 
-    # Name-based fallback for any still missing
-    for m in matches:
-        if m.get("internal_id"):
-            continue
-        p1_name = (m.get("player1") or {}).get("name", "")
-        p2_name = (m.get("player2") or {}).get("name", "")
-        match_date = (m.get("match_date") or "")[:10]
-        if p1_name and p2_name and match_date:
-            try:
-                row = query(
-                    """SELECT m.id FROM matches m
-                       JOIN players p1 ON p1.id = m.first_player_id
-                       JOIN players p2 ON p2.id = m.second_player_id
-                       WHERE m.event_date = %s
-                         AND (p1.full_name ILIKE %s OR p1.name ILIKE %s)
-                         AND (p2.full_name ILIKE %s OR p2.name ILIKE %s)
-                       LIMIT 1""",
-                    (match_date,
-                     f"%{p1_name.split()[-1]}%", f"%{p1_name.split()[-1]}%",
-                     f"%{p2_name.split()[-1]}%", f"%{p2_name.split()[-1]}%"),
-                )
-                if row:
-                    m["internal_id"] = row[0]["id"]
-            except Exception:
-                pass
+    # Name-based fallback skipped — too slow for live endpoint.
+    # Matches resolve via bzzoiro_id or negative api_event_key only.
 
     # ── Step 2: Bulk enrichment ────────────────────────────────────────
     internal_ids = [m["internal_id"] for m in matches if m.get("internal_id")]
