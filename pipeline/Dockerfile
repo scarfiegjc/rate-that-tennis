@@ -29,12 +29,18 @@ COPY pipeline/settle_predictions.py  ./settle_predictions.py
 COPY pipeline/surface_backfill.py    ./surface_backfill.py
 COPY pipeline/player_sync.py         ./player_sync.py
 COPY pipeline/fill_ratings.py        ./fill_ratings.py
+COPY pipeline/bzzoiro_ingest.py      ./bzzoiro_ingest.py
+COPY pipeline/bzzoiro.py             ./bzzoiro.py
+COPY pipeline/bresbet_links.py       ./bresbet_links.py
+COPY pipeline/cloudbet_odds.py       ./cloudbet_odds.py
+COPY pipeline/content_gen.py         ./content_gen.py
 
 # SQL migrations (applied on boot by scheduler.apply_schema_migrations).
 # Idempotent — re-running them is a no-op.
 COPY pipeline/schema_additions.sql      ./schema_additions.sql
 COPY pipeline/predictions_schema.sql    ./predictions_schema.sql
 COPY pipeline/picks_schema.sql          ./picks_schema.sql
+COPY pipeline/bzzoiro_schema.sql        ./bzzoiro_schema.sql
 
 # ML package — full LivePredictor stack (XGBoost + LightGBM ensemble).
 # ml/predict.py is the production predictor; it imports elo, features, train

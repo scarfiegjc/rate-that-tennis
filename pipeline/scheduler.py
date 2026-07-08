@@ -510,7 +510,7 @@ def apply_schema_migrations():
     # locally they're inside pipeline/.
     candidate_dirs = [here, os.path.join(here, "pipeline")]
 
-    migrations = ["schema_additions.sql", "predictions_schema.sql", "picks_schema.sql"]
+    migrations = ["schema_additions.sql", "predictions_schema.sql", "picks_schema.sql", "bzzoiro_schema.sql"]
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = True
@@ -586,6 +586,10 @@ if __name__ == "__main__":
     # 2. Fixtures + tournaments — populate the data layer first
     log.info("Running startup: daily fixtures...")
     run_daily_fixtures()
+    log.info("Running startup: bzzoiro matches...")
+    run_bzzoiro_matches()
+    log.info("Running startup: bzzoiro fixtures...")
+    run_bzzoiro_fixtures()
     log.info("Running startup: event type + tournament sync...")
     run_startup_sync()
 

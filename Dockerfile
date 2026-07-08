@@ -38,6 +38,11 @@ COPY pipeline/affiliate_config.py    ./affiliate_config.py
 COPY pipeline/merge_duplicate_players.py ./merge_duplicate_players.py
 COPY pipeline/odds.py                ./odds.py
 COPY pipeline/odds_io.py             ./odds_io.py
+COPY pipeline/bzzoiro_ingest.py      ./bzzoiro_ingest.py
+COPY pipeline/bzzoiro.py             ./bzzoiro.py
+COPY pipeline/bresbet_links.py       ./bresbet_links.py
+COPY pipeline/cloudbet_odds.py       ./cloudbet_odds.py
+COPY pipeline/content_gen.py         ./content_gen.py
 
 # ML package — full predictor with trained XGBoost/LightGBM/Logistic models
 COPY ml/__init__.py                  ./ml/__init__.py
