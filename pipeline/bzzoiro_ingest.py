@@ -355,6 +355,147 @@ def _resolve_or_create_player(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOURNAMENT / EVENT-TYPE RESOLUTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _bzz_circuit_to_event_type_name(circuit: str, category: str) -> str:
+    """Map Bzzoiro circuit+category to an event_type type_name string."""
+    c = (circuit or "").upper().strip()
+    cat = (category or "").lower().strip()
+    if c == "ATP":
+        return "ATP Singles"
+    if c == "WTA":
+        return "WTA Singles"
+    if "challenger" in cat:
+        if c == "WTA":
+            return "Challenger Women Singles"
+        return "Challenger Men Singles"
+    if "itf" in cat:
+        if c == "WTA":
+            return "ITF Women Singles"
+        return "ITF Men Singles"
+    if c:
+        return f"{c} Singles"
+    return "Other Singles"
+
+
+def _classify_bzz_event(type_name: str):
+    """Returns (tour_category, gender, is_doubles) — mirrors pipeline.classify_event_type."""
+    t = type_name.lower()
+    is_doubles = "double" in t
+    if "atp" in t:
+        return "ATP", "Men", is_doubles
+    if "wta" in t:
+        return "WTA", "Women", is_doubles
+    if "challenger" in t and "women" in t:
+        return "Challenger", "Women", is_doubles
+    if "challenger" in t:
+        return "Challenger", "Men", is_doubles
+    if "itf" in t and "women" in t:
+        return "ITF", "Women", is_doubles
+    if "itf" in t:
+        return "ITF", "Men", is_doubles
+    return "Other", "Unknown", is_doubles
+
+
+def _resolve_surface(cur, surface_name: str) -> Optional[int]:
+    """Resolve a surface name to surfaces.id, creating if needed."""
+    if not surface_name or surface_name.lower() in ("unknown", ""):
+        return None
+    normalised = surface_name.strip().title()
+    cur.execute("SELECT id FROM surfaces WHERE LOWER(name) = LOWER(%s)", (normalised,))
+    row = cur.fetchone()
+    if row:
+        return row["id"]
+    cur.execute(
+        "INSERT INTO surfaces (name) VALUES (%s) ON CONFLICT (name) DO NOTHING RETURNING id",
+        (normalised,),
+    )
+    row = cur.fetchone()
+    if row:
+        return row["id"]
+    cur.execute("SELECT id FROM surfaces WHERE LOWER(name) = LOWER(%s)", (normalised,))
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+def _resolve_tournament(
+    cur,
+    bzz_tournament: dict,
+) -> tuple[Optional[int], Optional[int]]:
+    """
+    Resolve a Bzzoiro tournament dict to (tournament_id, event_type_id).
+
+    Bzzoiro tournament structure:
+        {"id": 69, "name": "Wimbledon", "circuit": "ATP", "category": "grand_slam", "surface": "grass"}
+
+    Uses negative api_key (-abs(bzz_tournament_id)) to namespace bzzoiro tournaments.
+    """
+    if not bzz_tournament or not isinstance(bzz_tournament, dict):
+        return None, None
+
+    bzz_tid = bzz_tournament.get("id")
+    t_name = bzz_tournament.get("name") or ""
+    circuit = bzz_tournament.get("circuit") or ""
+    category = bzz_tournament.get("category") or ""
+    surface_name = bzz_tournament.get("surface") or ""
+
+    if not t_name:
+        return None, None
+
+    # ── Event type ──
+    et_name = _bzz_circuit_to_event_type_name(circuit, category)
+    cat, gender, is_doubles = _classify_bzz_event(et_name)
+
+    et_api_key = -abs(hash(et_name)) % 1_000_000
+    cur.execute(
+        """
+        INSERT INTO event_types (api_key, type_name, tour_category, gender, is_doubles)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (api_key) DO UPDATE SET
+            type_name     = EXCLUDED.type_name,
+            tour_category = EXCLUDED.tour_category,
+            gender        = EXCLUDED.gender,
+            is_doubles    = EXCLUDED.is_doubles
+        RETURNING id
+        """,
+        (et_api_key, et_name, cat, gender, is_doubles),
+    )
+    row = cur.fetchone()
+    event_type_id = row["id"] if row else None
+
+    # ── Surface ──
+    surface_id = _resolve_surface(cur, surface_name)
+
+    # ── Tournament ──
+    if bzz_tid:
+        t_api_key = -abs(int(bzz_tid))
+    else:
+        t_api_key = -abs(hash(t_name)) % 1_000_000_000
+
+    cur.execute(
+        """
+        INSERT INTO tournaments (api_key, name, event_type_id, surface_id)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (api_key) DO UPDATE SET
+            name          = EXCLUDED.name,
+            event_type_id = COALESCE(EXCLUDED.event_type_id, tournaments.event_type_id),
+            surface_id    = CASE
+                              WHEN EXCLUDED.surface_id IS NOT NULL THEN EXCLUDED.surface_id
+                              ELSE tournaments.surface_id
+                            END,
+            updated_at    = NOW()
+        RETURNING id
+        """,
+        (t_api_key, t_name.strip(), event_type_id, surface_id),
+    )
+    row = cur.fetchone()
+    tournament_id = row["id"] if row else None
+
+    return tournament_id, event_type_id
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MATCH SCORES — parse sets_detail array
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -613,7 +754,13 @@ def _upsert_one_match(
 
     season = str(event_date.year)
     round_name = bzz.get("round_name") or bzz.get("round") or ""
-    tournament_name = bzz.get("tournament") or bzz.get("tournament_name") or ""
+
+    # ── Tournament resolution ────────────────────────────────────────────────
+    bzz_tournament = bzz.get("tournament")
+    if isinstance(bzz_tournament, dict):
+        tournament_id, event_type_id = _resolve_tournament(cur, bzz_tournament)
+    else:
+        tournament_id, event_type_id = None, None
 
     event_status, is_live = _map_status(bzz.get("status") or "")
     winner       = _derive_winner(bzz)
@@ -626,6 +773,7 @@ def _upsert_one_match(
             api_event_key,
             first_player_id, second_player_id,
             event_date, event_time,
+            tournament_id, event_type_id,
             tournament_round, season,
             final_result, winner,
             event_status, is_live,
@@ -638,6 +786,7 @@ def _upsert_one_match(
             %s, %s,
             %s, %s,
             %s, %s,
+            %s, %s,
             %s::jsonb
         )
         ON CONFLICT (api_event_key) DO UPDATE SET
@@ -645,6 +794,8 @@ def _upsert_one_match(
             second_player_id = EXCLUDED.second_player_id,
             event_date       = EXCLUDED.event_date,
             event_time       = COALESCE(EXCLUDED.event_time, matches.event_time),
+            tournament_id    = COALESCE(EXCLUDED.tournament_id, matches.tournament_id),
+            event_type_id    = COALESCE(EXCLUDED.event_type_id, matches.event_type_id),
             tournament_round = COALESCE(EXCLUDED.tournament_round, matches.tournament_round),
             final_result     = COALESCE(EXCLUDED.final_result, matches.final_result),
             winner           = COALESCE(EXCLUDED.winner, matches.winner),
@@ -658,6 +809,7 @@ def _upsert_one_match(
             neg_event_key,
             p1_id, p2_id,
             event_date, event_time,
+            tournament_id, event_type_id,
             round_name, season,
             final_result, winner,
             event_status, is_live,
