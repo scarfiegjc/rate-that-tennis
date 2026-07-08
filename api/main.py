@@ -231,77 +231,46 @@ def live_matches():
 
         from api.db import query
 
-        # ── Step 1: Resolve internal IDs ───────────────────────────────────
-        # Strategy 1: match by negative api_event_key (bzzoiro convention)
+        # ── Step 1: Resolve internal IDs + enrichment ──────────────────────
         bzz_ids = [m.get("match_id") or m.get("id") for m in matches if m.get("match_id") or m.get("id")]
-        neg_keys = [-abs(int(bid)) for bid in bzz_ids if bid]
 
-        enrichment = {}  # internal_id → row dict
-        if neg_keys:
-            try:
-                rows = query(
-                    """
-                    SELECT
-                        m.id, m.api_event_key,
-                        m.first_player_id, m.second_player_id,
-                        m.live_data,
-                        pr1.rtt_score AS p1_rtt, pr1.form_score AS p1_form,
-                        pr1.serve_rating AS p1_serve_rating,
-                        pr1.return_rating AS p1_return_rating,
-                        pr1.pressure_rating AS p1_pressure_rating,
-                        pr1.momentum AS p1_momentum,
-                        pr2.rtt_score AS p2_rtt, pr2.form_score AS p2_form,
-                        pr2.serve_rating AS p2_serve_rating,
-                        pr2.return_rating AS p2_return_rating,
-                        pr2.pressure_rating AS p2_pressure_rating,
-                        pr2.momentum AS p2_momentum,
-                        p1.current_rank AS p1_ranking,
-                        p2.current_rank AS p2_ranking,
-                        mp.prob_first_player, mp.prob_second_player,
-                        mp.key_factors
-                    FROM matches m
-                    JOIN players p1 ON p1.id = m.first_player_id
-                    JOIN players p2 ON p2.id = m.second_player_id
-                    LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
-                    LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
-                    LEFT JOIN model_predictions mp ON mp.match_id = m.id
-                    WHERE m.api_event_key = ANY(%s)
-                    """,
-                    (neg_keys,),
-                )
-                for r in rows:
-                    key = r["api_event_key"]
-                    enrichment[key] = r
-            except Exception as db_err:
-                log.warning(f"bzzoiro live enrichment failed: {db_err}")
+        # Build maps for fast lookup
+        enrichment = {}   # neg_api_event_key → row
+        bzz_id_map = {}   # str(bzzoiro_id) → internal_id
 
-        # Strategy 2: name-based fallback for unmatched
-        # (also try bzzoiro_id column)
-        if bzz_ids:
-            try:
+        try:
+            # First: resolve by bzzoiro_id column (fast, indexed)
+            if bzz_ids:
                 rows2 = query(
                     "SELECT bzzoiro_id, id FROM matches WHERE bzzoiro_id = ANY(%s)",
                     (bzz_ids,)
                 )
                 bzz_id_map = {str(r["bzzoiro_id"]): r["id"] for r in (rows2 or [])}
-            except Exception:
-                bzz_id_map = {}
-        else:
-            bzz_id_map = {}
 
-        # ── Step 2: Merge enrichment into each match ───────────────────────
-        for m in matches:
-            bzz_id = m.get("match_id") or m.get("id")
-            neg_key = -abs(int(bzz_id)) if bzz_id else None
-
-            # Resolve internal_id
-            enrich = enrichment.get(neg_key, {}) if neg_key else {}
-            if enrich:
-                m["internal_id"] = enrich.get("id")
-            elif str(bzz_id) in bzz_id_map:
-                m["internal_id"] = bzz_id_map[str(bzz_id)]
+            # Also try negative api_event_key (bzzoiro convention)
+            neg_keys = [-abs(int(bid)) for bid in bzz_ids if bid]
+            if neg_keys:
+                rows = query(
+                    "SELECT api_event_key, id FROM matches WHERE api_event_key = ANY(%s)",
+                    (neg_keys,),
+                )
+                neg_key_map = {r["api_event_key"]: r["id"] for r in (rows or [])}
             else:
-                # Name-based fallback
+                neg_key_map = {}
+
+            # Assign internal_ids from both strategies
+            for m in matches:
+                bzz_id = m.get("match_id") or m.get("id")
+                if str(bzz_id) in bzz_id_map:
+                    m["internal_id"] = bzz_id_map[str(bzz_id)]
+                elif bzz_id:
+                    neg_key = -abs(int(bzz_id))
+                    if neg_key in neg_key_map:
+                        m["internal_id"] = neg_key_map[neg_key]
+
+            # Name-based fallback for any still missing
+            unlinked = [m for m in matches if not m.get("internal_id")]
+            for m in unlinked:
                 p1_name = (m.get("player1") or {}).get("name", "")
                 p2_name = (m.get("player2") or {}).get("name", "")
                 match_date = (m.get("match_date") or "")[:10]
@@ -324,8 +293,45 @@ def live_matches():
                     except Exception:
                         pass
 
-            # RTT scores and ratings
+            # ── Bulk enrichment: one query for all resolved match IDs ──────
+            internal_ids = [m["internal_id"] for m in matches if m.get("internal_id")]
+            if internal_ids:
+                erows = query(
+                    """
+                    SELECT
+                        m.id,
+                        m.live_data,
+                        pr1.rtt_score AS p1_rtt, pr1.form_score AS p1_form,
+                        pr1.serve_rating AS p1_serve_rating,
+                        pr1.return_rating AS p1_return_rating,
+                        pr1.pressure_rating AS p1_pressure_rating,
+                        pr1.momentum AS p1_momentum,
+                        pr2.rtt_score AS p2_rtt, pr2.form_score AS p2_form,
+                        pr2.serve_rating AS p2_serve_rating,
+                        pr2.return_rating AS p2_return_rating,
+                        pr2.pressure_rating AS p2_pressure_rating,
+                        pr2.momentum AS p2_momentum,
+                        mp.prob_first_player, mp.prob_second_player,
+                        mp.key_factors
+                    FROM matches m
+                    LEFT JOIN player_ratings pr1 ON pr1.player_id = m.first_player_id
+                    LEFT JOIN player_ratings pr2 ON pr2.player_id = m.second_player_id
+                    LEFT JOIN model_predictions mp ON mp.match_id = m.id
+                    WHERE m.id = ANY(%s)
+                    """,
+                    (internal_ids,),
+                )
+                enrichment = {r["id"]: r for r in (erows or [])}
+
+        except Exception as db_err:
+            log.warning(f"bzzoiro live enrichment failed: {db_err}")
+
+        # ── Step 2: Merge enrichment into each match ───────────────────────
+        for m in matches:
+            enrich = enrichment.get(m.get("internal_id"), {})
+
             if enrich:
+                # RTT scores and ratings
                 m["rtt"] = {
                     "p1_score": float(enrich["p1_rtt"]) if enrich.get("p1_rtt") else None,
                     "p2_score": float(enrich["p2_rtt"]) if enrich.get("p2_rtt") else None,
@@ -352,47 +358,28 @@ def live_matches():
                 odds_p2 = m.get("odds_player2")
                 if prob_p1 and odds_p1 and odds_p1 > 1:
                     implied = 1.0 / odds_p1
-                    m["edge"] = {
-                        "player": "p1",
-                        "model_prob": prob_p1,
-                        "implied_prob": round(implied, 3),
-                        "edge_pct": round((prob_p1 - implied) * 100, 1),
-                    }
+                    edge_pct = round((prob_p1 - implied) * 100, 1)
+                    m["edge"] = {"player": "p1", "model_prob": prob_p1, "implied_prob": round(implied, 3), "edge_pct": edge_pct}
                 elif prob_p1 and odds_p2 and odds_p2 > 1:
                     prob_p2_model = 1.0 - prob_p1
                     implied = 1.0 / odds_p2
-                    m["edge"] = {
-                        "player": "p2",
-                        "model_prob": round(prob_p2_model, 4),
-                        "implied_prob": round(implied, 3),
-                        "edge_pct": round((prob_p2_model - implied) * 100, 1),
-                    }
+                    edge_pct = round((prob_p2_model - implied) * 100, 1)
+                    m["edge"] = {"player": "p2", "model_prob": round(prob_p2_model, 4), "implied_prob": round(implied, 3), "edge_pct": edge_pct}
 
-                # Merge any live_data from DB (serve stats etc from sync_live)
+                # Merge live_data from DB (serve stats from sync_live)
                 live = enrich.get("live_data") or {}
                 if live:
                     ss = live.get("serve_stats") or {}
                     if ss:
-                        m["serve_stats"] = {
-                            "p1_aces": ss.get("p1_aces"),
-                            "p1_double_faults": ss.get("p1_double_faults"),
-                            "p1_first_serve_pct": ss.get("p1_first_serve_pct"),
-                            "p1_first_serve_won_pct": ss.get("p1_first_serve_won_pct"),
-                            "p2_aces": ss.get("p2_aces"),
-                            "p2_double_faults": ss.get("p2_double_faults"),
-                            "p2_first_serve_pct": ss.get("p2_first_serve_pct"),
-                            "p2_first_serve_won_pct": ss.get("p2_first_serve_won_pct"),
-                        }
-                    # Game scores and serving (if sync_live captured them)
+                        m["serve_stats"] = ss
                     if live.get("player1_games") is not None:
                         m.setdefault("player1_games", live["player1_games"])
                     if live.get("player2_games") is not None:
                         m.setdefault("player2_games", live["player2_games"])
                     if live.get("current_point"):
                         m.setdefault("current_point", live["current_point"])
-                    if live.get("serve") is not None:
-                        serve_val = live["serve"]
-                        # Normalise: bzzoiro may send 1/2 or "player1"/"player2"
+                    serve_val = live.get("serve")
+                    if serve_val is not None:
                         if serve_val in (1, "1", "player1", "first"):
                             m["is_serving_p1"] = True
                         elif serve_val in (2, "2", "player2", "second"):
