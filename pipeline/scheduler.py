@@ -192,22 +192,23 @@ def _import_bzzoiro_new():
         from pipeline.bzzoiro import (
             sync_fixtures, sync_live, sync_rankings as bzz_rankings,
             sync_odds, sync_predictions as bzz_predictions,
-            sync_h2h_upcoming, get_db_conn,
+            sync_h2h_upcoming, sync_point_by_point_recent, get_db_conn,
         )
     except ImportError:
         from bzzoiro import (
             sync_fixtures, sync_live, sync_rankings as bzz_rankings,
             sync_odds, sync_predictions as bzz_predictions,
-            sync_h2h_upcoming, get_db_conn,
+            sync_h2h_upcoming, sync_point_by_point_recent, get_db_conn,
         )
-    return sync_fixtures, sync_live, bzz_rankings, sync_odds, bzz_predictions, sync_h2h_upcoming, get_db_conn
+    return (sync_fixtures, sync_live, bzz_rankings, sync_odds, bzz_predictions,
+            sync_h2h_upcoming, sync_point_by_point_recent, get_db_conn)
 
 
 def run_bzzoiro_fixtures():
     """Sync bzzoiro upcoming fixtures (next 7 days) — stores bzzoiro_id on matches."""
     log.info("Scheduled: bzzoiro fixtures sync")
     try:
-        sync_fixtures, _, _, _, _, _, get_db_conn = _import_bzzoiro_new()
+        sync_fixtures, _, _, _, _, _, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             sync_fixtures(conn, days_ahead=7)
@@ -220,7 +221,7 @@ def run_bzzoiro_fixtures():
 def run_bzzoiro_live():
     """Sync bzzoiro live match data (scores, serve stats → live_data JSONB)."""
     try:
-        _, sync_live, _, _, _, _, get_db_conn = _import_bzzoiro_new()
+        _, sync_live, _, _, _, _, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             sync_live(conn)
@@ -234,7 +235,7 @@ def run_bzzoiro_odds():
     """Fetch per-bookmaker odds for upcoming matches via bzzoiro /matches/{id}/odds/."""
     log.info("Scheduled: bzzoiro odds sync")
     try:
-        _, _, _, sync_odds, _, _, get_db_conn = _import_bzzoiro_new()
+        _, _, _, sync_odds, _, _, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             sync_odds(conn)
@@ -248,7 +249,7 @@ def run_bzzoiro_ou_predictions():
     """Sync bzzoiro O/U predictions → bzzoiro_predictions table."""
     log.info("Scheduled: bzzoiro O/U predictions sync")
     try:
-        _, _, _, _, bzz_predictions, _, get_db_conn = _import_bzzoiro_new()
+        _, _, _, _, bzz_predictions, _, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             bzz_predictions(conn)
@@ -262,7 +263,7 @@ def run_bzzoiro_rankings_new():
     """Sync ATP+WTA rankings with movement (ranking_movement, ranking_career_best)."""
     log.info("Scheduled: bzzoiro rankings sync (with movement)")
     try:
-        _, _, bzz_rankings, _, _, _, get_db_conn = _import_bzzoiro_new()
+        _, _, bzz_rankings, _, _, _, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             bzz_rankings(conn)
@@ -276,7 +277,7 @@ def run_bzzoiro_h2h():
     """Sync H2H data for upcoming matches that don't have it yet."""
     log.info("Scheduled: bzzoiro H2H sync")
     try:
-        _, _, _, _, _, sync_h2h_upcoming, get_db_conn = _import_bzzoiro_new()
+        _, _, _, _, _, sync_h2h_upcoming, _, get_db_conn = _import_bzzoiro_new()
         conn = get_db_conn()
         try:
             sync_h2h_upcoming(conn)
@@ -284,6 +285,20 @@ def run_bzzoiro_h2h():
             conn.close()
     except Exception as e:
         log.error(f"bzzoiro H2H sync failed: {e}")
+
+
+def run_bzzoiro_point_by_point():
+    """Sync point-by-point data for recently finished matches that don't have it yet."""
+    log.info("Scheduled: bzzoiro point-by-point sync")
+    try:
+        _, _, _, _, _, _, sync_point_by_point_recent, get_db_conn = _import_bzzoiro_new()
+        conn = get_db_conn()
+        try:
+            sync_point_by_point_recent(conn, days_back=3)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"bzzoiro point-by-point sync failed: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -309,6 +324,48 @@ def run_seo_previews():
             conn.close()
     except Exception as e:
         log.error(f"SEO preview generation failed: {e}")
+        import traceback
+        log.error(traceback.format_exc())
+
+
+# ─────────────────────────────────────────────
+# DAILY HEALTHCHECK
+# pipeline/healthcheck.py + pipeline/health_email.py were referenced by
+# api/main.py's /admin/healthcheck for months but never existed until the
+# 2026-08 audit. Running it here too means it happens automatically every
+# day rather than depending on someone hitting the admin URL.
+# ─────────────────────────────────────────────
+
+def run_healthcheck():
+    """Run the daily data-health check panel and email a digest if configured."""
+    log.info("Scheduled: healthcheck")
+    try:
+        try:
+            from pipeline.healthcheck import _connect, run_checks, apply_auto_repair, log_results
+        except ImportError:
+            from healthcheck import _connect, run_checks, apply_auto_repair, log_results
+        try:
+            from pipeline.health_email import send_digest
+        except ImportError:
+            from health_email import send_digest
+
+        import uuid
+        from datetime import datetime as _dt
+        run_id = _dt.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+
+        conn = _connect()
+        try:
+            results = run_checks(conn)
+            apply_auto_repair(conn, results)
+            log_results(conn, run_id, results)
+        finally:
+            conn.close()
+
+        send_digest(run_id, results)  # no-ops quietly if RESEND_API_KEY isn't set
+        crit = sum(1 for r in results if r.status == "FAIL" and r.severity == "CRITICAL")
+        log.info(f"  healthcheck run_id={run_id}: {len(results)} checks, {crit} critical failures")
+    except Exception as e:
+        log.error(f"healthcheck failed: {e}")
         import traceback
         log.error(traceback.format_exc())
 
@@ -744,8 +801,13 @@ if __name__ == "__main__":
     schedule.every().day.at("19:30").do(run_bzzoiro_odds)          # bookmaker odds evening
     schedule.every().day.at("08:00").do(run_bzzoiro_ou_predictions)  # O/U predictions daily
     schedule.every().day.at("07:45").do(run_bzzoiro_h2h)           # H2H for upcoming matches
+    schedule.every().day.at("20:00").do(run_bzzoiro_point_by_point)  # PBP for matches finished today
+    schedule.every().day.at("08:30").do(run_bzzoiro_point_by_point)  # catch overnight/early finishes
     # SEO content generation — after fixtures + predictions are in
     schedule.every().day.at("09:00").do(run_seo_previews)          # generate match previews
+    # Daily healthcheck — after the morning's fixtures/predictions/ratings/odds/SEO
+    # jobs have all had a chance to run, so it reports on a settled state.
+    schedule.every().day.at("09:30").do(run_healthcheck)
     # Weekly player roster sync from api-tennis — enrich existing rows + light discovery
     def _player_sync_weekly():
         try:

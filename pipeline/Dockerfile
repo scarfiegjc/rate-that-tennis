@@ -34,6 +34,8 @@ COPY pipeline/bzzoiro.py             ./bzzoiro.py
 COPY pipeline/bresbet_links.py       ./bresbet_links.py
 COPY pipeline/cloudbet_odds.py       ./cloudbet_odds.py
 COPY pipeline/content_gen.py         ./content_gen.py
+COPY pipeline/healthcheck.py         ./healthcheck.py
+COPY pipeline/health_email.py        ./health_email.py
 
 # SQL migrations (applied on boot by scheduler.apply_schema_migrations).
 # Idempotent — re-running them is a no-op.

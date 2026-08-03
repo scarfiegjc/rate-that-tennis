@@ -695,6 +695,146 @@ def sync_matches(
     }
 
 
+def backfill_history(
+    conn: psycopg2.extensions.connection,
+    date_from: str = "2024-12-01",
+    date_to: Optional[str] = None,
+    chunk_days: int = 7,
+    sleep_sec: float = 1.0,
+    progress_cb=None,
+) -> dict:
+    """
+    One-time (or periodic) deep historic backfill of Bzzoiro match data.
+
+    This was never built before — every existing sync path (scheduled jobs,
+    manual .command scripts, the /admin/bzzoiro-matches endpoint) only ever
+    requests a rolling 7-30 day window. Bzzoiro's actual match-history depth
+    was verified live (2026-08 audit) to go back to roughly December 2024 —
+    NOT "since 2020" as an earlier internal doc assumed. `date_from` defaults
+    to that real depth; requesting further back just returns empty windows.
+
+    Chunked into `chunk_days`-day windows (default weekly) so:
+      - a single slow/failing window doesn't lose all prior progress
+        (each window commits independently, via sync_matches)
+      - Bzzoiro's per-IP rate limit (10 req/s, burst 110) has headroom —
+        _get()/_paginate() already rate-limit individual requests
+        (REQUEST_DELAY), this adds a pause between windows on top of that.
+
+    Reuses sync_matches — and therefore the fixed, non-destructive match
+    upsert (_upsert_one_match / _find_match_for_bzzoiro) — for every window,
+    so backfilled matches merge into existing api-tennis-sourced rows instead
+    of creating disconnected duplicates.
+
+    Safe to rerun / resume: every upsert is idempotent, so re-running over an
+    already-covered range (e.g. after a restart interrupted a prior run) just
+    re-writes the same rows.
+
+    `progress_cb`, if given, is called after every window with a dict
+    snapshot of running totals plus `current_window` — used by the
+    /admin/bzzoiro-backfill-history/status endpoint to report progress.
+
+    Returns final totals: {windows, inserted, updated, serve_stats_written,
+    errors, windows_failed}.
+    """
+    if date_to is None:
+        date_to = date.today().isoformat()
+
+    start = datetime.strptime(date_from, "%Y-%m-%d").date()
+    end   = datetime.strptime(date_to, "%Y-%m-%d").date()
+
+    totals = {
+        "windows": 0, "inserted": 0, "updated": 0,
+        "serve_stats_written": 0, "errors": 0, "windows_failed": 0,
+    }
+
+    log.info(f"backfill_history: {date_from} → {date_to} in {chunk_days}-day windows")
+
+    cur_start = start
+    while cur_start <= end:
+        cur_end = min(cur_start + timedelta(days=chunk_days - 1), end)
+        window_from = cur_start.isoformat()
+        window_to   = (cur_end + timedelta(days=1)).isoformat()  # sync_matches wants date_from != date_to
+
+        try:
+            res = sync_matches(conn, window_from, window_to)
+            totals["inserted"]            += res.get("inserted", 0)
+            totals["updated"]             += res.get("updated", 0)
+            totals["serve_stats_written"] += res.get("serve_stats_written", 0)
+            totals["errors"]              += res.get("errors", 0)
+        except Exception as exc:
+            totals["windows_failed"] += 1
+            log.error(f"backfill_history: window {window_from}..{window_to} failed: "
+                      f"{type(exc).__name__}: {exc}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+        totals["windows"] += 1
+        if progress_cb:
+            try:
+                progress_cb(dict(totals, current_window=f"{window_from}..{window_to}",
+                                  through=window_to))
+            except Exception:
+                pass
+
+        cur_start = cur_end + timedelta(days=1)
+        time.sleep(sleep_sec)
+
+    log.info(f"backfill_history done: {totals}")
+    return totals
+
+
+def _find_match_for_bzzoiro(cur, bzz_id, p1_id, p2_id, event_date):
+    """
+    Locate the correct `matches` row for a Bzzoiro match, preferring a row
+    that already exists (e.g. sourced from api-tennis.com) over creating a
+    duplicate shadow row keyed on the synthetic negative bzz id.
+
+    Without this, Bzzoiro data (serve stats, live_data, odds, predictions,
+    H2H) lands on a second, disconnected row for the same real-world match
+    that the frontend never reads — the visible api-tennis-sourced row keeps
+    a null bzzoiro_id forever. See DATA_PLAN.md / audit 2026-08.
+
+    Lookup order:
+      1. bzzoiro_id already set to this bzz_id — already linked, fast path.
+      2. api_event_key == -abs(bzz_id) — a bzzoiro-only row from a prior run.
+      3. same player pair (either order) within +/-1 day of event_date —
+         catches an existing api-tennis.com-sourced row for the same match.
+
+    Returns an existing match id, or None if no row exists yet (caller should
+    insert a new one, keyed on the negative bzz id as before).
+    """
+    if bzz_id:
+        cur.execute("SELECT id FROM matches WHERE bzzoiro_id = %s", (int(bzz_id),))
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+        cur.execute("SELECT id FROM matches WHERE api_event_key = %s", (-abs(int(bzz_id)),))
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+    if p1_id and p2_id and event_date:
+        cur.execute(
+            """
+            SELECT id FROM matches
+            WHERE event_date BETWEEN %s::date - INTERVAL '1 day' AND %s::date + INTERVAL '1 day'
+              AND ((first_player_id = %s AND second_player_id = %s)
+                OR (first_player_id = %s AND second_player_id = %s))
+            ORDER BY (api_event_key > 0) DESC, id ASC
+            LIMIT 1
+            """,
+            (event_date, event_date, p1_id, p2_id, p2_id, p1_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+    return None
+
+
 def _upsert_one_match(
     cur: psycopg2.extensions.cursor,
     bzz: dict,
@@ -766,55 +906,98 @@ def _upsert_one_match(
     winner       = _derive_winner(bzz)
     final_result = _derive_final_result(bzz)
 
-    # ── Upsert into matches ───────────────────────────────────────────────────
-    cur.execute(
-        """
-        INSERT INTO matches (
-            api_event_key,
-            first_player_id, second_player_id,
-            event_date, event_time,
-            tournament_id, event_type_id,
-            tournament_round, season,
-            final_result, winner,
-            event_status, is_live,
-            raw_json
+    # ── Find an existing row for this match before deciding insert vs update ──
+    # Prevents creating a disconnected shadow row when api-tennis.com already
+    # has this match — the frontend reads the api-tennis row, so Bzzoiro data
+    # upserted onto a separate negative-keyed row would never be surfaced.
+    existing_id = _find_match_for_bzzoiro(cur, bzz_id, p1_id, p2_id, event_date)
+
+    if existing_id is not None:
+        cur.execute(
+            """
+            UPDATE matches SET
+                first_player_id  = %s,
+                second_player_id = %s,
+                event_date       = %s,
+                event_time       = COALESCE(%s, event_time),
+                tournament_id    = COALESCE(%s, tournament_id),
+                event_type_id    = COALESCE(%s, event_type_id),
+                tournament_round = COALESCE(%s, tournament_round),
+                final_result     = COALESCE(%s, final_result),
+                winner           = COALESCE(%s, winner),
+                event_status     = %s,
+                is_live          = %s,
+                bzzoiro_id       = %s,
+                raw_json         = %s::jsonb,
+                updated_at       = NOW()
+            WHERE id = %s
+            RETURNING id, FALSE AS was_inserted
+            """,
+            (
+                p1_id, p2_id,
+                event_date, event_time,
+                tournament_id, event_type_id,
+                round_name,
+                final_result, winner,
+                event_status, is_live,
+                int(bzz_id),
+                json.dumps(bzz),
+                existing_id,
+            ),
         )
-        VALUES (
-            %s,
-            %s, %s,
-            %s, %s,
-            %s, %s,
-            %s, %s,
-            %s, %s,
-            %s, %s,
-            %s::jsonb
-        )
-        ON CONFLICT (api_event_key) DO UPDATE SET
-            first_player_id  = EXCLUDED.first_player_id,
-            second_player_id = EXCLUDED.second_player_id,
-            event_date       = EXCLUDED.event_date,
-            event_time       = COALESCE(EXCLUDED.event_time, matches.event_time),
-            tournament_id    = COALESCE(EXCLUDED.tournament_id, matches.tournament_id),
-            event_type_id    = COALESCE(EXCLUDED.event_type_id, matches.event_type_id),
-            tournament_round = COALESCE(EXCLUDED.tournament_round, matches.tournament_round),
-            final_result     = COALESCE(EXCLUDED.final_result, matches.final_result),
-            winner           = COALESCE(EXCLUDED.winner, matches.winner),
-            event_status     = EXCLUDED.event_status,
-            is_live          = EXCLUDED.is_live,
-            raw_json         = EXCLUDED.raw_json,
-            updated_at       = NOW()
-        RETURNING id, (xmax = 0) AS was_inserted
-        """,
-        (
-            neg_event_key,
-            p1_id, p2_id,
-            event_date, event_time,
-            tournament_id, event_type_id,
-            round_name, season,
-            final_result, winner,
-            event_status, is_live,
-            json.dumps(bzz),
-        ),
+    else:
+        cur.execute(
+            """
+            INSERT INTO matches (
+                api_event_key,
+                first_player_id, second_player_id,
+                event_date, event_time,
+                tournament_id, event_type_id,
+                tournament_round, season,
+                final_result, winner,
+                event_status, is_live,
+                bzzoiro_id,
+                raw_json
+            )
+            VALUES (
+                %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s,
+                %s::jsonb
+            )
+            ON CONFLICT (api_event_key) DO UPDATE SET
+                first_player_id  = EXCLUDED.first_player_id,
+                second_player_id = EXCLUDED.second_player_id,
+                event_date       = EXCLUDED.event_date,
+                event_time       = COALESCE(EXCLUDED.event_time, matches.event_time),
+                tournament_id    = COALESCE(EXCLUDED.tournament_id, matches.tournament_id),
+                event_type_id    = COALESCE(EXCLUDED.event_type_id, matches.event_type_id),
+                tournament_round = COALESCE(EXCLUDED.tournament_round, matches.tournament_round),
+                final_result     = COALESCE(EXCLUDED.final_result, matches.final_result),
+                winner           = COALESCE(EXCLUDED.winner, matches.winner),
+                event_status     = EXCLUDED.event_status,
+                is_live          = EXCLUDED.is_live,
+                bzzoiro_id       = EXCLUDED.bzzoiro_id,
+                raw_json         = EXCLUDED.raw_json,
+                updated_at       = NOW()
+            RETURNING id, (xmax = 0) AS was_inserted
+            """,
+            (
+                neg_event_key,
+                p1_id, p2_id,
+                event_date, event_time,
+                tournament_id, event_type_id,
+                round_name, season,
+                final_result, winner,
+                event_status, is_live,
+                int(bzz_id),
+                json.dumps(bzz),
+            ),
     )
     row = cur.fetchone()
     if not row:
@@ -934,10 +1117,12 @@ def _upsert_one_prediction(
 
     neg_event_key = -abs(int(bzz_match_id))
 
-    # Find our internal match_id
+    # Find our internal match_id — check bzzoiro_id first since the match
+    # sync may have merged this match into an existing api-tennis-sourced
+    # row (positive api_event_key) rather than the synthetic negative key.
     cur.execute(
-        "SELECT id FROM matches WHERE api_event_key = %s",
-        (neg_event_key,),
+        "SELECT id FROM matches WHERE bzzoiro_id = %s OR api_event_key = %s",
+        (int(bzz_match_id), neg_event_key),
     )
     row = cur.fetchone()
     if not row:

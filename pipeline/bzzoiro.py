@@ -321,6 +321,50 @@ def sync_fixtures(conn: psycopg2.extensions.connection, days_ahead: int = 7) -> 
     return {"fetched": len(bzz_matches), "inserted": inserted, "updated": updated, "errors": errors}
 
 
+def _find_match_for_bzzoiro(cur, bzz_id, p1_id, p2_id, event_date):
+    """
+    Locate the correct `matches` row for a Bzzoiro match, preferring a row
+    that already exists (e.g. sourced from api-tennis.com) over creating a
+    duplicate shadow row keyed on the synthetic negative bzz id.
+
+    Without this, Bzzoiro data (live scores, odds, predictions, H2H) lands on
+    a second, disconnected row for the same real-world match that the
+    frontend never reads — the visible api-tennis-sourced row keeps a null
+    bzzoiro_id forever. See DATA_PLAN.md / audit 2026-08.
+
+    Returns an existing match id, or None if no row exists yet (caller should
+    insert a new one, keyed on the negative bzz id as before).
+    """
+    if bzz_id:
+        cur.execute("SELECT id FROM matches WHERE bzzoiro_id = %s", (int(bzz_id),))
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+        cur.execute("SELECT id FROM matches WHERE api_event_key = %s", (-abs(int(bzz_id)),))
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+    if p1_id and p2_id and event_date:
+        cur.execute(
+            """
+            SELECT id FROM matches
+            WHERE event_date BETWEEN %s::date - INTERVAL '1 day' AND %s::date + INTERVAL '1 day'
+              AND ((first_player_id = %s AND second_player_id = %s)
+                OR (first_player_id = %s AND second_player_id = %s))
+            ORDER BY (api_event_key > 0) DESC, id ASC
+            LIMIT 1
+            """,
+            (event_date, event_date, p1_id, p2_id, p2_id, p1_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return row["id"] if isinstance(row, dict) else row[0]
+
+    return None
+
+
 def _upsert_fixture(cur, bzz: dict) -> bool:
     """
     Upsert one Bzzoiro match into matches.
@@ -370,41 +414,75 @@ def _upsert_fixture(cur, bzz: dict) -> bool:
     season = str(event_date.year)
     round_name = bzz.get("round_name") or bzz.get("round") or ""
 
-    cur.execute(
-        """
-        INSERT INTO matches (
-            api_event_key,
-            first_player_id, second_player_id,
-            event_date, event_time,
-            tournament_round, season,
-            event_status, is_live,
-            bzzoiro_id,
-            raw_json
+    # ── Find an existing row for this match before deciding insert vs update ──
+    # Prevents creating a disconnected shadow row when api-tennis.com already
+    # has this match — the frontend reads the api-tennis row, so Bzzoiro data
+    # upserted onto a separate negative-keyed row would never be surfaced.
+    existing_id = _find_match_for_bzzoiro(cur, bzz_id, p1_id, p2_id, event_date)
+
+    if existing_id is not None:
+        cur.execute(
+            """
+            UPDATE matches SET
+                first_player_id  = %s,
+                second_player_id = %s,
+                event_date       = %s,
+                event_time       = COALESCE(%s, event_time),
+                tournament_round = COALESCE(%s, tournament_round),
+                event_status     = %s,
+                is_live          = %s,
+                bzzoiro_id       = %s,
+                raw_json         = %s::jsonb,
+                updated_at       = NOW()
+            WHERE id = %s
+            RETURNING id, FALSE AS was_inserted
+            """,
+            (
+                p1_id, p2_id,
+                event_date, event_time,
+                round_name,
+                event_status, is_live,
+                int(bzz_id),
+                json.dumps(bzz),
+                existing_id,
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-        ON CONFLICT (api_event_key) DO UPDATE SET
-            first_player_id  = EXCLUDED.first_player_id,
-            second_player_id = EXCLUDED.second_player_id,
-            event_date       = EXCLUDED.event_date,
-            event_time       = COALESCE(EXCLUDED.event_time, matches.event_time),
-            tournament_round = COALESCE(EXCLUDED.tournament_round, matches.tournament_round),
-            event_status     = EXCLUDED.event_status,
-            is_live          = EXCLUDED.is_live,
-            bzzoiro_id       = EXCLUDED.bzzoiro_id,
-            raw_json         = EXCLUDED.raw_json,
-            updated_at       = NOW()
-        RETURNING id, (xmax = 0) AS was_inserted
-        """,
-        (
-            neg_event_key,
-            p1_id, p2_id,
-            event_date, event_time,
-            round_name, season,
-            event_status, is_live,
-            int(bzz_id),
-            json.dumps(bzz),
-        ),
-    )
+    else:
+        cur.execute(
+            """
+            INSERT INTO matches (
+                api_event_key,
+                first_player_id, second_player_id,
+                event_date, event_time,
+                tournament_round, season,
+                event_status, is_live,
+                bzzoiro_id,
+                raw_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (api_event_key) DO UPDATE SET
+                first_player_id  = EXCLUDED.first_player_id,
+                second_player_id = EXCLUDED.second_player_id,
+                event_date       = EXCLUDED.event_date,
+                event_time       = COALESCE(EXCLUDED.event_time, matches.event_time),
+                tournament_round = COALESCE(EXCLUDED.tournament_round, matches.tournament_round),
+                event_status     = EXCLUDED.event_status,
+                is_live          = EXCLUDED.is_live,
+                bzzoiro_id       = EXCLUDED.bzzoiro_id,
+                raw_json         = EXCLUDED.raw_json,
+                updated_at       = NOW()
+            RETURNING id, (xmax = 0) AS was_inserted
+            """,
+            (
+                neg_event_key,
+                p1_id, p2_id,
+                event_date, event_time,
+                round_name, season,
+                event_status, is_live,
+                int(bzz_id),
+                json.dumps(bzz),
+            ),
+        )
     row = cur.fetchone()
     if not row:
         return False
@@ -493,11 +571,12 @@ def _update_live_match(cur, bzz: dict) -> int:
         SET event_status = 'live',
             is_live      = TRUE,
             live_data    = %s::jsonb,
+            bzzoiro_id   = COALESCE(bzzoiro_id, %s),
             updated_at   = NOW()
-        WHERE api_event_key = %s
+        WHERE bzzoiro_id = %s OR api_event_key = %s
         RETURNING id
         """,
-        (json.dumps(live_data), neg_event_key),
+        (json.dumps(live_data), int(bzz_id), int(bzz_id), neg_event_key),
     )
     row = cur.fetchone()
     if not row:
@@ -1029,6 +1108,102 @@ def sync_h2h_upcoming(conn: psycopg2.extensions.connection) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# POINT-BY-POINT
+#
+# Bzzoiro's /matches/{id}/point-by-point/ endpoint is new (not present in the
+# original DATA_PLAN.md audit) — set → game → point granularity, including
+# server, winner, break flags, and per-point scores. Genuinely new data the
+# site didn't ingest at all before the 2026-08 audit; see bzzoiro_schema.sql
+# for the storage table.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sync_point_by_point(conn: psycopg2.extensions.connection, match_id: int) -> bool:
+    """
+    Fetch point-by-point data for a given internal match_id and store it in
+    bzzoiro_point_by_point (raw JSONB — the shape is deep and match-engine
+    specific parsing can be layered on top later without re-fetching).
+    Returns True if data was stored (including "available: false" responses,
+    so we don't keep re-requesting matches Bzzoiro has no PBP for).
+    """
+    client = BzzoiroClient()
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT bzzoiro_id FROM matches WHERE id = %s",
+            (match_id,),
+        )
+        match = cur.fetchone()
+
+    if not match or not match["bzzoiro_id"]:
+        log.warning(f"  sync_point_by_point: match_id={match_id} has no bzzoiro_id")
+        return False
+
+    bzz_id = match["bzzoiro_id"]
+    data = client.get(f"/matches/{bzz_id}/point-by-point/")
+    if data is None:
+        log.warning(f"  sync_point_by_point: no response for bzz_id={bzz_id}")
+        return False
+
+    available = bool(data.get("available"))
+    sets = data.get("sets") or []
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO bzzoiro_point_by_point (match_id, available, sets, synced_at)
+            VALUES (%s, %s, %s::jsonb, NOW())
+            ON CONFLICT (match_id) DO UPDATE SET
+                available = EXCLUDED.available,
+                sets      = EXCLUDED.sets,
+                synced_at = NOW()
+            """,
+            (match_id, available, json.dumps(sets)),
+        )
+    conn.commit()
+    log.info(f"  sync_point_by_point: match_id={match_id} bzz_id={bzz_id} "
+              f"available={available} sets={len(sets)}")
+    return True
+
+
+def sync_point_by_point_recent(conn: psycopg2.extensions.connection, days_back: int = 3) -> dict:
+    """
+    Sync point-by-point for recently FINISHED matches with a bzzoiro_id that
+    don't have PBP stored yet. Point-by-point only exists once a match is
+    complete, so — unlike H2H — this looks at finished matches, not upcoming
+    ones. Returns {processed, written, errors}.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT m.id
+            FROM matches m
+            LEFT JOIN bzzoiro_point_by_point p ON p.match_id = m.id
+            WHERE m.bzzoiro_id IS NOT NULL
+              AND m.event_status = 'Finished'
+              AND m.event_date BETWEEN CURRENT_DATE - (%s || ' days')::interval AND CURRENT_DATE
+              AND p.id IS NULL
+            ORDER BY m.event_date DESC
+            LIMIT 100
+            """,
+            (days_back,),
+        )
+        matches = cur.fetchall()
+
+    processed = written = errors = 0
+    for match in matches:
+        processed += 1
+        try:
+            ok = sync_point_by_point(conn, match["id"])
+            if ok:
+                written += 1
+        except Exception as exc:
+            errors += 1
+            log.error(f"  PBP sync failed for match_id={match['id']}: {exc}")
+
+    return {"processed": processed, "written": written, "errors": errors}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1036,7 +1211,7 @@ def main():
     parser = argparse.ArgumentParser(description="ratethat.tennis bzzoiro pipeline")
     parser.add_argument(
         "--job",
-        choices=["fixtures", "live", "rankings", "odds", "predictions", "h2h", "all"],
+        choices=["fixtures", "live", "rankings", "odds", "predictions", "h2h", "point_by_point", "all"],
         default="all",
         help="Which job to run (default: all)",
     )
@@ -1075,6 +1250,10 @@ def main():
         if args.job in ("h2h", "all"):
             result = sync_h2h_upcoming(conn)
             log.info(f"h2h: {result}")
+
+        if args.job in ("point_by_point", "all"):
+            result = sync_point_by_point_recent(conn)
+            log.info(f"point_by_point: {result}")
 
     except KeyboardInterrupt:
         log.info("Interrupted")

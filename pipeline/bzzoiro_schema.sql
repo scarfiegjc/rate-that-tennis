@@ -94,6 +94,24 @@ CREATE INDEX IF NOT EXISTS idx_bzzoiro_h2h_player1 ON bzzoiro_h2h(player1_id);
 CREATE INDEX IF NOT EXISTS idx_bzzoiro_h2h_player2 ON bzzoiro_h2h(player2_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- 8. bzzoiro_point_by_point — set → game → point granularity per finished match
+-- Added 2026-08 audit: genuinely new Bzzoiro endpoint not previously ingested.
+-- Stored as raw JSONB (sets[].games[].points[]) so richer parsing/aggregation
+-- (e.g. into serve_zones-style stats) can be layered on without re-fetching.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS bzzoiro_point_by_point (
+    id          SERIAL PRIMARY KEY,
+    match_id    INTEGER REFERENCES matches(id),
+    available   BOOLEAN DEFAULT FALSE,
+    sets        JSONB,   -- [{duration_seconds, games:[{server,winner,break,player1_games,player2_games,points:[...]}]}]
+    synced_at   TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(match_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bzzoiro_pbp_match ON bzzoiro_point_by_point(match_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Done
 -- ─────────────────────────────────────────────────────────────────────────────
 

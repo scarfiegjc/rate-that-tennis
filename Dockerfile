@@ -25,6 +25,7 @@ COPY api/ ./api/
 COPY pipeline/predictions_schema.sql ./api/_migrations/predictions_schema.sql
 COPY pipeline/schema_additions.sql   ./api/_migrations/schema_additions.sql
 COPY pipeline/matchstat_schema.sql   ./api/_migrations/matchstat_schema.sql
+COPY pipeline/bzzoiro_schema.sql     ./api/_migrations/bzzoiro_schema.sql
 COPY pipeline/surface_backfill.py    ./surface_backfill.py
 COPY pipeline/hand_backfill.py       ./hand_backfill.py
 COPY pipeline/player_sync.py         ./player_sync.py
@@ -43,6 +44,8 @@ COPY pipeline/bzzoiro.py             ./bzzoiro.py
 COPY pipeline/bresbet_links.py       ./bresbet_links.py
 COPY pipeline/cloudbet_odds.py       ./cloudbet_odds.py
 COPY pipeline/content_gen.py         ./content_gen.py
+COPY pipeline/healthcheck.py         ./healthcheck.py
+COPY pipeline/health_email.py        ./health_email.py
 
 # ML package — full predictor with trained XGBoost/LightGBM/Logistic models
 COPY ml/__init__.py                  ./ml/__init__.py

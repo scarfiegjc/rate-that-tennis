@@ -1607,6 +1607,229 @@ def admin_bzzoiro_matches_status():
     return s
 
 
+# ─── /admin/bzzoiro-backfill-history — one-time deep historic backfill ─────
+# Added 2026-08 audit: no code path had ever pulled more than a 7-30 day
+# rolling window, despite Bzzoiro's real match-history depth going back to
+# ~Dec 2024. This runs backfill_history() (pipeline/bzzoiro_ingest.py) in the
+# background — it can take a long time for ~20 months of data, so it's
+# fire-and-forget with a status poll, same pattern as /admin/bzzoiro-matches.
+_BZZOIRO_BACKFILL_STATUS = {"running": False, "started_at": None, "finished_at": None,
+                            "progress": None, "result": None, "error": None}
+
+
+def _bzzoiro_backfill_worker(date_from: str, date_to: str, chunk_days: int):
+    import traceback, time
+    _BZZOIRO_BACKFILL_STATUS.update({"running": True, "started_at": time.time(),
+                                      "finished_at": None, "progress": None,
+                                      "result": None, "error": None})
+    try:
+        try:
+            from pipeline.bzzoiro_ingest import backfill_history, get_db_conn
+        except ImportError:
+            from bzzoiro_ingest import backfill_history, get_db_conn
+
+        def _progress(p):
+            _BZZOIRO_BACKFILL_STATUS["progress"] = p
+
+        conn = get_db_conn()
+        try:
+            res = backfill_history(conn, date_from=date_from, date_to=date_to,
+                                    chunk_days=chunk_days, progress_cb=_progress)
+            _BZZOIRO_BACKFILL_STATUS["result"] = res
+        finally:
+            conn.close()
+    except SystemExit as e:
+        _BZZOIRO_BACKFILL_STATUS["error"] = f"SystemExit: {e.code}"
+    except BaseException as e:
+        _BZZOIRO_BACKFILL_STATUS["error"] = f"{type(e).__name__}: {e}"
+        log.error(f"bzzoiro backfill worker failed: {e}")
+        log.error(traceback.format_exc())
+    finally:
+        _BZZOIRO_BACKFILL_STATUS["finished_at"] = time.time()
+        _BZZOIRO_BACKFILL_STATUS["running"] = False
+
+
+@app.get("/admin/bzzoiro-backfill-history")
+def admin_bzzoiro_backfill_history(date_from: str = "2024-12-01", date_to: str = None,
+                                    chunk_days: int = 7):
+    """
+    One-time deep historic backfill from Bzzoiro. Defaults to 2024-12-01 —
+    Bzzoiro's real match-history depth verified live during the 2026-08 audit
+    (earlier dates return empty windows). Background-threaded — returns
+    immediately, poll /admin/bzzoiro-backfill-history/status.
+    """
+    if _BZZOIRO_BACKFILL_STATUS.get("running"):
+        return {"status": "already_running"}
+    import datetime as _dt
+    dt = date_to or _dt.date.today().isoformat()
+    threading.Thread(target=_bzzoiro_backfill_worker,
+                      args=(date_from, dt, chunk_days), daemon=True).start()
+    return {"status": "started", "poll": "/admin/bzzoiro-backfill-history/status",
+            "date_from": date_from, "date_to": dt, "chunk_days": chunk_days}
+
+
+@app.get("/admin/bzzoiro-backfill-history/status")
+def admin_bzzoiro_backfill_history_status():
+    import time
+    s = dict(_BZZOIRO_BACKFILL_STATUS)
+    if s.get("started_at"):
+        s["elapsed_sec"] = round((s.get("finished_at") or time.time()) - s["started_at"], 1)
+    return s
+
+
+# ─── /admin/bzzoiro-point-by-point — new endpoint, genuinely new PBP data ──
+_BZZOIRO_PBP_STATUS = {"running": False, "started_at": None, "finished_at": None,
+                       "result": None, "error": None}
+
+
+def _bzzoiro_pbp_worker(days_back: int):
+    import traceback, time
+    _BZZOIRO_PBP_STATUS.update({"running": True, "started_at": time.time(),
+                                 "finished_at": None, "result": None, "error": None})
+    try:
+        try:
+            from pipeline.bzzoiro import sync_point_by_point_recent, get_db_conn
+        except ImportError:
+            from bzzoiro import sync_point_by_point_recent, get_db_conn
+        conn = get_db_conn()
+        try:
+            res = sync_point_by_point_recent(conn, days_back=days_back)
+            _BZZOIRO_PBP_STATUS["result"] = res
+        finally:
+            conn.close()
+    except SystemExit as e:
+        _BZZOIRO_PBP_STATUS["error"] = f"SystemExit: {e.code}"
+    except BaseException as e:
+        _BZZOIRO_PBP_STATUS["error"] = f"{type(e).__name__}: {e}"
+        log.error(f"bzzoiro point-by-point worker failed: {e}")
+        log.error(traceback.format_exc())
+    finally:
+        _BZZOIRO_PBP_STATUS["finished_at"] = time.time()
+        _BZZOIRO_PBP_STATUS["running"] = False
+
+
+@app.get("/admin/bzzoiro-point-by-point")
+def admin_bzzoiro_point_by_point(days_back: int = 3):
+    """Backfill point-by-point data for recently finished matches. Background-threaded."""
+    if _BZZOIRO_PBP_STATUS.get("running"):
+        return {"status": "already_running"}
+    threading.Thread(target=_bzzoiro_pbp_worker, args=(days_back,), daemon=True).start()
+    return {"status": "started", "poll": "/admin/bzzoiro-point-by-point/status",
+            "days_back": days_back}
+
+
+@app.get("/admin/bzzoiro-point-by-point/status")
+def admin_bzzoiro_point_by_point_status():
+    import time
+    s = dict(_BZZOIRO_PBP_STATUS)
+    if s.get("started_at"):
+        s["elapsed_sec"] = round((s.get("finished_at") or time.time()) - s["started_at"], 1)
+    return s
+
+
+# ─── SEO preview: pending queue + manual store ──────────────────────────────
+# content_gen.py's scheduled job (09:00 UTC daily) silently produces nothing
+# whenever ANTHROPIC_API_KEY isn't set in this service's environment — it
+# logs an error and returns, so seo_preview stays null with no visible
+# failure (found during the 2026-08 audit; now also caught by
+# /admin/healthcheck's seo_preview_coverage check). These two endpoints let
+# preview text be generated by any process — including manually, or a
+# session with its own model access — without requiring that key here.
+
+@app.get("/admin/seo-preview-queue")
+def admin_seo_preview_queue(limit: int = 20, days_ahead: int = 7):
+    """
+    List upcoming matches missing an seo_preview, with full context
+    (players, ratings, form, H2H, prediction) — the same context
+    content_gen.py's generate_previews() would build, exposed over HTTP so
+    preview text can be written by any generator and stored via
+    /admin/seo-preview-store.
+    """
+    try:
+        try:
+            from pipeline.content_gen import _fetch_match_context, get_db_conn as content_db_conn
+        except ImportError:
+            from content_gen import _fetch_match_context, get_db_conn as content_db_conn
+    except Exception as e:
+        return {"error": f"content_gen import failed: {e}"}
+
+    import datetime as _dt
+    today = _dt.date.today()
+    cutoff = today + _dt.timedelta(days=days_ahead)
+
+    conn = content_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT m.id
+                FROM matches m
+                WHERE m.seo_preview IS NULL
+                  AND m.event_date BETWEEN %s AND %s
+                  AND m.event_status NOT IN ('Cancelled', 'Postponed', 'Walkover')
+                  AND m.first_player_id IS NOT NULL
+                  AND m.second_player_id IS NOT NULL
+                ORDER BY m.event_date ASC
+                LIMIT %s
+                """,
+                (today.isoformat(), cutoff.isoformat(), limit),
+            )
+            match_ids = [r["id"] for r in cur.fetchall()]
+
+        contexts = []
+        for mid in match_ids:
+            with conn.cursor() as cur:
+                ctx = _fetch_match_context(cur, mid)
+            if ctx:
+                contexts.append(ctx)
+        return {"count": len(contexts), "matches": contexts}
+    finally:
+        conn.close()
+
+
+class SeoPreviewStore(_BaseModel):
+    match_id: int
+    text: str
+
+
+@app.post("/admin/seo-preview-store")
+def admin_seo_preview_store(body: SeoPreviewStore):
+    """Store generated preview text for one match (same write content_gen.py's
+    generate_previews() does — separated out so it can be called by any
+    generator, not only one holding an ANTHROPIC_API_KEY)."""
+    try:
+        try:
+            from pipeline.content_gen import get_db_conn as content_db_conn
+        except ImportError:
+            from content_gen import get_db_conn as content_db_conn
+    except Exception as e:
+        return {"error": f"content_gen import failed: {e}"}
+
+    if not body.text or not body.text.strip():
+        return {"error": "text is empty"}
+
+    conn = content_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE matches SET
+                    seo_preview              = %s,
+                    seo_preview_generated_at = NOW()
+                WHERE id = %s
+                RETURNING id
+                """,
+                (body.text.strip(), body.match_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        if not row:
+            return {"error": f"no match with id={body.match_id}"}
+        return {"ok": True, "match_id": body.match_id}
+    finally:
+        conn.close()
+
+
 # ─── /admin/run-daily — chain everything in one fire-and-forget ────────────
 _DAILY_STATUS = {"running": False, "phase": None, "started_at": None,
                  "finished_at": None, "log": [], "error": None}

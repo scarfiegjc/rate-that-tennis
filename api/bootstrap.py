@@ -127,7 +127,7 @@ def apply_schema_migrations() -> dict:
         return {"error": "no database url"}
 
     migrations_dir = APP_DIR / "api" / "_migrations"
-    files = ["schema_additions.sql", "predictions_schema.sql", "matchstat_schema.sql"]
+    files = ["schema_additions.sql", "predictions_schema.sql", "matchstat_schema.sql", "bzzoiro_schema.sql"]
     summary: dict = {}
 
     conn = psycopg2.connect(db_url)
